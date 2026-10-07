@@ -196,10 +196,167 @@ async function chatSuite(URL, ctx) {
   F.close(); C.close(); E.close();
 }
 
+// ------------------------------------------------------------------ profile screen
+async function profileSuite(URL) {
+  console.log('--- profile');
+  const nobody = makeClient(URL); await nobody.ready;
+  const pg0 = await nobody.call('profile:get', null);
+  const play0 = await nobody.call('play', null);
+  ok(!pg0.ok && !play0.ok && play0.expired, 'profile / play need a login: ' + pg0.error);
+  nobody.close();
+
+  const name = 'Prof_' + rnd();
+  const L = makeClient(URL); await L.ready;
+  const r = await L.call('auth', { mode: 'register', name, password: PASS, confirm: PASS, enter: false });
+  if (r && r.token) issuedTokens.push(r.token);
+  ok(r.ok && r.token && r.profile && r.you === undefined && !r.orbs, 'auth with enter:false returns token + profile but does not enter the arena');
+  const p = r.profile || {};
+  const want = ['name', 'balance', 'total', 'equipped', 'upgrades', 'stats', 'inventory', 'slots', 'createdAt', 'rank', 'playMs', 'items', 'slotsUsed', 'inArena'];
+  ok(want.every(k => k in p) && p.name === name && p.slots === G.INV_SLOTS && p.rank === null && p.items === 0 && Math.abs(p.createdAt - Date.now()) < 60000,
+    `profile summary has ${want.length} fields (rank ${p.rank}, slots ${p.slots}, created ${new Date(p.createdAt).toISOString()})`);
+  ok(!['passHash', 'key', 'token', 'sessionHash', 'owned', 'lastSeen'].some(k => k in p), 'profile summary has no hash / key / token / internal fields');
+  await sleep(400);
+  ok(!received.some(x => x.startsWith('s ')) || L.orbs.size === 0, 'lobby (profile screen) socket gets no arena state');
+  const pl = await L.call('play', null);
+  L.entered(pl);
+  ok(pl.ok && typeof pl.you === 'number' && pl.orbs.length > 0 && typeof pl.chatNextClear === 'number' && pl.chatNextClear > Date.now(), `Играть → enters the arena (next chat clear in ${Math.round((pl.chatNextClear - Date.now()) / 1000)} s)`);
+  const pl2 = await L.call('play', null);
+  ok(!pl2.ok, 'second play refused: ' + pl2.error);
+  await L.farm(5, 30000);
+  await sleep(700);
+  const pgr = await L.call('profile:get', null);
+  const lb = await (await fetch(`${URL}/api/leaderboard?limit=100&name=${name}`)).json();
+  ok(pgr.ok && pgr.profile.total === L.profile.total && pgr.profile.rank === lb.me.rank && pgr.profile.stats.sessions === 1 && pgr.profile.inArena && pgr.profile.playMs > 0,
+    `in-game profile: total ${pgr.profile.total}, rank #${pgr.profile.rank} (= leaderboard), sessions ${pgr.profile.stats.sessions}, play ${pgr.profile.playMs} ms`);
+  const fast = await L.call('profile:get', null);
+  ok(!fast.ok, 'profile:get is throttled');
+  L.close();
+  await sleep(300);
+  // fresh page load with the saved token: 'session' shows the profile, play time + session count persisted
+  const S = makeClient(URL); await S.ready;
+  const ss = await S.call('session', { token: r.token });
+  ok(ss.ok && ss.profile.name === name && ss.profile.stats.sessions === 1 && ss.profile.playMs >= pgr.profile.playMs && !ss.profile.inArena && ss.you === undefined,
+    `saved session → profile screen (play time ${ss.profile.playMs} ms, sessions ${ss.profile.stats.sessions})`);
+  const bad = await makeClient(URL).call('session', { token: 'B'.repeat(43) });
+  ok(!bad.ok && bad.expired, 'unknown token on profile screen → back to login');
+  S.close();
+}
+
+// ------------------------------------------------------------------ shop + inventory (needs OCS_TEST_HOOKS=1)
+function priceSanity() {
+  console.log('--- economy');
+  const sold = G.ITEMS.filter(i => i.price > 0);
+  const byR = r => sold.filter(i => i.rarity === r).map(i => i.price);
+  const RATE = 80; // measured orbs/min of a greedy bot without upgrades (see README)
+  ok(Math.max(...byR('common')) <= 600 && Math.min(...byR('common')) >= 100, `common items ${Math.min(...byR('common'))}–${Math.max(...byR('common'))} (≈${(Math.min(...byR('common')) / RATE).toFixed(1)}–${(Math.max(...byR('common')) / RATE).toFixed(1)} min)`);
+  ok(Math.min(...byR('epic')) >= 15 * RATE * 0.8 && Math.max(...byR('epic')) <= 60 * RATE, `epic items ${Math.min(...byR('epic'))}–${Math.max(...byR('epic'))} (≈${Math.round(Math.min(...byR('epic')) / RATE)}–${Math.round(Math.max(...byR('epic')) / RATE)} min)`);
+  ok(Math.min(...byR('legendary')) >= 100 * RATE, `legendary items ${Math.min(...byR('legendary'))}–${Math.max(...byR('legendary'))} (≈${(Math.min(...byR('legendary')) / RATE / 60).toFixed(1)}–${(Math.max(...byR('legendary')) / RATE / 60).toFixed(1)} h)`);
+  const rank = { common: 0, rare: 1, epic: 2, legendary: 3 };
+  ok(G.CATEGORIES.every(c => { const l = sold.filter(i => i.cat === c.key).sort((x, y) => x.price - y.price); return l.every((it, i) => !i || rank[it.rarity] >= rank[l[i - 1].rarity]); }), 'within each category price never decreases with rarity');
+  ok(Object.values(G.UPGRADES).every(u => u.prices.every((v, i) => !i || v > u.prices[i - 1])), 'upgrade prices strictly increase per level');
+  // mini-games must earn less per minute than farming
+  const rush = G.MINIGAMES.rush, re = G.MINIGAMES.reaction;
+  const rushPerMin = (G.rushPrize(1e9) - rush.fee) / ((rush.duration + rush.cooldownMs) / 60000);
+  const reactPerMin = (G.REACTION_PRIZES[0][1] - re.fee) / ((2500 + re.cooldownMs) / 60000);
+  ok(rushPerMin < RATE * 0.5 && reactPerMin < RATE * 0.5, `perfect play nets at most ${rushPerMin.toFixed(0)} (rush) / ${reactPerMin.toFixed(0)} (reaction) orbs/min, farming ≈${RATE}`);
+  ok(G.rushPrize(20) === 15 && G.rushPrize(100) === rush.maxPrize && G.rushPrize(-5) === 0, `rush payout 75% capped at ${rush.maxPrize}`);
+}
+
+async function shopInventorySuite(URL) {
+  console.log('--- shop + inventory');
+  const shop = await (await fetch(URL + '/api/shop')).json();
+  ok(shop.items.find(i => i.id === 'c_coral').price === G.ITEM_BY_ID.c_coral.price && shop.minigames.rush.maxPrize === G.MINIGAMES.rush.maxPrize, '/api/shop serves the same price list as the client');
+  const A = makeClient(URL), B = makeClient(URL);
+  await A.register('Shopper' + rnd()); await B.register('Watcher' + rnd());
+  let foreignProfiles = 0;
+  B.s.on('profile', p => { if (p.name !== B.profile.name) foreignProfiles++; });
+  await sleep(300);
+  // real collection still works
+  await A.farm(3, 30000);
+  ok(A.profile.balance >= 3, `A collected orbs (${A.profile.balance})`);
+  const poor = await B.emit('buy', 'c_coral');
+  ok(!poor.ok && /Не хватает/.test(poor.error), 'cannot buy without enough orbs: ' + poor.error);
+  await A.emit('test:orbs', 100000);
+  const bal0 = A.profile.balance;
+  const b1 = await A.emit('buy', 'c_coral');
+  const slot = b1.profile && b1.profile.inventory.find(x => x.id === 'c_coral');
+  ok(b1.ok && b1.profile.balance === bal0 - G.ITEM_BY_ID.c_coral.price && slot && slot.q === 1 && slot.src === 'shop', `buy c_coral: −${G.ITEM_BY_ID.c_coral.price}, item in inventory with source "shop"`);
+  ok(b1.profile.equipped.color === 'c_cyan', 'buying does not auto-equip (shop only sells)');
+  const b2 = await A.emit('buy', 'c_coral');
+  ok(!b2.ok && b2.code === 'owned', 'cosmetics are unique: second purchase refused: ' + b2.error);
+  const free = await A.emit('buy', 'c_cyan'), shard = await A.emit('buy', 'x_legend_shard'), proto = await A.emit('buy', '__proto__');
+  ok(!free.ok && !shard.ok && !proto.ok, 'free/base items, non-shop items and junk ids cannot be bought');
+  const e1 = await A.emit('inv:equip', 'c_coral');
+  ok(e1.ok && e1.profile.equipped.color === 'c_coral', 'equip from inventory');
+  await sleep(200);
+  ok(B.metas.get(A.id) && B.metas.get(A.id).eq.color === 'c_coral', 'other players see the equipped item');
+  const e2 = await A.emit('inv:equip', 'h_crown'), e3 = await A.emit('inv:equip', 'x_legend_shard'), e4 = await A.emit('inv:equip', { id: 'c_coral' });
+  ok(!e2.ok && !e3.ok && !e4.ok, `cannot equip unowned / non-cosmetic / malformed: «${e2.error}» «${e3.error}»`);
+  const e5 = await A.emit('equip', 'c_cyan');
+  ok(e5.ok && e5.profile.equipped.color === 'c_cyan', 'base (free) items are always equippable');
+  await A.emit('inv:equip', 'c_coral');
+  const u1 = await A.emit('inv:unequip', 'color'), u2 = await A.emit('inv:unequip', 'nope');
+  ok(u1.ok && u1.profile.equipped.color === 'c_cyan' && u1.profile.inventory.some(x => x.id === 'c_coral') && !u2.ok, 'unequip returns to the default look, item stays in inventory');
+  // stacking
+  const g1 = await A.emit('test:grant', { id: 'x_legend_shard', qty: 150, source: 'event' });
+  const st = A.profile.inventory.filter(x => x.id === 'x_legend_shard').map(x => x.q);
+  ok(g1.ok && st.join(',') === '99,51', `stackable items: 150 shards → slots [${st}] (max ${G.ITEM_BY_ID.x_legend_shard.maxStack} per slot)`);
+  await A.emit('test:grant', { id: 'x_legend_shard', qty: 48, source: 'event' });
+  const st2 = A.profile.inventory.filter(x => x.id === 'x_legend_shard').map(x => x.q);
+  ok(st2.join(',') === '99,99', `partial stack topped up first → [${st2}]`);
+  // fill up to 100 slots
+  const used = A.profile.inventory.length, freeSlots = G.INV_SLOTS - used;
+  const g2 = await A.emit('test:grant', { id: 'x_legend_shard', qty: freeSlots * 99, source: 'event' });
+  ok(g2.ok && A.profile.inventory.length === G.INV_SLOTS, `inventory filled to ${A.profile.inventory.length}/${G.INV_SLOTS} slots`);
+  const g3 = await A.emit('test:grant', { id: 'x_legend_shard', qty: 1, source: 'event' });
+  ok(!g3.ok && g3.code === 'full', 'grant refused when full: ' + g3.error);
+  const balF = A.profile.balance;
+  const bf = await A.emit('buy', 'c_lime');
+  ok(!bf.ok && bf.code === 'full' && /Инвентарь полон/.test(bf.error) && A.profile.balance === balF, 'buying with a full inventory refused, no orbs taken: ' + bf.error);
+  const g4 = await A.emit('test:grant', { id: 'c_coral', qty: 1, source: 'nope' }), g5 = await A.emit('test:grant', { id: 'x_legend_shard', qty: -3 });
+  ok(!g4.ok && !g5.ok, 'grantItem validates source and quantity');
+  // upgrades
+  const up = await A.emit('upgrade', 'magnet');
+  ok(up.ok && up.profile.upgrades.magnet === 1, `magnet upgrade lvl 1 for ${G.UPGRADES.magnet.prices[0]}`);
+  ok(foreignProfiles === 0, 'players never receive another player\'s profile');
+  A.close(); B.close();
+}
+
+async function minigameSuite(URL) {
+  console.log('--- mini-games');
+  const A = makeClient(URL), B = makeClient(URL);
+  await A.register('Gamer' + rnd()); await B.register('Player' + rnd());
+  await A.emit('test:orbs', 500); await B.emit('test:orbs', 500);
+  const balR = A.profile.balance;
+  const res = new Promise(r => A.s.once('mg:result', r));
+  A.s.once('mg:reaction:go', () => setTimeout(() => A.s.emit('mg:reaction:click'), 150));
+  ok((await A.emit('mg:start', 'reaction')).ok, 'reaction mini-game started');
+  const rr = await res; await sleep(200);
+  const expected = (G.REACTION_PRIZES.find(([ms]) => rr.rt < ms) || [0, 0])[1];
+  ok(rr.prize === expected && A.profile.balance === balR - G.MINIGAMES.reaction.fee + rr.prize, `reaction: ${rr.message}, prize ${rr.prize} (fee ${G.MINIGAMES.reaction.fee})`);
+  const again = await A.emit('mg:start', 'reaction');
+  ok(!again.ok && /снова будет доступна/.test(again.error), 'mini-game cooldown: ' + again.error);
+  const balB = B.profile.balance; let hits = 0;
+  B.s.on('mg:rush:spawn', async tg => { if (tg.type === 'b') return; await sleep(120); const h = await B.emit('mg:rush:hit', { id: tg.id, x: tg.x + 3, y: tg.y - 3 }); if (h.ok) hits++; });
+  const resB = new Promise(r => B.s.once('mg:result', r));
+  ok((await B.emit('mg:start', 'rush')).ok, 'orb rush started');
+  ok(!(await B.emit('mg:rush:hit', { id: 1, x: -500, y: -500 })).ok, 'rush rejects hit at wrong position');
+  const rB = await resB; await sleep(200);
+  ok(hits > 10 && rB.prize === G.rushPrize(rB.score) && rB.prize <= G.MINIGAMES.rush.maxPrize && B.profile.balance === balB - G.MINIGAMES.rush.fee + rB.prize,
+    `orb rush: score ${rB.score} → prize ${rB.prize} (fee ${G.MINIGAMES.rush.fee}, cap ${G.MINIGAMES.rush.maxPrize})`);
+  await sleep(700);
+  const pg = await B.call('profile:get', null);
+  ok(pg.ok && pg.profile.stats.bestRush === rB.score && pg.profile.stats.minigames === 1, `best mini-game results stored (best rush ${pg.profile.stats.bestRush})`);
+  const lb = await (await fetch(`${URL}/api/leaderboard?limit=100&name=${encodeURIComponent(A.profile.name)}`)).json();
+  ok(lb.players.every((p, i, arr) => i === 0 || arr[i - 1].total >= p.total) && lb.me, `leaderboard sorted by all-time total; A rank #${lb.me && lb.me.rank}`);
+  A.close(); B.close();
+}
+
+// light gameplay checks that work against any server (no test hooks)
 async function gameplaySuite(URL) {
   console.log('--- gameplay');
   const A = makeClient(URL), B = makeClient(URL);
-  await A.register('Gamer' + rnd()); await B.register('Player' + rnd());
+  await A.register('Runner' + rnd()); await B.register('Player' + rnd());
   await sleep(300);
   const p0 = { ...A.pos };
   for (let i = 0; i < 100; i++) A.s.emit('input', { s: ++A.seq, x: 5, y: 0 });
@@ -207,64 +364,201 @@ async function gameplaySuite(URL) {
   const moved = Math.hypot(A.pos.x - p0.x, A.pos.y - p0.y);
   const maxLegit = G.speedFor(0) * 1.0 + G.speedFor(0) * G.STEP_DT * 8;
   ok(moved > 50 && moved <= maxLegit, `input flood is rate-limited: moved ${moved.toFixed(0)}px in 1s (cap ≈${maxLegit.toFixed(0)})`);
-  await sleep(1000);
-  await A.farm(60, 90000);
-  ok(A.profile.balance >= 60, `A farmed balance to ${A.profile.balance}`);
-  const r1 = await A.emit('buy', 'c_coral');
-  ok(r1.ok && r1.profile.equipped.color === 'c_coral', 'A bought and auto-equipped c_coral (25)');
-  await sleep(200);
-  ok(B.metas.get(A.id) && B.metas.get(A.id).eq.color === 'c_coral', 'B sees A\'s new color');
-  ok(!(await A.emit('buy', 'c_coral')).ok, 'cannot buy same item twice');
-  ok(!(await A.emit('buy', 'c_rainbow')).ok, 'cannot buy unaffordable item');
-  ok(!(await A.emit('buy', '__proto__')).ok && !(await A.emit('upgrade', '__proto__')).ok && !(await A.emit('mg:start', 'constructor')).ok, 'prototype-key payloads rejected (no crash)');
-  const r4 = await A.emit('equip', 'c_cyan');
-  ok(r4.ok && r4.profile.equipped.color === 'c_cyan', 'equip owned default item');
-  ok(!(await A.emit('equip', 'h_crown')).ok, 'cannot equip unowned item');
-  await A.farm(40, 60000);
-  const r6 = await A.emit('upgrade', 'magnet');
-  ok(r6.ok && r6.profile.upgrades.magnet === 1, 'magnet upgrade lvl 1 purchased');
-  await A.farm(10, 30000);
-  const balR = A.profile.balance;
-  const res = new Promise(r => A.s.once('mg:result', r));
-  A.s.once('mg:reaction:go', () => setTimeout(() => A.s.emit('mg:reaction:click'), 150));
-  ok((await A.emit('mg:start', 'reaction')).ok, 'reaction mini-game started');
-  const rr = await res; await sleep(200);
-  ok(rr.prize >= 0 && A.profile.balance === balR - 10 + rr.prize, `reaction result: ${rr.message}, prize ${rr.prize}`);
-  await B.farm(15, 60000);
-  const balB = B.profile.balance; let hits = 0;
-  B.s.on('mg:rush:spawn', async tg => { if (tg.type === 'b') return; await sleep(120); const h = await B.emit('mg:rush:hit', { id: tg.id, x: tg.x + 3, y: tg.y - 3 }); if (h.ok) hits++; });
-  const resB = new Promise(r => B.s.once('mg:result', r));
-  ok((await B.emit('mg:start', 'rush')).ok, 'orb rush started');
-  ok(!(await B.emit('mg:rush:hit', { id: 1, x: -500, y: -500 })).ok, 'rush rejects hit at wrong position');
-  const rB = await resB; await sleep(200);
-  ok(rB.prize > 15 && hits > 10 && B.profile.balance === balB - 15 + rB.prize, `orb rush: ${rB.message}, prize ${rB.prize}`);
+  await A.farm(15, 60000);
+  ok(A.profile.balance >= 15, `A farmed balance to ${A.profile.balance}`);
+  ok(!(await A.emit('buy', 'c_rainbow')).ok && !(await A.emit('upgrade', '__proto__')).ok && !(await A.emit('mg:start', 'constructor')).ok, 'unaffordable / prototype-key payloads rejected');
   const lb = await (await fetch(`${URL}/api/leaderboard?limit=100&name=${encodeURIComponent(A.profile.name)}`)).json();
-  const names = lb.players.map(p => p.name);
-  ok(names.includes(A.profile.name) && names.includes(B.profile.name), 'leaderboard contains both players');
-  ok(lb.players.every((p, i, arr) => i === 0 || arr[i - 1].total >= p.total) && lb.me && lb.me.total === A.profile.total, `leaderboard sorted by all-time total; A rank #${lb.me && lb.me.rank}`);
+  ok(lb.me && lb.me.total === A.profile.total, `leaderboard has A with total ${A.profile.total}`);
   A.close(); B.close();
 }
 
+// ------------------------------------------------------------------ chat clear cycle + spawn (dedicated server with short timers)
+async function chatClearSuite(URL, period) {
+  console.log('--- chat clear cycle');
+  const C = makeClient(URL), E = makeClient(URL);
+  const clears = [];
+  E.s.on('chat:clear', d => clears.push({ at: Date.now(), next: d.next }));
+  const rc = await C.register('Clr' + rnd()); await E.register('Clr' + rnd());
+  ok(rc.chatNextClear % period === 0 && rc.chatNextClear > Date.now() && rc.chatNextClear - Date.now() <= period, `next clear is aligned to the ${period} ms cycle`);
+  await C.call('chat', 'до очистки');
+  await waitFor(() => clears.length >= 2, period * 2 + 2000);
+  ok(clears.length >= 2 && clears[1].next - clears[0].next === period && Math.abs(clears[1].at - clears[0].at - period) < 400,
+    `chat:clear broadcast on a fixed cycle (${clears.map(c => new Date(c.next).toISOString().slice(17, 23)).join(', ')})`);
+  const F = makeClient(URL);
+  const rf = await F.register('Clr' + rnd());
+  ok(rf.ok && !rf.chat.some(m => /до очистки/.test(m.t)), `history wiped by the clear (new player sees ${rf.chat.length} old messages)`);
+  C.close(); E.close(); F.close();
+}
+
+async function spawnSuite(URL) {
+  console.log('--- orb spawning');
+  const h0 = await (await fetch(URL + '/api/health')).json();
+  const cl = [];
+  for (let i = 0; i < 3; i++) { const c = makeClient(URL); await c.register('Spawn' + rnd()); cl.push(c); }
+  const adds = []; let tooClose = 0;
+  cl[0].s.on('s', st => {
+    for (const [id, x, y, t] of st.oa) {
+      adds.push(t);
+      for (const [, px, py] of st.p) if (Math.hypot(px - x, py - y) < 200) tooClose++;
+    }
+  });
+  const h1 = await (await fetch(URL + '/api/health')).json();
+  ok(h0.targetOrbs === 90 && h1.targetOrbs === 160, `target orbs scale with players: ${h0.targetOrbs} (0 online, min) → ${h1.targetOrbs} (3 online) [70 + 30/player, 90…320]`);
+  const n0 = cl[0].orbs.size;
+  await sleep(1000);
+  const n1 = cl[0].orbs.size;
+  ok(n1 > n0 && n1 < h1.targetOrbs, `new orbs fade in gradually (${n0} → ${n1} after 1 s, target ${h1.targetOrbs})`);
+  await sleep(4500);
+  const list = Array.from(cl[0].orbs.values()).filter(o => o.t !== 'l');
+  ok(Math.abs(list.length - h1.targetOrbs) <= 8, `orb count reaches the target (${list.length}/${h1.targetOrbs})`);
+  const cells = new Map();
+  for (const o of list) { const k = Math.floor(o.x / 300) + ',' + Math.floor(o.y / 300); cells.set(k, (cells.get(k) || 0) + 1); }
+  const maxCell = Math.max(...cells.values());
+  ok(cells.size >= 75 && maxCell <= 5, `even spread: ${cells.size}/100 cells occupied, max ${maxCell} orbs per 300×300 cell`);
+  let minD = Infinity;
+  for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) minD = Math.min(minD, Math.hypot(list[i].x - list[j].x, list[i].y - list[j].y));
+  ok(minD >= 69, `no clumps: min distance between orbs ${minD.toFixed(0)} px (≥ 70)`);
+  ok(adds.length > 50 && tooClose === 0, `no orb spawned within 200 px of a player (${adds.length} spawns checked)`);
+  const types = adds.filter(t => t !== 'l').concat(list.map(o => o.t));
+  const rare = types.filter(t => t === 'r').length / types.length;
+  ok(rare > 0.03 && rare < 0.2, `rare orb share ${(rare * 100).toFixed(1)}% of ${types.length} orbs (configured 10%)`);
+  // collected orbs come back after a delay, not instantly
+  const A = cl[0];
+  const before = A.profile.total;
+  await A.farm(before + 8, 20000);
+  const justAfter = A.orbs.size;
+  await sleep(1000);
+  ok(A.orbs.size <= h1.targetOrbs, `after collecting, orbs refill gradually (${justAfter} right after, ${A.orbs.size} 1 s later, target ${h1.targetOrbs})`);
+  for (const c of cl) c.close();
+}
+
+async function legendarySuite(URL) {
+  console.log('--- legendary event');
+  const A = makeClient(URL); await A.register('Hunter' + rnd());
+  const atJoin = Array.from(A.orbs.values()).filter(o => o.t === 'l').length;
+  const items = [], announces = [];
+  A.s.on('item', d => items.push(d));
+  A.s.on('announce', d => announces.push(d));
+  const t0 = Date.now(); let maxAlive = 0;
+  while (!items.length && Date.now() - t0 < 40000) {
+    const ls = Array.from(A.orbs.values()).filter(o => o.t === 'l');
+    maxAlive = Math.max(maxAlive, ls.length);
+    let dx = 0, dy = 0;
+    if (ls.length) { dx = ls[0].x - A.pos.x; dy = ls[0].y - A.pos.y; const l = Math.hypot(dx, dy) || 1; dx /= l; dy /= l; }
+    A.s.emit('input', { s: ++A.seq, x: dx, y: dy });
+    await sleep(50);
+  }
+  await sleep(1000);
+  const sh = A.profile.inventory.find(x => x.id === 'x_legend_shard');
+  const after = Array.from(A.orbs.values()).filter(o => o.t === 'l').length;
+  ok((announces.length >= 1 || atJoin === 1) && maxAlive <= 1 && after === 0, `legendary orb is a timed event (on field at join: ${atJoin}, announced ${announces.length}×, max ${maxAlive} alive, none 1 s after pickup — cooldown)`);
+  ok(items.length === 1 && items[0].id === 'x_legend_shard' && sh && sh.src === 'arena', 'collecting it grants a «Легендарный осколок» via grantItem (source "arena")');
+  A.close();
+}
+
+// ------------------------------------------------------------------ migration of accounts saved by the previous version (7c2dacd)
+const LEGACY_OWNED = ['c_cyan', 's_circle', 't_none', 'n_white', 'h_none', 'c_coral', 'c_gold', 's_star', 't_sparks', 'h_crown', 'n_rainbow', 'zz_removed_item'];
+function legacyAccount() {
+  const bcrypt = require('bcryptjs');
+  const name = 'Veteran' + rnd(), now = Date.now();
+  const token = crypto.randomBytes(32).toString('base64url');
+  issuedTokens.push(token);
+  return {
+    token, tokenHash: crypto.createHash('sha256').update(token).digest('hex'),
+    acc: { key: name.toLowerCase(), name, passHash: bcrypt.hashSync(PASS, 4), balance: 4321, total: 987654, owned: LEGACY_OWNED.slice(),
+      equipped: { color: 'c_gold', shape: 's_star', trail: 't_sparks', nameColor: 'n_rainbow', hat: 'h_crown' },
+      upgrades: { magnet: 3, speed: 2 }, stats: { minigames: 7, bestReaction: 212, bestRush: 31 }, createdAt: now - 20 * 86400000, lastSeen: now - 3600000 },
+  };
+}
+const OLD_PG_SCHEMA = `
+CREATE TABLE ocs_accounts (key TEXT PRIMARY KEY, name TEXT NOT NULL, pass_hash TEXT NOT NULL, balance BIGINT NOT NULL DEFAULT 0, total BIGINT NOT NULL DEFAULT 0,
+  owned JSONB NOT NULL, equipped JSONB NOT NULL, upgrades JSONB NOT NULL, stats JSONB NOT NULL, created_at BIGINT NOT NULL, last_seen BIGINT NOT NULL);
+CREATE INDEX ocs_accounts_rank_idx ON ocs_accounts (total DESC, created_at ASC);
+CREATE TABLE ocs_sessions (token_hash TEXT PRIMARY KEY, account_key TEXT NOT NULL REFERENCES ocs_accounts(key) ON DELETE CASCADE, created_at BIGINT NOT NULL, expires_at BIGINT NOT NULL);`;
+async function seedLegacyPg(dbUrl, L) {
+  const { Client } = require('pg');
+  const db = new Client({ connectionString: dbUrl }); await db.connect();
+  await db.query('DROP TABLE IF EXISTS ocs_sessions; DROP TABLE IF EXISTS ocs_accounts;');
+  await db.query(OLD_PG_SCHEMA);
+  const a = L.acc;
+  await db.query('INSERT INTO ocs_accounts (key,name,pass_hash,balance,total,owned,equipped,upgrades,stats,created_at,last_seen) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
+    [a.key, a.name, a.passHash, a.balance, a.total, JSON.stringify(a.owned), JSON.stringify(a.equipped), JSON.stringify(a.upgrades), JSON.stringify(a.stats), a.createdAt, a.lastSeen]);
+  await db.query('INSERT INTO ocs_sessions VALUES ($1,$2,$3,$4)', [L.tokenHash, a.key, Date.now(), Date.now() + 86400000]);
+  await db.end();
+}
+function seedLegacyJson(file, L) {
+  fs.writeFileSync(file, JSON.stringify({ version: 2, accounts: { [L.acc.key]: L.acc }, sessions: { [L.tokenHash]: { key: L.acc.key, createdAt: Date.now(), expiresAt: Date.now() + 86400000 } } }));
+}
+async function migrationSuite(URL, L, label) {
+  console.log('--- migration of old-format account (' + label + ')');
+  const S = makeClient(URL); await S.ready;
+  const ss = await S.call('session', { token: L.token });
+  ok(ss.ok && ss.profile.name === L.acc.name, 'old session token still valid after migration');
+  S.close(); await sleep(200);
+  const P = makeClient(URL);
+  const r = await P.login(L.acc.name);
+  const pr = r.profile || {};
+  const inv = (pr.inventory || []).map(x => x.id).sort();
+  const expectInv = ['c_coral', 'c_gold', 'h_crown', 'n_rainbow', 's_star', 't_sparks'];
+  ok(r.ok, 'old password still works');
+  ok(pr.balance === 4321 && pr.total === 987654 && pr.upgrades.magnet === 3 && pr.upgrades.speed === 2, `balance ${pr.balance}, total ${pr.total}, upgrades magnet ${pr.upgrades && pr.upgrades.magnet}/speed ${pr.upgrades && pr.upgrades.speed} kept`);
+  ok(JSON.stringify(inv) === JSON.stringify(expectInv) && pr.inventory.every(x => x.src === 'legacy' && x.q === 1), `owned cosmetics moved to inventory (${inv.join(', ')}; unknown ids dropped, free items implicit)`);
+  ok(JSON.stringify(pr.equipped) === JSON.stringify(L.acc.equipped), 'equipped look unchanged');
+  ok(pr.stats.minigames === 7 && pr.stats.bestReaction === 212 && pr.stats.bestRush === 31 && pr.stats.sessions === 1 && pr.createdAt === L.acc.createdAt, 'stats + creation date kept, new counters added');
+  const e = await P.emit('inv:equip', 'c_coral');
+  ok(e.ok && e.profile.equipped.color === 'c_coral', 'migrated item can be equipped from the inventory');
+  await P.emit('inv:equip', 'c_gold');
+  P.close();
+}
+// simulates the previous build (still running during a zero-downtime deploy) writing `owned` after the migration
+async function legacyWriteAfterMigration(env, L) {
+  if (env.DATABASE_URL) {
+    const { Client } = require('pg');
+    const db = new Client({ connectionString: env.DATABASE_URL }); await db.connect();
+    const col = await db.query("SELECT inventory, owned FROM ocs_accounts WHERE key = $1", [L.acc.key]);
+    ok(col.rows[0].inventory && col.rows[0].inventory.slots.length === 6 && col.rows[0].owned.includes('h_crown'), 'Postgres: inventory JSONB column filled, legacy owned column kept in sync');
+    await db.query("UPDATE ocs_accounts SET owned = owned || '[\"t_fire\"]'::jsonb, balance = balance - 4000 WHERE key = $1", [L.acc.key]);
+    await db.end();
+  } else {
+    const d = JSON.parse(fs.readFileSync(env.DATA_FILE, 'utf8'));
+    const a = d.accounts[L.acc.key];
+    ok(a.inventory && a.inventory.slots.length === 6 && a.owned.includes('h_crown') && a.passHash === L.acc.passHash, 'JSON file: inventory saved, legacy owned list kept, password hash unchanged');
+    a.owned.push('t_fire'); a.balance -= 4000;
+    fs.writeFileSync(env.DATA_FILE, JSON.stringify(d));
+  }
+}
+async function legacyReconcileCheck(URL, L) {
+  const P = makeClient(URL);
+  const r = await P.login(L.acc.name);
+  ok(r.ok && r.profile.inventory.some(x => x.id === 't_fire') && r.profile.balance === 321 && r.profile.equipped.color === 'c_gold',
+    `item bought by the old build after migration is reconciled into the inventory (t_fire), balance ${r.profile.balance}`);
+  P.close();
+}
+
 // farm, buy, restart server, verify everything came back
-async function persistencePhase1(URL) {
+async function persistencePhase1(URL, hooks) {
   const name = 'Keeper' + rnd();
   const P = makeClient(URL);
   await P.register(name);
-  await P.farm(70, 90000);
+  await P.farm(5, 30000);
+  if (hooks) await P.emit('test:orbs', 5000);
   const b1 = await P.emit('buy', 'c_coral');
+  const q1 = await P.emit('inv:equip', 'c_coral');
   const u1 = await P.emit('upgrade', 'magnet');
-  ok(b1.ok && u1.ok, `persistence: ${name} farmed ${P.profile.total}, bought c_coral + magnet`);
+  if (hooks) await P.emit('test:grant', { id: 'x_legend_shard', qty: 120, source: 'event' });
+  ok(b1.ok && q1.ok && u1.ok, `persistence: ${name} has ${P.profile.total} total, bought + equipped c_coral, magnet 1, ${P.profile.inventory.length} inventory slots`);
   await sleep(100);
   const snap = JSON.parse(JSON.stringify(P.profile));
-  const token = P.token;
-  return { name, snap, token, P };
+  return { name, snap, token: P.token, P };
 }
 async function persistencePhase2(URL, st) {
   const P = makeClient(URL);
   const r = await P.login(st.name);
-  const same = r.ok && r.profile.balance === st.snap.balance && r.profile.total === st.snap.total && r.profile.owned.includes('c_coral')
-    && r.profile.equipped.color === 'c_coral' && r.profile.upgrades.magnet === 1;
-  ok(same, `data survived restart: balance ${r.profile && r.profile.balance}/${st.snap.balance}, total ${r.profile && r.profile.total}/${st.snap.total}, color ${r.profile && r.profile.equipped.color}, magnet ${r.profile && r.profile.upgrades.magnet}`);
+  const pr = r.profile || {};
+  const invSig = p => JSON.stringify((p.inventory || []).map(x => [x.id, x.q, x.src]));
+  const same = r.ok && pr.balance === st.snap.balance && pr.total === st.snap.total && invSig(pr) === invSig(st.snap)
+    && pr.equipped.color === 'c_coral' && pr.upgrades.magnet === 1;
+  ok(same, `data survived restart: balance ${pr.balance}/${st.snap.balance}, total ${pr.total}/${st.snap.total}, inventory ${invSig(pr) === invSig(st.snap) ? 'same' : 'DIFFERENT'}, color ${pr.equipped && pr.equipped.color}`);
   P.close();
   const Q = makeClient(URL);
   const rq = await Q.resume(st.token);
@@ -295,7 +589,9 @@ async function leaderboardAudit(URL) {
 }
 
 // ------------------------------------------------------------------ server process helpers
-function startServer(port, env) {
+async function startServer(port, env) {
+  try { await fetch(`http://localhost:${port}/api/health`); throw new Error(`port ${port} is already in use by another server`); }
+  catch (e) { if (/already in use/.test(e.message)) throw e; } // connection refused = port free
   return new Promise((resolve, reject) => {
     const proc = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: Object.assign({}, process.env, { PORT: String(port), DATABASE_URL: '', DATA_FILE: '' }, env), stdio: ['ignore', 'pipe', 'pipe'] });
     const srv = { proc, logs: '', url: `http://localhost:${port}` };
@@ -318,22 +614,39 @@ function startServer(port, env) {
 async function runMode(label, env, opts) {
   console.log(`\n===== ${label} =====`);
   const port = 3101;
+  env = Object.assign({ OCS_TEST_HOOKS: '1' }, env);
   let srv = await startServer(port, env);
-  console.log('server: ' + srv.logs.trim().split('\n')[0]);
+  console.log('server: ' + srv.logs.trim().split('\n').slice(0, 3).join(' | '));
+  if (opts.legacy) await migrationSuite(srv.url, opts.legacy, label);
   await authSuite(srv.url);
-  await chatSuite(srv.url);
-  if (opts.gameplay) await gameplaySuite(srv.url);
+  await profileSuite(srv.url);
+  if (opts.full) { await chatSuite(srv.url); await gameplaySuite(srv.url); await minigameSuite(srv.url); }
+  await shopInventorySuite(srv.url);
   await leaderboardAudit(srv.url);
-  const st = await persistencePhase1(srv.url);
+  const st = await persistencePhase1(srv.url, true);
   const code = await srv.stop(); // SIGTERM while the player is still online -> must flush
   st.P.close();
   ok(code === 0 && /Saved/.test(srv.logs), `server flushed and exited cleanly on SIGTERM (exit ${code})`);
+  if (opts.legacy) await legacyWriteAfterMigration(env, opts.legacy);
   let logs = srv.logs;
   srv = await startServer(port, env);
   await persistencePhase2(srv.url, st);
+  if (opts.legacy) await legacyReconcileCheck(srv.url, opts.legacy);
   await srv.stop();
   logs += srv.logs;
-  privacyAudit(logs);
+  return logs;
+}
+
+async function runCycleMode() {
+  console.log('\n===== chat cycle / spawn / legendary (short timers) =====');
+  const tmp = path.join(os.tmpdir(), `ocs-cycle-${process.pid}.json`);
+  const srv = await startServer(3104, { DATA_FILE: tmp, OCS_TEST_HOOKS: '1', CHAT_CLEAR_MS: '3000', LEGENDARY_EVERY_MS: '2500' });
+  await spawnSuite(srv.url);
+  await chatClearSuite(srv.url, 3000);
+  await legendarySuite(srv.url);
+  await srv.stop();
+  fs.rmSync(tmp, { force: true });
+  return srv.logs;
 }
 
 (async () => {
@@ -344,16 +657,23 @@ async function runMode(label, env, opts) {
     await gameplaySuite(url);
     await leaderboardAudit(url);
     privacyAudit(null);
+  } else if (process.env.OCS_TEST_ONLY === 'cycle') {
+    privacyAudit(await runCycleMode());
   } else {
+    priceSanity();
+    let logs = '';
     const tmp = path.join(os.tmpdir(), `ocs-test-${process.pid}.json`);
-    await runMode('JSON file mode', { DATA_FILE: tmp }, { gameplay: true });
+    const L1 = legacyAccount();
+    seedLegacyJson(tmp, L1);
+    logs += await runMode('JSON file mode', { DATA_FILE: tmp }, { full: true, legacy: L1 });
     fs.rmSync(tmp, { force: true });
+    logs += await runCycleMode();
     if (process.env.TEST_DATABASE_URL) {
-      const { Client } = require('pg');
-      const db = new Client({ connectionString: process.env.TEST_DATABASE_URL });
-      await db.connect(); await db.query('DROP TABLE IF EXISTS ocs_sessions; DROP TABLE IF EXISTS ocs_accounts;'); await db.end();
-      await runMode('PostgreSQL mode', { DATABASE_URL: process.env.TEST_DATABASE_URL }, { gameplay: false });
+      const L2 = legacyAccount();
+      await seedLegacyPg(process.env.TEST_DATABASE_URL, L2); // old (7c2dacd) schema + data, the new server must migrate it
+      logs += await runMode('PostgreSQL mode', { DATABASE_URL: process.env.TEST_DATABASE_URL }, { full: false, legacy: L2 });
     } else console.log('\n(PostgreSQL mode skipped: set TEST_DATABASE_URL to run it)');
+    privacyAudit(logs);
   }
   console.log(`\n${passes} passed, ${failures} failed`);
   for (const s of allSockets) s.close();

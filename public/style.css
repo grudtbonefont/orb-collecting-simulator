@@ -67,6 +67,7 @@ canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: blo
 .top li b { float: right; }
 .top li.me { color: #3ee0ff; font-weight: 700; }
 .menu-buttons { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; gap: 8px; pointer-events: auto; }
+.menu-buttons .btn i { font-style: normal; margin-right: 6px; }
 #minimap { position: absolute; right: 12px; bottom: 12px; border-radius: 12px; border: 1px solid rgba(110, 140, 255, .3); background: rgba(8, 12, 26, .75); }
 
 #toasts { position: fixed; top: 74px; left: 50%; transform: translateX(-50%); z-index: 40; display: flex; flex-direction: column; gap: 6px; align-items: center; pointer-events: none; }
@@ -114,6 +115,43 @@ canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: blo
 .lb-table td.num { color: #ffcc33; font-weight: 700; }
 .lb-me { margin: 6px 0 10px; font-weight: 600; }
 .on { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #3ddc8c; margin-left: 6px; vertical-align: 2px; }
+
+/* ---------------------------------------------------------------- profile screen */
+.profile-ov { z-index: 22; }
+.profile-ov.in-game { background: rgba(3, 5, 12, .62); }
+.profile-card { width: min(560px, 100%); background: rgba(12, 16, 34, .94); border: 1px solid rgba(110, 140, 255, .28); border-radius: 22px;
+  padding: 18px 22px 16px; box-shadow: 0 0 60px rgba(70, 120, 255, .2); margin: auto; }
+.pf-top { display: flex; align-items: center; gap: 16px; margin-bottom: 12px; }
+#pfAvatar { width: 120px; height: 120px; flex: none; border-radius: 18px; background: radial-gradient(circle at 50% 60%, rgba(62, 224, 255, .12), rgba(255, 255, 255, .02) 70%);
+  border: 1px solid rgba(110, 140, 255, .2); }
+.pf-id { min-width: 0; }
+.pf-name { font-size: 26px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-rank { color: #ffcc33; font-weight: 600; margin: 4px 0; }
+.pf-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.pf-stats div { background: rgba(255, 255, 255, .04); border: 1px solid rgba(120, 150, 255, .14); border-radius: 12px; padding: 8px 10px; min-width: 0; }
+.pf-stats span { display: block; font-size: 12px; color: #8a93b8; line-height: 1.25; }
+.pf-stats b { display: block; font-size: 17px; margin-top: 2px; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-upg { font-size: 13px; margin: 10px 0 2px; }
+.pf-actions { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+.pf-actions .btn.big { flex: 1; min-width: 140px; }
+.pf-actions #pfLogout { flex: none; }
+.name-btn { padding: 0; color: #dfe6ff; text-decoration: none; font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px; }
+.name-btn:hover { color: #3ee0ff; }
+.note { font-size: 13px; margin: 0 0 10px; }
+/* ---------------------------------------------------------------- shop / inventory cards */
+.item { position: relative; }
+.item.rar-rare { border-color: rgba(62, 160, 255, .45); }
+.item.rar-epic { border-color: rgba(180, 107, 255, .55); box-shadow: inset 0 0 18px rgba(180, 107, 255, .12); }
+.item.rar-legendary { border-color: rgba(255, 204, 51, .65); box-shadow: inset 0 0 22px rgba(255, 204, 51, .15); }
+.rar { font-size: 12px; font-weight: 700; margin-top: -4px; }
+.big-icon { font-size: 44px; line-height: 96px; height: 96px; text-shadow: 0 0 18px currentColor; }
+.qty { position: absolute; top: 8px; right: 8px; background: rgba(0, 0, 0, .55); border: 1px solid rgba(255, 204, 51, .5); color: #ffe08a;
+  border-radius: 10px; padding: 1px 8px; font-weight: 800; font-size: 13px; }
+.inv-meter { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, .06); overflow: hidden; margin: -2px 0 12px; }
+#invMeter { height: 100%; background: linear-gradient(90deg, #2bc4ff, #8a5bff); width: 0; transition: width .3s; }
+#invMeter.full { background: #ff4d6d; }
+.tab .cnt { opacity: .6; font-size: 12px; }
+.inv-empty { grid-column: 1 / -1; text-align: center; padding: 30px 10px; }
 /* ---------------------------------------------------------------- chat (desktop: compact panel bottom-left) */
 .chat { position: fixed; left: 12px; bottom: 12px; width: 340px; z-index: 6; display: flex; flex-direction: column;
   background: rgba(10, 14, 30, .42); border: 1px solid rgba(110, 140, 255, .16); border-radius: 14px; backdrop-filter: blur(4px); transition: background .2s, border-color .2s; }
@@ -171,4 +209,28 @@ canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: blo
   .row.who { max-width: 150px; }
   #toasts { top: auto; bottom: calc(190px + env(safe-area-inset-bottom)); width: 86vw; }
   .toast { font-size: 13px; padding: 6px 12px; text-align: center; max-width: 86vw; }
+}
+
+@media (max-width: 640px) {
+  .menu-buttons { bottom: calc(10px + env(safe-area-inset-bottom)); gap: 6px; }
+  .menu-buttons .btn { display: flex; flex-direction: column; align-items: center; gap: 1px; width: 66px; padding: 6px 2px 5px; font-size: 10.5px; border-radius: 12px; }
+  .menu-buttons .btn i { margin: 0; font-size: 19px; line-height: 1.1; }
+  .modal { padding: 0; align-items: flex-end; }
+  .modal-card, .modal-card.wide { width: 100%; max-height: 92vh; border-radius: 18px 18px 0 0; padding: 14px 12px calc(14px + env(safe-area-inset-bottom)); }
+  .modal-head h2 { font-size: 19px; }
+  .grid { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
+  .item { padding: 8px 6px; gap: 4px; }
+  .item canvas { width: 72px; height: 72px; }
+  .big-icon { font-size: 34px; line-height: 72px; height: 72px; }
+  .item .name { font-size: 12.5px; }
+  .item .btn { font-size: 12px; padding: 7px 4px; }
+  .tabs { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
+  .tab { flex: none; }
+  .profile-card { padding: 14px 14px 12px; border-radius: 18px; }
+  #pfAvatar { width: 92px; height: 92px; }
+  .pf-name { font-size: 21px; }
+  .pf-stats { grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  .pf-stats b { font-size: 15px; }
+  .pf-actions .btn.big { min-width: 0; font-size: 16px; padding: 11px 10px; }
+  .pf-actions #pfLogout { flex: 1 1 100%; }
 }

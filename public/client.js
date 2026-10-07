@@ -26,7 +26,7 @@
 
   // ------------------------------------------------------------ state
   const socket = io({ transports: ['websocket', 'polling'] });
-  let joined = false, wantPlay = !!token, myName = store.get(NICK_KEY) || '', myId = null, profile = null, sessionScore = 0;
+  let joined = false, myName = store.get(NICK_KEY) || '', myId = null, profile = null, sessionScore = 0;
   const players = new Map();   // id -> {id,name,eq,trail:[],dir:{x,y},pos:{x,y}}
   const snapshots = [];        // {time, map}
   const orbs = new Map();      // id -> {x,y,t,born}
@@ -44,6 +44,8 @@
   const mySpeed = () => G.speedFor(profile ? profile.upgrades.speed : 0);
   const myPickup = () => G.pickupFor(profile ? profile.upgrades.magnet : 0);
   const fmt = n => Number(n).toLocaleString('ru-RU');
+  const hhmm = ts => new Date(ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  let chatNextClear = 0;
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const rainbow = (t, off = 0) => `hsl(${((t * 90 + off) % 360 + 360) % 360},100%,62%)`;
   const colorOf = (eq, t) => { const v = itemVal(eq.color) || '#3ee0ff'; return v === 'rainbow' ? rainbow(t) : v; };
@@ -58,7 +60,9 @@
   }
 
   // ------------------------------------------------------------ auth / connection
-  let authMode = 'login', authPending = false;
+  // stage: 'auth' (login form) → 'lobby' (profile screen) → 'game' (arena)
+  let stage = 'auth', authMode = 'login', authPending = false, playPending = false, paused = false;
+  let summary = null; // last profile summary (rank, play time…) from the server
   const setErr = msg => { $('joinError').textContent = msg || ''; };
   function setAuthMode(mode) {
     authMode = mode;
@@ -88,31 +92,58 @@
     } else if (!password) { setErr('Введите пароль'); $('pass').focus(); return; }
     if (!socket.connected) { setErr('Нет связи с сервером, подождите…'); socket.connect(); return; }
     authPending = true; $('authSubmit').disabled = true; setErr('');
-    const payload = { mode: authMode, name, password };
+    const payload = { mode: authMode, name, password, enter: false };
     if (authMode === 'register') payload.confirm = confirm;
     socket.emit('auth', payload, res => {
       authPending = false; $('authSubmit').disabled = false;
       if (!res || !res.ok) { setErr((res && res.error) || 'Ошибка входа'); return; }
       token = res.token; store.set(TOKEN_KEY, token);
       $('pass').value = ''; $('pass2').value = '';
-      wantPlay = true;
-      enterGame(res);
+      showLobby(res.profile);
     });
   });
-  function tryResume() {
-    if (!token || joined || authPending) return;
-    if (!socket.connected) { showResume('Подключение к серверу…', false); socket.connect(); return; } // resumes on 'connect'
+  // saved token → profile screen (does not enter the arena)
+  function trySession() {
+    if (!token || authPending || paused) return;
+    const silent = stage === 'lobby';
+    if (!socket.connected) { if (!silent) showResume('Подключение к серверу…', false); socket.connect(); return; }
     authPending = true;
-    showResume('Входим как ' + (myName || 'игрок') + '…', false);
-    socket.emit('resume', { token }, res => {
+    if (!silent) showResume('Входим как ' + (myName || 'игрок') + '…', false);
+    socket.emit('session', { token }, res => {
       authPending = false;
-      if (res && res.ok) { enterGame(res); return; }
-      if (res && res.expired) { token = null; store.del(TOKEN_KEY); wantPlay = false; showStart(); setErr(res.error); return; }
-      wantPlay = false; showStart(); setErr((res && res.error) || 'Не удалось войти');
+      if (res && res.ok) { showLobby(res.profile); return; }
+      sessionFailed(res);
     });
   }
-  function enterGame(res) {
-    setErr('');
+  function sessionFailed(res) {
+    stage = 'auth'; hideGameUi();
+    if (res && res.expired) { token = null; store.del(TOKEN_KEY); showStart(); setErr(res.error); return; }
+    paused = true; showResume((res && res.error) || 'Не удалось войти', true);
+  }
+  // reconnect while playing → straight back into the arena
+  function tryResume() {
+    if (!token || joined || authPending) return;
+    authPending = true;
+    socket.emit('resume', { token }, res => {
+      authPending = false;
+      if (res && res.ok) { enterGame(res, true); return; }
+      sessionFailed(res);
+    });
+  }
+  function play() {
+    if (stage === 'game') { closeProfile(); return; }
+    if (playPending) return;
+    if (!socket.connected) { $('pfError').textContent = 'Нет связи с сервером, подождите…'; return; }
+    playPending = true; $('pfPlay').disabled = true; $('pfError').textContent = '';
+    socket.emit('play', null, res => {
+      playPending = false; $('pfPlay').disabled = false;
+      if (res && res.ok) { enterGame(res); return; }
+      if (res && res.expired) { sessionFailed(res); return; }
+      $('pfError').textContent = (res && res.error) || 'Не удалось войти в игру';
+    });
+  }
+  function enterGame(res, reconnect) {
+    setErr(''); stage = 'game'; paused = false;
     myId = res.you; profile = res.profile; myName = profile.name; sessionScore = 0;
     store.set(NICK_KEY, myName); $('nick').value = myName;
     players.clear(); orbs.clear(); snapshots.length = 0; pending = []; seq = 0; fx.length = 0;
@@ -122,46 +153,65 @@
     const now = performance.now();
     for (const [id, x, y, t] of res.orbs) orbs.set(id, { x, y, t, born: now - 1000 });
     joined = true;
-    $('start').classList.add('hidden'); $('hud').classList.remove('hidden');
+    $('start').classList.add('hidden'); $('profile').classList.add('hidden'); closeModals();
+    $('hud').classList.remove('hidden');
     $('chat').classList.remove('hidden'); $('chatBtn').classList.remove('hidden');
     $('hudName').textContent = '👤 ' + myName;
     resetChat(res.chat || []);
+    chatNextClear = res.chatNextClear || 0;
+    if (chatNextClear) addChat({ sys: true, t: `Чат очищается каждые 15 минут · следующая очистка в ${hhmm(chatNextClear)}` });
     updateHud();
-    toast(`Добро пожаловать, ${myName}! Собирайте сферы.`, 'ok');
+    if (!reconnect) toast(`Добро пожаловать, ${myName}! Собирайте сферы.`, 'ok');
+  }
+  function hideGameUi() {
+    joined = false;
+    $('hud').classList.add('hidden'); $('chat').classList.add('hidden'); $('chatBtn').classList.add('hidden'); closeChat();
+    closeModals();
   }
   function showResume(text, buttons) {
+    $('start').classList.remove('hidden'); $('profile').classList.add('hidden');
     $('resumeBox').classList.remove('hidden'); $('authBox').classList.add('hidden');
     $('resumeText').textContent = text;
     $('resumeBtn').classList.toggle('hidden', !buttons); $('resumeLogout').classList.toggle('hidden', !buttons);
   }
   function showStart() {
-    joined = false;
-    $('start').classList.remove('hidden'); $('hud').classList.add('hidden');
-    $('chat').classList.add('hidden'); $('chatBtn').classList.add('hidden'); closeChat();
-    document.querySelectorAll('.modal').forEach(m => m.classList.add('hidden'));
-    if (token) showResume('Вы вошли как ' + (myName || 'игрок'), true);
-    else { $('resumeBox').classList.add('hidden'); $('authBox').classList.remove('hidden'); }
+    stage = 'auth'; hideGameUi();
+    $('start').classList.remove('hidden'); $('profile').classList.add('hidden');
+    $('resumeBox').classList.add('hidden'); $('authBox').classList.remove('hidden');
     loadStartLb();
+  }
+  function showLobby(p) {
+    stage = 'lobby'; paused = false; hideGameUi();
+    summary = p; profile = p; myName = p.name;
+    store.set(NICK_KEY, myName); $('nick').value = myName;
+    $('start').classList.add('hidden');
+    renderProfile();
+    $('profile').classList.remove('hidden');
   }
   function logout() {
     const t = token;
-    token = null; store.del(TOKEN_KEY); wantPlay = false;
+    token = null; store.del(TOKEN_KEY); paused = false; profile = null; summary = null;
     if (socket.connected) socket.emit('logout', { token: t }, () => {});
     showStart(); setAuthMode('login'); $('pass').value = '';
     toast('Вы вышли из аккаунта');
   }
   $('logoutBtn').addEventListener('click', logout);
   $('resumeLogout').addEventListener('click', logout);
-  $('resumeBtn').addEventListener('click', () => { wantPlay = true; tryResume(); });
+  $('pfLogout').addEventListener('click', logout);
+  $('pfPlay').addEventListener('click', play);
+  $('resumeBtn').addEventListener('click', () => { paused = false; trySession(); });
   if (token) showResume('Входим как ' + (myName || 'игрок') + '…', false);
 
-  socket.on('connect', () => { if (wantPlay && token) tryResume(); else if (/связи/.test($('joinError').textContent)) setErr(''); });
+  socket.on('connect', () => {
+    if (!token) { if (/связи/.test($('joinError').textContent)) setErr(''); return; }
+    if (stage === 'game') tryResume(); else trySession();
+  });
   socket.on('disconnect', () => {
-    authPending = false; $('authSubmit').disabled = false;
+    authPending = false; playPending = false; $('authSubmit').disabled = false; $('pfPlay').disabled = false;
     if (joined) toast('Соединение потеряно, переподключаемся…', 'err');
     joined = false;
   });
-  socket.on('kicked', msg => { wantPlay = false; showStart(); setErr(msg); });
+  socket.on('kicked', msg => { paused = true; stage = 'auth'; hideGameUi(); showResume(msg, true); });
 
   function addPlayer(p) {
     players.set(p.id, { id: p.id, name: p.name, eq: p.eq, trail: [], dir: { x: 1, y: 0 }, pos: { x: p.x, y: p.y }, last: { x: p.x, y: p.y } });
@@ -213,7 +263,28 @@
     profile.balance = b.b; profile.total = b.t; sessionScore = b.s;
     updateHud(true);
   });
-  socket.on('profile', p => { profile = p; updateHud(); if (!$('shop').classList.contains('hidden')) renderShop(); });
+  socket.on('profile', p => { setProfile(p); });
+  socket.on('chat:clear', d => {
+    chatNextClear = (d && d.next) || 0;
+    resetChat([]);
+    addChat({ sys: true, t: 'Чат очищен' + (chatNextClear ? ` · следующая очистка в ${hhmm(chatNextClear)}` : '') });
+  });
+  socket.on('item', d => {
+    if (!d) return;
+    if (d.error) { toast(d.error, 'err'); return; }
+    const def = G.ITEM_BY_ID[d.id];
+    if (def) toast(`${def.icon || '🎁'} Получен предмет: ${def.name}${d.qty > 1 ? ' ×' + d.qty : ''} — он в инвентаре (I)`, 'ok');
+  });
+  // any fresh own-profile from the server: refresh everything that shows it
+  function setProfile(p) {
+    if (!p) return;
+    profile = p;
+    if (summary) { Object.assign(summary, p); summary.items = p.inventory.reduce((n, s) => n + s.q, 0); summary.slotsUsed = p.inventory.length; }
+    updateHud();
+    if (!$('shop').classList.contains('hidden')) renderShop();
+    if (!$('inv').classList.contains('hidden')) renderInv();
+    if (!$('profile').classList.contains('hidden')) renderProfile();
+  }
   socket.on('top', d => {
     $('hudOnline').textContent = d.online;
     const ol = $('hudTop'); ol.textContent = '';
@@ -234,7 +305,8 @@
   }
 
   // ------------------------------------------------------------ input
-  const anyModal = () => Array.from(document.querySelectorAll('.modal')).some(m => !m.classList.contains('hidden'));
+  const anyModalOnly = () => Array.from(document.querySelectorAll('.modal')).some(m => !m.classList.contains('hidden'));
+  const anyModal = () => anyModalOnly() || !$('profile').classList.contains('hidden');
   const typing = () => { const a = document.activeElement; return !!a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA'); };
   window.addEventListener('keydown', e => {
     if (typing()) return;                 // chat / login inputs: no movement, no hotkeys
@@ -243,8 +315,15 @@
       e.preventDefault(); chatInput.focus(); return;
     }
     keys[e.code] = true;
-    if (!joined) return;
-    if (e.code === 'Escape') closeModals();
+    if (stage === 'lobby' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (e.code === 'KeyI') toggleModal('inv');
+      if (e.code === 'Escape') closeModals();
+      return;
+    }
+    if (!joined || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.code === 'Escape') { if (!$('profile').classList.contains('hidden') && !anyModalOnly()) closeProfile(); else closeModals(); }
+    if (e.code === 'KeyP') toggleProfile();
+    if (e.code === 'KeyI') toggleModal('inv');
     if (e.code === 'KeyB') toggleModal('shop');
     if (e.code === 'KeyM') toggleModal('games');
     if (e.code === 'KeyL') toggleModal('lb');
@@ -464,7 +543,7 @@
     frameNo++;
     const now = performance.now(), t = now / 1000;
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-    if (!joined) { drawIdleBackground(t); return; }
+    if (!joined) { drawIdleBackground(t); drawPreviews(t, now); return; }
 
     const a = Math.min(1, (now - lastStepAt) / G.TICK_MS);
     corr.x *= 0.86; corr.y *= 0.86;
@@ -530,7 +609,7 @@
     }
     ctx.restore();
     if (frameNo % 4 === 0) drawMinimap();
-    if (!$('shop').classList.contains('hidden')) drawShopPreviews(t, now);
+    drawPreviews(t, now);
     if (rushActive) drawRush(now);
   }
 
@@ -580,8 +659,10 @@
   // ------------------------------------------------------------ modals
   function openModal(id) {
     closeModals();
+    if (id !== 'inv') { if (stage !== 'game') return; closeProfile(); }
     $(id).classList.remove('hidden');
     if (id === 'shop') renderShop();
+    if (id === 'inv') renderInv();
     if (id === 'lb') loadLb();
     if (id === 'games') { if (!mgRunning) showGamesList(); updateGameButtons(); }
     updateHud();
@@ -590,17 +671,45 @@
   function toggleModal(id) { $(id).classList.contains('hidden') ? openModal(id) : closeModals(); }
   document.querySelectorAll('[data-open]').forEach(b => b.addEventListener('click', () => openModal(b.dataset.open)));
   document.querySelectorAll('.modal .close').forEach(b => b.addEventListener('click', closeModals));
+  $('hudName').addEventListener('click', () => toggleProfile());
+  $('profileClose').addEventListener('click', () => closeProfile());
+  $('pfInv').addEventListener('click', () => openModal('inv'));
+  $('profile').addEventListener('pointerdown', e => { if (e.target === $('profile') && stage === 'game') closeProfile(); });
   document.querySelectorAll('.modal').forEach(m => m.addEventListener('pointerdown', e => { if (e.target === m) closeModals(); }));
 
-  // ------------------------------------------------------------ shop
+  // ------------------------------------------------------------ live avatar previews (shop, inventory, profile)
+  const previews = []; // {cv, eq, cat, size, r, name}
+  function addPreview(cv, eq, cat, opts = {}) { previews.push(Object.assign({ cv, eq, cat, size: 96, r: 18 }, opts)); return cv; }
+  function pruneHidden(owner) { for (let i = previews.length - 1; i >= 0; i--) if (previews[i].owner === owner) previews.splice(i, 1); }
+  function drawPreviews(t, now) {
+    for (const p of previews) {
+      if (!p.cv.isConnected || p.cv.offsetParent === null) continue;
+      const g = p.cv.getContext('2d'), S = p.size;
+      g.setTransform(p.cv.width / S, 0, 0, p.cv.height / S, 0, 0);
+      g.clearRect(0, 0, S, S);
+      const trail = p.cat === 'trail' || (p.cat === 'all' && (itemVal(p.eq.trail) || 'none') !== 'none');
+      const cx = S / 2 + (trail ? S * 0.14 : 0), cy = S * (p.name ? 0.64 : 0.6);
+      if (trail) {
+        const fake = { eq: p.eq, trail: [] }, k = S / 96;
+        for (let i = 0; i < 14; i++) fake.trail.push({ x: cx - 60 * k + i * 4.2 * k, y: cy + Math.sin(t * 4 + i * 0.5) * 6 * k, time: now - (14 - i) * 40, seed: (i * 0.37) % 1 });
+        drawTrail(g, fake, t, now);
+      }
+      drawAvatar(g, cx, cy, p.r, p.eq, t, { dir: { x: 1, y: 0 }, name: p.name, isMe: !!p.name });
+    }
+  }
+  const owns = id => !!(profile && profile.inventory.some(s => s.id === id));
+  const rarityOf = def => G.RARITIES[def.rarity] || G.RARITIES.common;
+  const SOURCE_NAMES = { shop: 'Магазин', minigame: 'Мини-игры', arena: 'Арена', event: 'Событие', admin: 'Подарок', legacy: 'Куплено раньше' };
+  function rarityTag(def) { const r = rarityOf(def); const el = document.createElement('div'); el.className = 'rar'; el.style.color = r.color; el.textContent = r.name; return el; }
+
+  // ------------------------------------------------------------ shop (only sells; purchases go to the inventory)
   let shopTab = 'color';
-  const shopPreviews = [];
   function renderShop() {
     if (!profile) return;
+    pruneHidden('shop');
     const tabs = G.CATEGORIES.concat([{ key: 'upgrades', name: '⚡ Улучшения' }]);
     $('shopTabs').innerHTML = tabs.map(c => `<button class="tab ${c.key === shopTab ? 'active' : ''}" data-tab="${c.key}">${c.name}</button>`).join('');
     $('shopTabs').querySelectorAll('.tab').forEach(b => b.onclick = () => { shopTab = b.dataset.tab; renderShop(); });
-    shopPreviews.length = 0;
     const grid = $('shopGrid');
     grid.innerHTML = '';
     if (shopTab === 'upgrades') {
@@ -608,49 +717,124 @@
         const lvl = profile.upgrades[up.key] || 0, price = up.prices[lvl];
         const el = document.createElement('div'); el.className = 'item';
         const cur = up.key === 'magnet' ? `Радиус сбора: ${G.pickupFor(lvl)}` : `Скорость: ${Math.round(G.speedFor(lvl))}`;
-        el.innerHTML = `<div style="font-size:44px;line-height:96px">${up.key === 'magnet' ? '🧲' : '👟'}</div>
+        el.innerHTML = `<div class="big-icon">${up.key === 'magnet' ? '🧲' : '👟'}</div>
           <div class="name">${up.name} — ур. ${lvl}/${up.max}</div><div class="desc">${up.desc}<br>${cur}</div>`;
         const btn = document.createElement('button'); btn.className = 'btn' + (lvl < up.max ? ' primary' : '');
         if (lvl >= up.max) { btn.textContent = 'Максимум'; btn.disabled = true; }
-        else { btn.textContent = `Улучшить · ${fmt(price)} ◉`; btn.disabled = profile.balance < price; btn.onclick = () => socket.emit('upgrade', up.key, res => afterShop(res, `${up.name}: уровень ${lvl + 1}!`)); }
+        else { btn.textContent = `Улучшить · ${fmt(price)} ◉`; btn.disabled = profile.balance < price; btn.onclick = () => socket.emit('upgrade', up.key, res => afterAction(res, `${up.name}: уровень ${lvl + 1}!`)); }
         el.appendChild(btn); grid.appendChild(el);
       }
       return;
     }
-    for (const it of G.ITEMS.filter(i => i.cat === shopTab)) {
-      const owned = profile.owned.includes(it.id), equipped = profile.equipped[it.cat] === it.id;
-      const el = document.createElement('div'); el.className = 'item';
+    const full = profile.inventory.length >= profile.slots;
+    for (const it of G.ITEMS.filter(i => i.cat === shopTab && i.price > 0 && i.sources.includes('shop'))) {
+      const owned = owns(it.id);
+      const el = document.createElement('div'); el.className = 'item rar-' + it.rarity;
       const cv = document.createElement('canvas'); cv.width = 192; cv.height = 192;
-      el.appendChild(cv);
-      const nm = document.createElement('div'); nm.className = 'name'; nm.textContent = it.name; el.appendChild(nm);
-      const ds = document.createElement('div'); ds.className = 'desc'; ds.textContent = it.price ? `${fmt(it.price)} сфер` : 'Бесплатно'; el.appendChild(ds);
+      el.appendChild(addPreview(cv, Object.assign({}, profile.equipped, { [it.cat]: it.id }), it.cat, { owner: 'shop' }));
+      const nm = document.createElement('div'); nm.className = 'name'; nm.textContent = it.name; el.append(nm, rarityTag(it));
       const btn = document.createElement('button');
-      if (equipped) { btn.className = 'btn equipped'; btn.textContent = '✓ Надето'; btn.disabled = true; }
-      else if (owned) { btn.className = 'btn'; btn.textContent = 'Надеть'; btn.onclick = () => socket.emit('equip', it.id, res => afterShop(res)); }
-      else { btn.className = 'btn primary'; btn.textContent = `Купить · ${fmt(it.price)} ◉`; btn.disabled = profile.balance < it.price; btn.onclick = () => socket.emit('buy', it.id, res => afterShop(res, `Куплено: ${it.name}!`)); }
+      if (owned) { btn.className = 'btn equipped'; btn.textContent = '✓ В инвентаре'; btn.disabled = true; }
+      else {
+        btn.className = 'btn primary'; btn.textContent = `Купить · ${fmt(it.price)} ◉`;
+        btn.disabled = profile.balance < it.price;
+        if (full) btn.title = 'Инвентарь полон';
+        btn.onclick = () => socket.emit('buy', it.id, res => afterAction(res, `Куплено: ${it.name} — предмет в инвентаре (I)`));
+      }
       el.appendChild(btn); grid.appendChild(el);
-      shopPreviews.push({ cv, eq: Object.assign({}, profile.equipped, { [it.cat]: it.id }), cat: it.cat });
     }
   }
-  function afterShop(res, okMsg) {
+  function afterAction(res, okMsg) {
     if (!res || !res.ok) { toast((res && res.error) || 'Ошибка', 'err'); return; }
-    profile = res.profile; updateHud(); renderShop();
+    setProfile(res.profile);
     if (okMsg) toast(okMsg, 'ok');
   }
-  function drawShopPreviews(t, now) {
-    for (const p of shopPreviews) {
-      const g = p.cv.getContext('2d');
-      g.setTransform(2, 0, 0, 2, 0, 0);
-      g.clearRect(0, 0, 96, 96);
-      const cx = 48 + (p.cat === 'trail' ? 14 : 0), cy = 58;
-      if (p.cat === 'trail') {
-        const fake = { eq: p.eq, trail: [] };
-        for (let i = 0; i < 14; i++) fake.trail.push({ x: cx - 60 + i * 4.2, y: cy + Math.sin(t * 4 + i * 0.5) * 6, time: now - (14 - i) * 40, seed: (i * 0.37) % 1 });
-        drawTrail(g, fake, t, now);
-      }
-      drawAvatar(g, cx, cy, 18, p.eq, t, { dir: { x: 1, y: 0 } });
+
+  // ------------------------------------------------------------ inventory (100 slots; stackable items up to 99 per slot)
+  let invTab = 'all';
+  function renderInv() {
+    if (!profile) return;
+    pruneHidden('inv');
+    const inv = profile.inventory, slots = profile.slots || G.INV_SLOTS;
+    $('invCount').textContent = `Занято ${inv.length}/${slots}`;
+    $('invMeter').style.width = Math.min(100, inv.length / slots * 100) + '%';
+    $('invMeter').classList.toggle('full', inv.length >= slots);
+    const tabs = [{ key: 'all', name: 'Все' }].concat(G.INV_CATEGORIES);
+    $('invTabs').innerHTML = tabs.map(c => {
+      const n = c.key === 'all' ? inv.length : inv.filter(s => (G.ITEM_BY_ID[s.id] || {}).cat === c.key).length;
+      return `<button class="tab ${c.key === invTab ? 'active' : ''}" data-tab="${c.key}">${c.name} <span class="cnt">${n}</span></button>`;
+    }).join('');
+    $('invTabs').querySelectorAll('.tab').forEach(b => b.onclick = () => { invTab = b.dataset.tab; renderInv(); });
+    const grid = $('invGrid');
+    grid.innerHTML = '';
+    let shown = 0;
+    inv.forEach((slot, i) => {
+      const def = G.ITEM_BY_ID[slot.id];
+      if (!def || (invTab !== 'all' && def.cat !== invTab)) return;
+      shown++;
+      const el = document.createElement('div'); el.className = 'item inv-item rar-' + def.rarity; el.dataset.item = def.id; el.dataset.slot = i;
+      if (def.type === 'cosmetic') {
+        const cv = document.createElement('canvas'); cv.width = 192; cv.height = 192;
+        el.appendChild(addPreview(cv, Object.assign({}, profile.equipped, { [def.cat]: def.id }), def.cat, { owner: 'inv' }));
+      } else { const ic = document.createElement('div'); ic.className = 'big-icon'; ic.style.color = rarityOf(def).color; ic.textContent = def.icon || '🎁'; el.appendChild(ic); }
+      if (def.stackable) { const q = document.createElement('span'); q.className = 'qty'; q.textContent = '×' + slot.q; el.appendChild(q); }
+      const nm = document.createElement('div'); nm.className = 'name'; nm.textContent = def.name; el.append(nm, rarityTag(def));
+      const src = document.createElement('div'); src.className = 'desc'; src.textContent = SOURCE_NAMES[slot.src] || ''; el.appendChild(src);
+      const btn = document.createElement('button');
+      if (def.type === 'cosmetic') {
+        const on = profile.equipped[def.cat] === def.id;
+        btn.className = on ? 'btn equipped' : 'btn primary'; btn.textContent = on ? '✓ Надето · Снять' : 'Надеть';
+        btn.onclick = on ? () => socket.emit('inv:unequip', def.cat, res => afterAction(res, `Снято: ${def.name}`))
+          : () => socket.emit('inv:equip', def.id, res => afterAction(res, `Надето: ${def.name}`));
+      } else { btn.className = 'btn'; btn.textContent = def.stackable ? `Коллекция · до ${def.maxStack} в ячейке` : 'Коллекция'; btn.disabled = true; }
+      el.appendChild(btn); grid.appendChild(el);
+    });
+    if (!shown) {
+      const em = document.createElement('div'); em.className = 'inv-empty muted';
+      em.textContent = inv.length ? 'В этой категории пока ничего нет.' : 'Инвентарь пуст. Купите что-нибудь в магазине (B) — покупки появятся здесь.';
+      grid.appendChild(em);
     }
   }
+
+  // ------------------------------------------------------------ profile screen
+  const fmtDur = ms => { const m = Math.floor((ms || 0) / 60000), h = Math.floor(m / 60); return h ? `${h} ч ${m % 60} мин` : `${m} мин`; };
+  const fmtDate = ts => (ts ? new Date(ts).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }) : '—');
+  function renderProfile() {
+    const p = summary || profile;
+    if (!p) return;
+    pruneHidden('profile');
+    addPreview($('pfAvatar'), Object.assign({}, p.equipped), 'all', { owner: 'profile', size: 120, r: 28, name: p.name });
+    $('pfName').textContent = p.name;
+    $('pfRankLine').textContent = p.rank ? `🏆 Место в рейтинге: #${p.rank}` : '🏆 Пока без места в рейтинге — соберите первую сферу';
+    $('pfSince').textContent = 'Аккаунт создан: ' + fmtDate(p.createdAt);
+    $('pfBalance').textContent = fmt(p.balance) + ' ◉';
+    $('pfTotal').textContent = fmt(p.total);
+    $('pfRank').textContent = p.rank ? '#' + fmt(p.rank) : '—';
+    $('pfTime').textContent = fmtDur(p.playMs != null ? p.playMs : (p.stats && p.stats.playMs));
+    const st = p.stats || {};
+    $('pfSessions').textContent = fmt(st.sessions || 0);
+    $('pfItems').textContent = `${fmt(p.items != null ? p.items : p.inventory.length)} · ${p.slotsUsed != null ? p.slotsUsed : p.inventory.length}/${p.slots}`;
+    $('pfReaction').textContent = st.bestReaction ? st.bestReaction + ' мс' : '—';
+    $('pfRush').textContent = st.bestRush ? st.bestRush + ' очк.' : '—';
+    $('pfGames').textContent = fmt(st.minigames || 0);
+    $('pfUpgrades').textContent = `Улучшения: магнит ${p.upgrades.magnet}/${G.UPGRADES.magnet.max} · ускорение ${p.upgrades.speed}/${G.UPGRADES.speed.max}`;
+    const inGame = stage === 'game';
+    $('pfPlay').textContent = inGame ? '▶ Продолжить' : '▶ Играть';
+    $('profileClose').classList.toggle('hidden', !inGame);
+    $('profile').classList.toggle('in-game', inGame);
+  }
+  let profileReq = 0;
+  function openProfile() {
+    if (stage !== 'game') return;
+    closeModals();
+    summary = Object.assign({}, profile, { rank: summary && summary.rank });
+    renderProfile(); $('pfError').textContent = '';
+    $('profile').classList.remove('hidden');
+    const id = ++profileReq;
+    socket.emit('profile:get', null, res => { if (res && res.ok && id === profileReq) { summary = res.profile; renderProfile(); } });
+  }
+  function closeProfile() { if (stage === 'game') $('profile').classList.add('hidden'); }
+  function toggleProfile() { $('profile').classList.contains('hidden') ? openProfile() : closeProfile(); }
 
   // ------------------------------------------------------------ leaderboard
   const safeColor = c => (c === 'rainbow' || /^#[0-9a-fA-F]{3,8}$/.test(c) ? c : '#3ee0ff');
@@ -694,6 +878,12 @@
     $('reactionArea').classList.add('hidden'); $('rushArea').classList.add('hidden');
     $('mgResult').classList.add('hidden');
   }
+  (function gameTexts() {
+    const re = G.MINIGAMES.reaction, ru = G.MINIGAMES.rush;
+    $('reactionPrizes').textContent = G.REACTION_PRIZES.map(([ms, p]) => `<${ms} мс: ${p}`).join(' · ') + ` · пауза ${re.cooldownMs / 1000} с`;
+    $('rushPrizes').textContent = `Выплата: ${Math.round(ru.payoutRate * 100)}% от очков, не больше ${ru.maxPrize} сфер · пауза ${ru.cooldownMs / 1000} с`;
+    document.querySelectorAll('[data-game]').forEach(b => { b.textContent = `Играть — взнос ${G.MINIGAMES[b.dataset.game].fee} ◉`; });
+  })();
   function updateGameButtons() {
     document.querySelectorAll('[data-game]').forEach(b => { const fee = G.MINIGAMES[b.dataset.game].fee; b.disabled = !!mgRunning || !profile || profile.balance < fee; });
   }

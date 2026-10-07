@@ -1,4 +1,4 @@
-// Headless Chrome UI check + screenshots (login, desktop chat, mobile chat closed/open).
+// Headless Chrome UI check + screenshots (login, profile, inventory, shop, desktop chat, mobile chat closed/open).
 //   node test/screenshot.js          -> seeds demo accounts into a temp file and starts its own server on :3102
 //   node test/screenshot.js <url>    -> uses a running server (demo accounts must exist there)
 const { chromium } = require('playwright-core');
@@ -12,13 +12,15 @@ const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) { fails
 const PW = 'demo-pass-123';
 const CHROME = process.env.CHROME || ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find(p => fs.existsSync(p));
 
-async function startOwnServer() {
-  const file = path.join(os.tmpdir(), 'ocs-demo-' + process.pid + '.json');
-  execFileSync(process.execPath, [path.join(__dirname, 'seed-demo.js'), file], { stdio: 'inherit' });
-  const proc = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: Object.assign({}, process.env, { PORT: '3102', DATA_FILE: file, DATABASE_URL: '' }), stdio: 'ignore' });
-  for (let i = 0; i < 100; i++) { try { if ((await fetch('http://localhost:3102/api/health')).ok) break; } catch (_) { /* wait */ } await sleep(200); }
-  return { url: 'http://localhost:3102', stop: () => { proc.kill('SIGTERM'); fs.rmSync(file, { force: true }); } };
+async function startOwnServer(port, env = {}, seed = true) {
+  try { await fetch(`http://localhost:${port}/api/health`); throw new Error(`port ${port} is already in use`); } catch (e) { if (/in use/.test(e.message)) throw e; }
+  const file = path.join(os.tmpdir(), `ocs-demo-${process.pid}-${port}.json`);
+  if (seed) execFileSync(process.execPath, [path.join(__dirname, 'seed-demo.js'), file], { stdio: 'inherit' });
+  const proc = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: Object.assign({}, process.env, { PORT: String(port), DATA_FILE: file, DATABASE_URL: '' }, env), stdio: 'ignore' });
+  for (let i = 0; i < 100; i++) { try { if ((await fetch(`http://localhost:${port}/api/health`)).ok) break; } catch (_) { /* wait */ } await sleep(200); }
+  return { url: `http://localhost:${port}`, stop: () => { proc.kill('SIGTERM'); fs.rmSync(file, { force: true }); } };
 }
+const shot = (page, name) => page.screenshot({ path: path.join(ROOT, name) });
 
 function bot(url, name) {
   const s = io(url, { transports: ['websocket'], forceNew: true });
@@ -44,7 +46,7 @@ function bot(url, name) {
 }
 
 (async () => {
-  const own = process.argv[2] ? null : await startOwnServer();
+  const own = process.argv[2] ? null : await startOwnServer(3102);
   const URL = process.argv[2] || own.url;
   const browser = await chromium.launch({ executablePath: CHROME, args: ['--no-sandbox', '--use-gl=swiftshader', '--enable-unsafe-swiftshader'] });
   const errors = [];
@@ -71,10 +73,29 @@ function bot(url, name) {
   ok(/Неверный ник или пароль/.test(await desk.textContent('#joinError')), 'wrong password message shown');
   await desk.fill('#pass', PW);
   await desk.click('#authSubmit');
-  await desk.waitForSelector('#hud:not(.hidden)', { timeout: 10000 });
-  ok(await desk.isVisible('#chat') && !(await desk.isVisible('#chatBtn')), 'desktop: chat panel visible, mobile chat button hidden');
+  // ---------------- profile screen (after login, before the arena)
+  await desk.waitForSelector('#profile:not(.hidden)', { timeout: 10000 });
+  ok(!(await desk.isVisible('#hud')), 'login opens the profile screen, not the arena');
   const token = await desk.evaluate(() => localStorage.getItem('ocs_session'));
   ok(/^[A-Za-z0-9_-]{43}$/.test(token || ''), 'session token stored in localStorage');
+  const pf = await desk.evaluate(() => Object.fromEntries(['pfName', 'pfRank', 'pfBalance', 'pfTotal', 'pfTime', 'pfSessions', 'pfItems', 'pfReaction', 'pfRush', 'pfSince'].map(id => [id, document.getElementById(id).textContent])));
+  ok(pf.pfName === 'Demo' && pf.pfRank === '#1' && /2\s?450/.test(pf.pfBalance) && /48\s?210/.test(pf.pfTotal) && /11 ч 25 мин/.test(pf.pfTime) && pf.pfSessions === '27'
+    && /^17 · 15\/100$/.test(pf.pfItems) && pf.pfReaction === '231 мс' && /34/.test(pf.pfRush) && /создан/.test(pf.pfSince), 'profile shows rank, balance, total, play time, sessions, items, best results: ' + JSON.stringify(pf));
+  const avatarPixels = await desk.evaluate(() => { const c = document.getElementById('pfAvatar'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 0) n++; return n; });
+  ok(avatarPixels > 2000, `equipped look preview is drawn (${avatarPixels} px)`);
+  for (const id of ['pfPlay', 'pfInv', 'pfLogout']) ok(await desk.isVisible('#' + id), `profile button #${id} visible`);
+  await shot(desk, 'screenshot-profile.png');
+  await desk.click('#pfInv');
+  await sleep(300);
+  ok(await desk.isVisible('#inv') && /Занято 15\/100/.test(await desk.textContent('#invCount')), 'Инвентарь opens from the profile: ' + await desk.textContent('#invCount'));
+  await desk.keyboard.press('Escape');
+  await sleep(150);
+  ok(!(await desk.isVisible('#inv')) && await desk.isVisible('#profile'), 'closing the inventory returns to the profile');
+  await desk.click('#pfPlay');
+  await desk.waitForSelector('#hud:not(.hidden)', { timeout: 10000 });
+  ok(!(await desk.isVisible('#profile')), 'Играть enters the arena');
+  ok(await desk.isVisible('#chat') && !(await desk.isVisible('#chatBtn')), 'desktop: chat panel visible, mobile chat button hidden');
+  ok(/следующая очистка в \d\d:\d\d/.test(await desk.textContent('#chatLog')), 'chat shows when it is cleared next');
 
   // bots
   const bots = ['Kometa', 'StarGazer', 'Nova_7'].map(n => bot(URL, n));
@@ -120,7 +141,52 @@ function bot(url, name) {
   ok(await desk.evaluate(() => document.activeElement.id !== 'chatInput'), 'Esc leaves the chat input');
   await desk.keyboard.press('KeyB'); await sleep(300);
   ok(await desk.isVisible('#shop'), 'hotkey B works again after leaving chat');
+  // ---------------- shop: only sells; bought items land in the inventory
+  await sleep(300);
+  const shopState = await desk.evaluate(() => Array.from(document.querySelectorAll('#shopGrid .item')).map(e => [e.querySelector('.name').textContent, e.querySelector('button').textContent, e.querySelector('button').disabled]));
+  ok(shopState.length === 6 && !shopState.some(([n]) => n === 'Бирюзовый') && shopState.filter(x => /В инвентаре/.test(x[1])).length === 4 && shopState.some(x => /Купить · 2\s?400/.test(x[1]) && !x[2]),
+    'shop lists only paid items with prices; owned ones say «В инвентаре»: ' + shopState.map(x => x[0] + '=' + x[1]).join(', '));
+  await shot(desk, 'screenshot-shop.png');
+  const hudBal = () => desk.evaluate(() => Number(document.querySelector('#hudBalance').textContent.replace(/\s/g, '')));
+  const violetBtn = desk.locator('#shopGrid .item', { hasText: 'Фиолетовый' }).locator('button');
+  const balBefore = await hudBal();
+  await violetBtn.click();
+  await sleep(500);
+  ok(/В инвентаре/.test(await violetBtn.textContent()) && /Куплено: Фиолетовый/.test(await desk.textContent('#toasts')), 'purchase confirmed, item marked «В инвентаре»');
+  const balAfter = await hudBal();
+  ok(balAfter <= balBefore - 400 + 30 && balAfter >= balBefore - 400, `balance reduced by 400 (${balBefore} → ${balAfter}; the player may pick up a few orbs meanwhile)`);
   await desk.keyboard.press('Escape');
+  // ---------------- inventory (hotkey I)
+  await desk.keyboard.press('KeyI'); await sleep(400);
+  ok(await desk.isVisible('#inv') && /Занято 16\/100/.test(await desk.textContent('#invCount')), 'hotkey I opens the inventory with the new item: ' + await desk.textContent('#invCount'));
+  const shardQty = await desk.evaluate(() => { const e = document.querySelector('#invGrid [data-item=x_legend_shard] .qty'); return e && e.textContent; });
+  ok(shardQty === '×3', 'stackable item shows its quantity: ' + shardQty);
+  const violet = desk.locator('#invGrid [data-item=c_violet] button');
+  ok(/Надеть/.test(await violet.textContent()), 'new item can be equipped from the inventory');
+  await violet.click(); await sleep(500);
+  const demoId = bots[0].ids.get('Demo');
+  ok(/Снять/.test(await violet.textContent()), 'button switches to «Снять» after equipping');
+  await desk.evaluate(() => { document.querySelector('#inv .modal-card').scrollTop = 0; });
+  await sleep(3400); // let the toasts fade
+  await shot(desk, 'screenshot-inventory.png');
+  await desk.click('#invTabs .tab[data-tab=hat]'); await sleep(200);
+  ok(await desk.evaluate(() => Array.from(document.querySelectorAll('#invGrid .item')).every(e => ['h_cap', 'h_tophat', 'h_crown'].includes(e.dataset.item))), 'category tabs filter the inventory');
+  await desk.click('#invTabs .tab[data-tab=all]'); await sleep(200);
+  await desk.locator('#invGrid [data-item=c_violet] button').click(); await sleep(400);
+  ok(/Надеть/.test(await desk.locator('#invGrid [data-item=c_violet] button').textContent()), 'unequip from the inventory');
+  await desk.locator('#invGrid [data-item=c_rainbow] button').click(); await sleep(300);
+  await desk.keyboard.press('Escape');
+  // ---------------- in-game profile (hotkey P / name button)
+  await desk.keyboard.press('KeyP'); await sleep(900);
+  ok(await desk.isVisible('#profile') && await desk.isVisible('#profileClose') && /Продолжить/.test(await desk.textContent('#pfPlay')), 'hotkey P opens the profile in game');
+  const pfBal = Number((await desk.textContent('#pfBalance')).replace(/[^0-9]/g, ''));
+  ok(Math.abs(pfBal - await hudBal()) <= 30 && /^18 · 16\/100$/.test(await desk.textContent('#pfItems')), `in-game profile is up to date: balance ${pfBal}, items ${await desk.textContent('#pfItems')}`);
+  await desk.click('#pfPlay'); await sleep(200);
+  ok(!(await desk.isVisible('#profile')) && await desk.isVisible('#hud'), 'Продолжить returns to the game');
+  await desk.click('#hudName'); await sleep(300);
+  ok(await desk.isVisible('#profile'), 'name button in the HUD opens the profile');
+  await desk.keyboard.press('Escape'); await sleep(150);
+  ok(!(await desk.isVisible('#profile')), 'Esc closes the in-game profile');
 
   // ---------------- mobile
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true,
@@ -132,7 +198,15 @@ function bot(url, name) {
   await mob.screenshot({ path: path.join(ROOT, 'screenshot-login-mobile.png') });
   await mob.fill('#nick', 'Mobile_Max'); await mob.fill('#pass', PW);
   await mob.tap('#authSubmit');
+  await mob.waitForSelector('#profile:not(.hidden)', { timeout: 10000 });
+  await sleep(500);
+  const pcard = await mob.locator('.profile-card').boundingBox(), pbtn = await mob.locator('#pfPlay').boundingBox();
+  ok(pcard && pcard.width <= 390 && pbtn && pbtn.y + pbtn.height <= 844 && pbtn.height >= 40, `mobile profile fits the screen, «Играть» reachable (card ${pcard && Math.round(pcard.width)}px, button bottom ${pbtn && Math.round(pbtn.y + pbtn.height)})`);
+  await shot(mob, 'screenshot-profile-mobile.png');
+  await mob.tap('#pfPlay');
   await mob.waitForSelector('#hud:not(.hidden)', { timeout: 10000 });
+  const mb = await mob.locator('.menu-buttons').boundingBox();
+  ok(mb && mb.x >= 0 && mb.x + mb.width <= 390, `mobile menu (4 buttons) fits the screen width (${mb && Math.round(mb.width)}px)`);
   ok(await mob.isVisible('#chatBtn') && !(await mob.isVisible('#chat')), 'mobile: chat collapsed to a button');
   await sleep(1700);
   await bots[0].say('Mobile_Max, давай к нам на север!');
@@ -178,18 +252,32 @@ function bot(url, name) {
   ok(ib && ib.y + ib.height <= 500, `input stays visible when the keyboard shrinks the viewport (input bottom ${ib && Math.round(ib.y + ib.height)} ≤ 500)`);
   await mob.setViewportSize({ width: 390, height: 844 });
   await mob.tap('#chatClose');
+  // mobile inventory
+  await mob.tap('.menu-buttons [data-open=inv]');
+  await sleep(600);
+  const ig = await mob.locator('#inv .modal-card').boundingBox();
+  const cols = await mob.evaluate(() => getComputedStyle(document.getElementById('invGrid')).gridTemplateColumns.split(' ').length);
+  ok(await mob.isVisible('#inv') && ig && ig.width <= 390 && cols >= 3, `mobile inventory: bottom sheet ${ig && Math.round(ig.width)}px wide, ${cols}-column grid`);
+  await shot(mob, 'screenshot-inventory-mobile.png');
+  await mob.tap('#inv .close');
 
-  // second tab with the same session kicks the first; «Играть» in the first tab takes the session back
+  // opening the site with a saved session shows the profile first; «Играть» there kicks the other tab
   const tab2 = await deskCtx.newPage();
   watch(tab2);
   await tab2.goto(URL);
+  await tab2.waitForSelector('#profile:not(.hidden)', { timeout: 10000 });
+  await sleep(500);
+  ok(!(await tab2.isVisible('#hud')) && await desk.isVisible('#hud'), 'page load with a valid session → profile screen (the game in the other tab keeps running)');
+  await tab2.click('#pfPlay');
   await tab2.waitForSelector('#hud:not(.hidden)', { timeout: 10000 });
   await desk.waitForSelector('#resumeBox:not(.hidden)', { timeout: 5000 });
-  ok(/другой вкладки/.test(await desk.textContent('#joinError')), 'first tab kicked with a message: ' + await desk.textContent('#joinError'));
+  ok(/другой вкладки/.test(await desk.textContent('#resumeText')), 'first tab kicked with a message: ' + await desk.textContent('#resumeText'));
   await desk.click('#resumeBtn');
+  await desk.waitForSelector('#profile:not(.hidden)', { timeout: 10000 });
+  await desk.click('#pfPlay');
   await desk.waitForSelector('#hud:not(.hidden)', { timeout: 10000 });
   await tab2.waitForSelector('#start:not(.hidden)', { timeout: 5000 });
-  ok(true, '«Играть» reconnects the kicked tab and the other tab is kicked instead');
+  ok(true, 'kicked tab → «Продолжить» → profile → «Играть» takes the session back');
   await tab2.close();
 
   // logout
@@ -200,6 +288,26 @@ function bot(url, name) {
   const rr = await new Promise(r => s.emit('resume', { token }, r));
   ok(!rr.ok, 'logged-out token can no longer be used');
   s.close();
+
+  // chat auto-clear in the UI (separate server with a 4 s cycle)
+  const cyc = process.argv[2] ? null : await startOwnServer(3105, { CHAT_CLEAR_MS: '4000' }, false);
+  if (cyc) {
+    const cp = await deskCtx.newPage();
+    watch(cp);
+    await cp.goto(cyc.url); await sleep(500);
+    await cp.click('.auth-tab[data-mode=register]');
+    await cp.fill('#nick', 'Clear_Test'); await cp.fill('#pass', PW); await cp.fill('#pass2', PW);
+    await cp.click('#authSubmit');
+    await cp.waitForSelector('#profile:not(.hidden)', { timeout: 10000 });
+    await cp.click('#pfPlay');
+    await cp.waitForSelector('#hud:not(.hidden)', { timeout: 10000 });
+    await cp.fill('#chatInput', 'это сообщение исчезнет'); await cp.keyboard.press('Enter');
+    await cp.waitForFunction(() => /Чат очищен/.test(document.getElementById('chatLog').textContent), null, { timeout: 9000 });
+    const log = await cp.textContent('#chatLog');
+    ok(!/исчезнет/.test(log) && /Чат очищен · следующая очистка в \d\d:\d\d/.test(log), 'chat clears itself and shows «Чат очищен» + next clear time: ' + log);
+    await cp.close();
+    cyc.stop();
+  }
 
   const cspErrors = errors.filter(e => /Content Security Policy|Refused to/i.test(e));
   ok(cspErrors.length === 0, 'no CSP violations');

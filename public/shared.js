@@ -7,9 +7,9 @@
   const STEP_DT = TICK_MS / 1000;
 
   const ORB_TYPES = {
-    c: { key: 'c', name: 'Обычная', value: 1, r: 7, color: '#3ee0ff', glow: 'rgba(62,224,255,', weight: 85 },
-    r: { key: 'r', name: 'Редкая', value: 5, r: 10, color: '#b46bff', glow: 'rgba(180,107,255,', weight: 13 },
-    l: { key: 'l', name: 'Легендарная', value: 25, r: 14, color: '#ffcc33', glow: 'rgba(255,204,51,', weight: 2 },
+    c: { key: 'c', name: 'Обычная', value: 1, r: 7, color: '#3ee0ff', glow: 'rgba(62,224,255,', weight: 90 },
+    r: { key: 'r', name: 'Редкая', value: 5, r: 10, color: '#b46bff', glow: 'rgba(180,107,255,', weight: 10 },
+    l: { key: 'l', name: 'Легендарная', value: 25, r: 14, color: '#ffcc33', glow: 'rgba(255,204,51,', weight: 0 },
   };
 
   const CATEGORIES = [
@@ -20,54 +20,76 @@
     { key: 'hat', name: 'Шапки' },
   ];
 
+  // ---------------------------------------------------------------- item model
+  // Every item: id, type ('cosmetic' | 'collectible'), cat, name, rarity ('common'|'rare'|'epic'|'legendary'),
+  // stackable, maxStack, sources (where it can come from: base | shop | minigame | arena | event | admin),
+  // price (shop price in orbs, only when sources includes 'shop'), value (visual parameter for cosmetics).
+  // Base items (price 0) are always available to everyone and never occupy inventory slots.
+  const RARITIES = {
+    common: { name: 'Обычный', color: '#9fb3d9' },
+    rare: { name: 'Редкий', color: '#3ee0ff' },
+    epic: { name: 'Эпический', color: '#b46bff' },
+    legendary: { name: 'Легендарный', color: '#ffcc33' },
+  };
+  const C = (id, cat, name, price, rarity, value) => ({ id, type: 'cosmetic', cat, name, price, rarity, value,
+    stackable: false, maxStack: 1, base: price === 0, sources: price === 0 ? ['base'] : ['shop', 'event', 'admin'] });
   const ITEMS = [
     // colors
-    { id: 'c_cyan', cat: 'color', name: 'Бирюзовый', price: 0, value: '#3ee0ff' },
-    { id: 'c_coral', cat: 'color', name: 'Коралловый', price: 25, value: '#ff6b6b' },
-    { id: 'c_lime', cat: 'color', name: 'Лаймовый', price: 25, value: '#9dff4f' },
-    { id: 'c_violet', cat: 'color', name: 'Фиолетовый', price: 50, value: '#a66bff' },
-    { id: 'c_pink', cat: 'color', name: 'Неоново-розовый', price: 75, value: '#ff5fd2' },
-    { id: 'c_gold', cat: 'color', name: 'Золотой', price: 250, value: '#ffcc33' },
-    { id: 'c_rainbow', cat: 'color', name: 'Радужный', price: 600, value: 'rainbow' },
+    C('c_cyan', 'color', 'Бирюзовый', 0, 'common', '#3ee0ff'),
+    C('c_coral', 'color', 'Коралловый', 150, 'common', '#ff6b6b'),
+    C('c_lime', 'color', 'Лаймовый', 150, 'common', '#9dff4f'),
+    C('c_violet', 'color', 'Фиолетовый', 400, 'rare', '#a66bff'),
+    C('c_pink', 'color', 'Неоново-розовый', 700, 'rare', '#ff5fd2'),
+    C('c_gold', 'color', 'Золотой', 2400, 'epic', '#ffcc33'),
+    C('c_rainbow', 'color', 'Радужный', 15000, 'legendary', 'rainbow'),
     // shapes
-    { id: 's_circle', cat: 'shape', name: 'Круг', price: 0, value: 'circle' },
-    { id: 's_square', cat: 'shape', name: 'Квадрат', price: 80, value: 'square' },
-    { id: 's_triangle', cat: 'shape', name: 'Треугольник', price: 120, value: 'triangle' },
-    { id: 's_hexagon', cat: 'shape', name: 'Шестиугольник', price: 180, value: 'hexagon' },
-    { id: 's_star', cat: 'shape', name: 'Звезда', price: 300, value: 'star' },
+    C('s_circle', 'shape', 'Круг', 0, 'common', 'circle'),
+    C('s_square', 'shape', 'Квадрат', 400, 'common', 'square'),
+    C('s_triangle', 'shape', 'Треугольник', 800, 'rare', 'triangle'),
+    C('s_hexagon', 'shape', 'Шестиугольник', 1400, 'rare', 'hexagon'),
+    C('s_star', 'shape', 'Звезда', 4000, 'epic', 'star'),
     // trails
-    { id: 't_none', cat: 'trail', name: 'Без следа', price: 0, value: 'none' },
-    { id: 't_sparks', cat: 'trail', name: 'Искры', price: 100, value: 'sparks' },
-    { id: 't_neon', cat: 'trail', name: 'Неоновый шлейф', price: 200, value: 'neon' },
-    { id: 't_fire', cat: 'trail', name: 'Огненный след', price: 400, value: 'fire' },
+    C('t_none', 'trail', 'Без следа', 0, 'common', 'none'),
+    C('t_sparks', 'trail', 'Искры', 1000, 'rare', 'sparks'),
+    C('t_neon', 'trail', 'Неоновый шлейф', 2800, 'epic', 'neon'),
+    C('t_fire', 'trail', 'Огненный след', 12000, 'legendary', 'fire'),
     // name colors
-    { id: 'n_white', cat: 'nameColor', name: 'Белый ник', price: 0, value: '#ffffff' },
-    { id: 'n_pink', cat: 'nameColor', name: 'Розовый ник', price: 40, value: '#ff8bd8' },
-    { id: 'n_gold', cat: 'nameColor', name: 'Золотой ник', price: 150, value: '#ffd34d' },
-    { id: 'n_rainbow', cat: 'nameColor', name: 'Радужный ник', price: 450, value: 'rainbow' },
+    C('n_white', 'nameColor', 'Белый ник', 0, 'common', '#ffffff'),
+    C('n_pink', 'nameColor', 'Розовый ник', 300, 'common', '#ff8bd8'),
+    C('n_gold', 'nameColor', 'Золотой ник', 1800, 'epic', '#ffd34d'),
+    C('n_rainbow', 'nameColor', 'Радужный ник', 9000, 'legendary', 'rainbow'),
     // hats
-    { id: 'h_none', cat: 'hat', name: 'Без шапки', price: 0, value: 'none' },
-    { id: 'h_cap', cat: 'hat', name: 'Кепка', price: 90, value: 'cap' },
-    { id: 'h_tophat', cat: 'hat', name: 'Цилиндр', price: 220, value: 'tophat' },
-    { id: 'h_halo', cat: 'hat', name: 'Нимб', price: 350, value: 'halo' },
-    { id: 'h_crown', cat: 'hat', name: 'Корона', price: 500, value: 'crown' },
+    C('h_none', 'hat', 'Без шапки', 0, 'common', 'none'),
+    C('h_cap', 'hat', 'Кепка', 500, 'common', 'cap'),
+    C('h_tophat', 'hat', 'Цилиндр', 1500, 'rare', 'tophat'),
+    C('h_halo', 'hat', 'Нимб', 3200, 'epic', 'halo'),
+    C('h_crown', 'hat', 'Корона', 20000, 'legendary', 'crown'),
+    // collectibles (not sold; example of a non-shop, stackable item)
+    { id: 'x_legend_shard', type: 'collectible', cat: 'misc', name: 'Легендарный осколок', rarity: 'legendary', icon: '✦',
+      desc: 'Выпадает из легендарных сфер. Пока коллекционный.', stackable: true, maxStack: 99, base: false, price: null,
+      sources: ['arena', 'event', 'admin'] },
   ];
   const ITEM_BY_ID = {};
   for (const it of ITEMS) ITEM_BY_ID[it.id] = it;
+  const INV_SLOTS = 100;
+  const INV_CATEGORIES = CATEGORIES.concat([{ key: 'misc', name: 'Прочее' }]);
 
   const DEFAULT_EQUIPPED = { color: 'c_cyan', shape: 's_circle', trail: 't_none', nameColor: 'n_white', hat: 'h_none' };
-  const DEFAULT_OWNED = ITEMS.filter(i => i.price === 0).map(i => i.id);
+  const DEFAULT_OWNED = ITEMS.filter(i => i.base).map(i => i.id);
 
+  // Upgrades are optional: each level costs more, the bonus is a convenience, not a requirement.
   const UPGRADES = {
-    magnet: { key: 'magnet', name: 'Магнит', desc: '+14 к радиусу сбора сфер за уровень', max: 5, prices: [40, 100, 200, 350, 550] },
-    speed: { key: 'speed', name: 'Ускорение', desc: '+6% к скорости за уровень', max: 5, prices: [60, 150, 300, 500, 800] },
+    magnet: { key: 'magnet', name: 'Магнит', desc: '+14 к радиусу сбора сфер за уровень', max: 5, prices: [300, 700, 1500, 3000, 6000] },
+    speed: { key: 'speed', name: 'Ускорение', desc: '+6% к скорости за уровень', max: 5, prices: [400, 900, 1800, 3600, 7200] },
   };
 
+  // Mini-games are for fun and skill, not a better income than collecting orbs (see README "Economy").
   const MINIGAMES = {
-    reaction: { key: 'reaction', name: 'Реакция', fee: 10 },
-    rush: { key: 'rush', name: 'Сферный шторм', fee: 15, duration: 20000, w: 600, h: 400 },
+    reaction: { key: 'reaction', name: 'Реакция', fee: 10, cooldownMs: 15000 },
+    rush: { key: 'rush', name: 'Сферный шторм', fee: 20, duration: 20000, w: 600, h: 400, payoutRate: 0.75, maxPrize: 40, cooldownMs: 20000 },
   };
-  const REACTION_PRIZES = [ [300, 25], [400, 18], [550, 12], [800, 6] ]; // [ms threshold, prize]
+  const REACTION_PRIZES = [ [250, 16], [320, 12], [400, 10], [550, 6], [750, 3] ]; // [ms threshold, prize]
+  const rushPrize = score => Math.max(0, Math.min(MINIGAMES.rush.maxPrize, Math.floor(score * MINIGAMES.rush.payoutRate)));
 
   function speedFor(level) { return BASE_SPEED * (1 + 0.06 * (level || 0)); }
   function pickupFor(level) { return PLAYER_R + 14 * (level || 0); }
@@ -86,8 +108,8 @@
   }
 
   const api = {
-    WORLD, PLAYER_R, BASE_SPEED, TICK_MS, STEP_DT, ORB_TYPES, CATEGORIES, ITEMS, ITEM_BY_ID,
-    DEFAULT_EQUIPPED, DEFAULT_OWNED, UPGRADES, MINIGAMES, REACTION_PRIZES, speedFor, pickupFor, applyInput,
+    WORLD, PLAYER_R, BASE_SPEED, TICK_MS, STEP_DT, ORB_TYPES, CATEGORIES, INV_CATEGORIES, RARITIES, ITEMS, ITEM_BY_ID, INV_SLOTS,
+    DEFAULT_EQUIPPED, DEFAULT_OWNED, UPGRADES, MINIGAMES, REACTION_PRIZES, rushPrize, speedFor, pickupFor, applyInput,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.G = api;

@@ -18,7 +18,7 @@
     <div id="resumeBox" class="resume hidden">
       <div id="resumeText" class="resume-text">Входим…</div>
       <div class="resume-actions">
-        <button type="button" id="resumeBtn" class="btn primary big">Играть</button>
+        <button type="button" id="resumeBtn" class="btn primary big">Продолжить</button>
         <button type="button" id="resumeLogout" class="btn">Выйти</button>
       </div>
     </div>
@@ -41,8 +41,41 @@
       <span><i class="dot r"></i>Редкая&nbsp;+5</span>
       <span><i class="dot l"></i>Легендарная&nbsp;+25</span>
     </div>
-    <div class="hint">Управление: <b>WASD</b> / <b>стрелки</b>, или зажмите мышь / палец — персонаж идёт за курсором.<br>Горячие клавиши: <b>B</b> — магазин, <b>M</b> — мини-игры, <b>L</b> — рейтинг, <b>Enter</b> / <b>T</b> — чат.</div>
+    <div class="hint">Управление: <b>WASD</b> / <b>стрелки</b>, или зажмите мышь / палец — персонаж идёт за курсором.<br>Горячие клавиши: <b>P</b> — профиль, <b>I</b> — инвентарь, <b>B</b> — магазин, <b>M</b> — мини-игры, <b>L</b> — рейтинг, <b>Enter</b> / <b>T</b> — чат.</div>
     <div class="mini-lb"><h3>🏆 Лучшие сборщики</h3><ol id="startLb"><li class="muted">Загрузка…</li></ol></div>
+  </div>
+</div>
+
+<!-- Profile: shown after login / on page load with a saved session, and in-game via the profile button or P -->
+<div id="profile" class="overlay profile-ov hidden">
+  <div class="profile-card">
+    <div class="modal-head"><h2>👤 Профиль</h2><button type="button" id="profileClose" class="close hidden" aria-label="Закрыть профиль">✕</button></div>
+    <div class="pf-top">
+      <canvas id="pfAvatar" width="240" height="240" aria-label="Ваш персонаж"></canvas>
+      <div class="pf-id">
+        <div id="pfName" class="pf-name"></div>
+        <div id="pfRankLine" class="pf-rank"></div>
+        <div id="pfSince" class="muted"></div>
+      </div>
+    </div>
+    <div class="pf-stats">
+      <div><span>Баланс</span><b id="pfBalance">0</b></div>
+      <div><span>Собрано за всё время</span><b id="pfTotal">0</b></div>
+      <div><span>Место в рейтинге</span><b id="pfRank">—</b></div>
+      <div><span>Время в игре</span><b id="pfTime">0 мин</b></div>
+      <div><span>Сессий</span><b id="pfSessions">0</b></div>
+      <div><span>Предметов · ячеек занято</span><b id="pfItems">0</b></div>
+      <div><span>Лучшая реакция</span><b id="pfReaction">—</b></div>
+      <div><span>Рекорд «Сферного шторма»</span><b id="pfRush">—</b></div>
+      <div><span>Сыграно мини-игр</span><b id="pfGames">0</b></div>
+    </div>
+    <div id="pfUpgrades" class="pf-upg muted"></div>
+    <div class="pf-actions">
+      <button type="button" id="pfPlay" class="btn primary big">▶ Играть</button>
+      <button type="button" id="pfInv" class="btn big">🎒 Инвентарь</button>
+      <button type="button" id="pfLogout" class="btn">Выйти</button>
+    </div>
+    <div id="pfError" class="error" role="alert"></div>
   </div>
 </div>
 
@@ -53,16 +86,17 @@
     <div class="row">Всего собрано: <b id="hudTotal">0</b></div>
     <div class="row">За сессию: <b id="hudSession">0</b></div>
     <div class="row online"><i class="live"></i>Онлайн: <b id="hudOnline">1</b></div>
-    <div class="row who"><span id="hudName"></span><button type="button" id="logoutBtn" class="link-btn">Выйти</button></div>
+    <div class="row who"><button type="button" id="hudName" class="link-btn name-btn" title="Профиль (P)"></button><button type="button" id="logoutBtn" class="link-btn">Выйти</button></div>
   </div>
   <div class="panel top">
     <h4>Топ арены</h4>
     <ol id="hudTop"></ol>
   </div>
   <div class="menu-buttons">
-    <button class="btn" data-open="shop">🛒 Магазин</button>
-    <button class="btn" data-open="games">🎮 Мини-игры</button>
-    <button class="btn" data-open="lb">🏆 Рейтинг</button>
+    <button class="btn" data-open="shop" title="Магазин (B)"><i>🛒</i><span>Магазин</span></button>
+    <button class="btn" data-open="inv" title="Инвентарь (I)"><i>🎒</i><span>Инвентарь</span></button>
+    <button class="btn" data-open="games" title="Мини-игры (M)"><i>🎮</i><span>Мини-игры</span></button>
+    <button class="btn" data-open="lb" title="Рейтинг (L)"><i>🏆</i><span>Рейтинг</span></button>
   </div>
   <canvas id="minimap" width="150" height="150"></canvas>
 </div>
@@ -85,8 +119,19 @@
 <div id="shop" class="modal hidden">
   <div class="modal-card wide">
     <div class="modal-head"><h2>🛒 Магазин</h2><div class="pill"><i class="dot c"></i><span class="bal">0</span></div><button class="close">✕</button></div>
+    <p class="muted note">Купленные предметы попадают в <b>инвентарь</b> — надеть их можно там (кнопка «Инвентарь» или клавиша I).</p>
     <div class="tabs" id="shopTabs"></div>
     <div class="grid" id="shopGrid"></div>
+  </div>
+</div>
+
+<!-- Inventory -->
+<div id="inv" class="modal hidden">
+  <div class="modal-card wide">
+    <div class="modal-head"><h2>🎒 Инвентарь</h2><div class="pill" id="invCount">0/100</div><button class="close" aria-label="Закрыть">✕</button></div>
+    <div class="inv-meter"><div id="invMeter"></div></div>
+    <div class="tabs" id="invTabs"></div>
+    <div class="grid inv-grid" id="invGrid"></div>
   </div>
 </div>
 
@@ -94,20 +139,21 @@
 <div id="games" class="modal hidden">
   <div class="modal-card wide">
     <div class="modal-head"><h2>🎮 Мини-игры</h2><div class="pill"><i class="dot c"></i><span class="bal">0</span></div><button class="close">✕</button></div>
+    <p class="muted note">Мини-игры — для развлечения: в среднем они приносят меньше, чем сбор сфер на арене.</p>
     <div id="gamesList" class="games-list">
       <div class="game-card">
         <div class="game-icon">⚡</div>
         <h3>Реакция</h3>
         <p>Дождитесь зелёного экрана и нажмите как можно быстрее. Нажмёте раньше — взнос сгорит.</p>
-        <p class="prizes">&lt;300 мс: <b>25</b> · &lt;400 мс: <b>18</b> · &lt;550 мс: <b>12</b> · &lt;800 мс: <b>6</b></p>
-        <button class="btn primary" data-game="reaction">Играть — взнос 10 ◉</button>
+        <p class="prizes" id="reactionPrizes"></p>
+        <button class="btn primary" data-game="reaction">Играть</button>
       </div>
       <div class="game-card">
         <div class="game-icon">🌀</div>
         <h3>Сферный шторм</h3>
-        <p>20 секунд: кликайте (тапайте) по появляющимся сферам. Голубая +1, золотая +3, красная бомба −3. Очки = выигрыш в сферах.</p>
-        <p class="prizes">Хороший результат: 25–40 сфер</p>
-        <button class="btn primary" data-game="rush">Играть — взнос 15 ◉</button>
+        <p>20 секунд: кликайте (тапайте) по появляющимся сферам. Голубая +1, золотая +3, красная бомба −3.</p>
+        <p class="prizes" id="rushPrizes"></p>
+        <button class="btn primary" data-game="rush">Играть</button>
       </div>
     </div>
     <div id="reactionArea" class="mg-area hidden"><div id="reactionBox" class="reaction-box">Ждите зелёного…</div></div>
