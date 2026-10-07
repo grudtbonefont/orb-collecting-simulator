@@ -130,8 +130,33 @@
   <div class="modal-card wide">
     <div class="modal-head"><h2>🎒 Инвентарь</h2><div class="pill" id="invCount">0/100</div><button class="close" aria-label="Закрыть">✕</button></div>
     <div class="inv-meter"><div id="invMeter"></div></div>
-    <div class="tabs" id="invTabs"></div>
+    <div class="inv-bar"><div class="tabs" id="invTabs"></div><div id="invTrash" class="inv-trash" title="Перетащите предмет сюда, чтобы удалить">🗑 <span>Корзина</span></div></div>
     <div class="grid inv-grid" id="invGrid"></div>
+  </div>
+</div>
+
+<!-- Trash confirmation -->
+<div id="trashDlg" class="confirm-ov hidden" role="dialog" aria-modal="true" aria-labelledby="trashTitle">
+  <div class="confirm-card">
+    <h3 id="trashTitle">🗑 Удалить навсегда?</h3>
+    <div class="trash-item"><canvas id="trashPreview" width="128" height="128"></canvas><div id="trashIcon" class="big-icon"></div><b id="trashName"></b></div>
+    <p class="warn">Это нельзя отменить. Сферы не возвращаются.</p>
+    <p id="trashEquipped" class="muted hidden">Предмет сейчас надет — он будет снят, вместо него вернётся бесплатный базовый.</p>
+    <div id="trashQtyBox" class="trash-qty">
+      <label for="trashQty">Сколько удалить:</label>
+      <div class="qty-row">
+        <button type="button" id="trashMinus" class="btn" aria-label="Меньше">−</button>
+        <input id="trashQty" type="number" min="1" value="1" inputmode="numeric">
+        <button type="button" id="trashPlus" class="btn" aria-label="Больше">+</button>
+        <button type="button" id="trashAll" class="btn">Все</button>
+      </div>
+      <input id="trashRange" type="range" min="1" value="1" aria-label="Количество">
+    </div>
+    <div id="trashErr" class="error" role="alert"></div>
+    <div class="confirm-actions">
+      <button type="button" id="trashCancel" class="btn">Отмена</button>
+      <button type="button" id="trashOk" class="btn danger">Удалить</button>
+    </div>
   </div>
 </div>
 

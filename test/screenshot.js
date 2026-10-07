@@ -18,18 +18,20 @@ async function startOwnServer(port, env = {}, seed = true) {
   if (seed) execFileSync(process.execPath, [path.join(__dirname, 'seed-demo.js'), file], { stdio: 'inherit' });
   const proc = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: Object.assign({}, process.env, { PORT: String(port), DATA_FILE: file, DATABASE_URL: '' }, env), stdio: 'ignore' });
   for (let i = 0; i < 100; i++) { try { if ((await fetch(`http://localhost:${port}/api/health`)).ok) break; } catch (_) { /* wait */ } await sleep(200); }
+  process.on('exit', () => { try { proc.kill('SIGTERM'); fs.rmSync(file, { force: true }); } catch (_) { /* already gone */ } }); // also on crash
   return { url: `http://localhost:${port}`, stop: () => { proc.kill('SIGTERM'); fs.rmSync(file, { force: true }); } };
 }
 const shot = (page, name) => page.screenshot({ path: path.join(ROOT, name) });
 
 function bot(url, name) {
   const s = io(url, { transports: ['websocket'], forceNew: true });
-  const b = { s, name, id: null, pos: null, seq: 0, ids: new Map(), positions: new Map() };
+  const b = { s, name, id: null, pos: null, seq: 0, ids: new Map(), positions: new Map(), metas: new Map() };
+  s.on('pmeta', p => b.metas.set(p.id, p));
   s.on('s', st => { for (const [id, x, y] of st.p) { b.positions.set(id, { x, y }); if (id === b.id) b.pos = { x, y }; } });
   s.on('pjoin', p => b.ids.set(p.name, p.id));
   s.on('sping', v => s.emit('spong', v));
   b.login = () => new Promise(res => s.emit('auth', { mode: 'login', name, password: PW }, r => {
-    if (r && r.ok) { b.id = r.you; for (const p of r.players) { b.ids.set(p.name, p.id); if (p.id === r.you) b.pos = { x: p.x, y: p.y }; } }
+    if (r && r.ok) { b.id = r.you; for (const p of r.players) { b.ids.set(p.name, p.id); b.metas.set(p.id, p); if (p.id === r.you) b.pos = { x: p.x, y: p.y }; } }
     res(r);
   }));
   b.say = text => new Promise(res => s.emit('chat', text, res));
@@ -95,7 +97,7 @@ function bot(url, name) {
   await desk.waitForSelector('#hud:not(.hidden)', { timeout: 10000 });
   ok(!(await desk.isVisible('#profile')), 'Играть enters the arena');
   ok(await desk.isVisible('#chat') && !(await desk.isVisible('#chatBtn')), 'desktop: chat panel visible, mobile chat button hidden');
-  ok(/следующая очистка в \d\d:\d\d/.test(await desk.textContent('#chatLog')), 'chat shows when it is cleared next');
+  ok(!/очищ|очистк/i.test(await desk.textContent('#chatLog')), 'chat shows no clear schedule');
 
   // bots
   const bots = ['Kometa', 'StarGazer', 'Nova_7'].map(n => bot(URL, n));
@@ -161,7 +163,7 @@ function bot(url, name) {
   ok(await desk.isVisible('#inv') && /Занято 16\/100/.test(await desk.textContent('#invCount')), 'hotkey I opens the inventory with the new item: ' + await desk.textContent('#invCount'));
   const shardQty = await desk.evaluate(() => { const e = document.querySelector('#invGrid [data-item=x_legend_shard] .qty'); return e && e.textContent; });
   ok(shardQty === '×3', 'stackable item shows its quantity: ' + shardQty);
-  const violet = desk.locator('#invGrid [data-item=c_violet] button');
+  const violet = desk.locator('#invGrid [data-item=c_violet] button.btn');
   ok(/Надеть/.test(await violet.textContent()), 'new item can be equipped from the inventory');
   await violet.click(); await sleep(500);
   const demoId = bots[0].ids.get('Demo');
@@ -172,9 +174,9 @@ function bot(url, name) {
   await desk.click('#invTabs .tab[data-tab=hat]'); await sleep(200);
   ok(await desk.evaluate(() => Array.from(document.querySelectorAll('#invGrid .item')).every(e => ['h_cap', 'h_tophat', 'h_crown'].includes(e.dataset.item))), 'category tabs filter the inventory');
   await desk.click('#invTabs .tab[data-tab=all]'); await sleep(200);
-  await desk.locator('#invGrid [data-item=c_violet] button').click(); await sleep(400);
-  ok(/Надеть/.test(await desk.locator('#invGrid [data-item=c_violet] button').textContent()), 'unequip from the inventory');
-  await desk.locator('#invGrid [data-item=c_rainbow] button').click(); await sleep(300);
+  await desk.locator('#invGrid [data-item=c_violet] button.btn').click(); await sleep(400);
+  ok(/Надеть/.test(await desk.locator('#invGrid [data-item=c_violet] button.btn').textContent()), 'unequip from the inventory');
+  await desk.locator('#invGrid [data-item=c_rainbow] button.btn').click(); await sleep(300);
   await desk.keyboard.press('Escape');
   // ---------------- in-game profile (hotkey P / name button)
   await desk.keyboard.press('KeyP'); await sleep(900);
@@ -187,6 +189,43 @@ function bot(url, name) {
   ok(await desk.isVisible('#profile'), 'name button in the HUD opens the profile');
   await desk.keyboard.press('Escape'); await sleep(150);
   ok(!(await desk.isVisible('#profile')), 'Esc closes the in-game profile');
+  // ---------------- trash
+  await desk.keyboard.press('KeyI'); await sleep(400);
+  ok(await desk.isVisible('#invTrash') && await desk.locator('#invGrid .trash-btn').count() === 16, 'every inventory card has a 🗑 button, desktop shows a trash zone');
+  await desk.locator('#invGrid [data-item=x_legend_shard] .trash-btn').click(); await sleep(300);
+  ok(await desk.isVisible('#trashDlg') && /Удалить навсегда/.test(await desk.textContent('#trashTitle')) && /нельзя отменить/.test(await desk.textContent('#trashDlg')) && await desk.isVisible('#trashQtyBox'),
+    'stack → confirm dialog with «Удалить навсегда? Это нельзя отменить» and a quantity picker');
+  await desk.click('#trashPlus'); await desk.click('#trashPlus'); await desk.click('#trashPlus');
+  ok(await desk.inputValue('#trashQty') === '3' && /Удалить 3 шт/.test(await desk.textContent('#trashOk')), 'quantity is capped at the stack size (3)');
+  await desk.click('#trashMinus');
+  ok(await desk.inputValue('#trashQty') === '2', '− lowers the quantity');
+  await shot(desk, 'screenshot-trash-confirm.png');
+  await desk.click('#trashOk'); await sleep(500);
+  ok(!(await desk.isVisible('#trashDlg')) && await desk.textContent('#invGrid [data-item=x_legend_shard] .qty') === '×1', 'partial stack deleted (×3 → ×1)');
+  await desk.locator('#invGrid [data-item=x_legend_shard] .trash-btn').click(); await sleep(200);
+  ok(!(await desk.isVisible('#trashQtyBox')), 'no quantity picker for a single item');
+  await desk.click('#trashOk'); await sleep(500);
+  ok(await desk.locator('#invGrid [data-item=x_legend_shard]').count() === 0 && /Занято 15\/100/.test(await desk.textContent('#invCount')), 'last unit deleted → slot freed (15/100)');
+  // drag & drop onto the trash zone, then cancel
+  await desk.dragAndDrop('#invGrid [data-item=c_coral]', '#invTrash'); await sleep(300);
+  ok(await desk.isVisible('#trashDlg') && /Коралловый/.test(await desk.textContent('#trashName')), 'dragging an item onto the trash zone opens the confirmation');
+  await desk.click('#trashCancel'); await sleep(200);
+  ok(!(await desk.isVisible('#trashDlg')) && await desk.locator('#invGrid [data-item=c_coral]').count() === 1, 'Отмена keeps the item');
+  await desk.locator('#invGrid [data-item=c_coral] .trash-btn').click(); await sleep(200);
+  await desk.keyboard.press('Escape'); await sleep(200);
+  ok(!(await desk.isVisible('#trashDlg')) && await desk.isVisible('#inv'), 'Esc closes only the dialog');
+  await desk.locator('#invGrid [data-item=c_coral] .trash-btn').click(); await sleep(200);
+  await desk.click('#trashOk'); await sleep(500);
+  ok(await desk.locator('#invGrid [data-item=c_coral]').count() === 0, 'unique item deleted');
+  // equipped item
+  await desk.locator('#invGrid [data-item=c_rainbow] .trash-btn').click(); await sleep(200);
+  ok(await desk.isVisible('#trashEquipped'), 'confirmation warns that the equipped item will be taken off');
+  await desk.click('#trashOk'); await sleep(600);
+  ok(bots[0].metas.get(demoId) && bots[0].metas.get(demoId).eq.color === 'c_cyan', 'deleting the equipped color reverts to the free default (others see it)');
+  await desk.keyboard.press('Escape');
+  await desk.keyboard.press('KeyB'); await sleep(400);
+  ok(/Купить · 150/.test(await desk.locator('#shopGrid .item', { hasText: 'Коралловый' }).locator('button').textContent()), 'deleted item can be bought again in the shop');
+  await desk.keyboard.press('Escape');
 
   // ---------------- mobile
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true,
@@ -258,7 +297,13 @@ function bot(url, name) {
   const ig = await mob.locator('#inv .modal-card').boundingBox();
   const cols = await mob.evaluate(() => getComputedStyle(document.getElementById('invGrid')).gridTemplateColumns.split(' ').length);
   ok(await mob.isVisible('#inv') && ig && ig.width <= 390 && cols >= 3, `mobile inventory: bottom sheet ${ig && Math.round(ig.width)}px wide, ${cols}-column grid`);
+  ok(!(await mob.isVisible('#invTrash')) && await mob.locator('#invGrid .trash-btn').count() === 5, 'mobile: 🗑 button on every card (no drag zone)');
   await shot(mob, 'screenshot-inventory-mobile.png');
+  await mob.tap('#invGrid [data-item=s_square] .trash-btn'); await sleep(300);
+  const dlg = await mob.locator('#trashDlg .confirm-card').boundingBox();
+  ok(dlg && dlg.width <= 390 && dlg.y >= 0 && dlg.y + dlg.height <= 844, `mobile confirm dialog fits the screen (${dlg && Math.round(dlg.width)}×${dlg && Math.round(dlg.height)})`);
+  await mob.tap('#trashOk'); await sleep(500);
+  ok(await mob.locator('#invGrid [data-item=s_square]').count() === 0 && /Занято 4\/100/.test(await mob.textContent('#invCount')), 'mobile: item deleted via the 🗑 button');
   await mob.tap('#inv .close');
 
   // opening the site with a saved session shows the profile first; «Играть» there kicks the other tab
@@ -302,9 +347,11 @@ function bot(url, name) {
     await cp.click('#pfPlay');
     await cp.waitForSelector('#hud:not(.hidden)', { timeout: 10000 });
     await cp.fill('#chatInput', 'это сообщение исчезнет'); await cp.keyboard.press('Enter');
-    await cp.waitForFunction(() => /Чат очищен/.test(document.getElementById('chatLog').textContent), null, { timeout: 9000 });
-    const log = await cp.textContent('#chatLog');
-    ok(!/исчезнет/.test(log) && /Чат очищен · следующая очистка в \d\d:\d\d/.test(log), 'chat clears itself and shows «Чат очищен» + next clear time: ' + log);
+    await cp.waitForFunction(() => /исчезнет/.test(document.getElementById('chatLog').textContent), null, { timeout: 3000 });
+    await cp.waitForFunction(() => !/исчезнет/.test(document.getElementById('chatLog').textContent), null, { timeout: 9000 });
+    await sleep(300);
+    const n = await cp.evaluate(() => document.querySelectorAll('#chatLog .chat-msg').length);
+    ok(n === 0, `chat silently becomes empty on the periodic clear (${n} lines, no «очищен» notice)`);
     await cp.close();
     cyc.stop();
   }

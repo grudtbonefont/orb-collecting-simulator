@@ -216,7 +216,7 @@ function scheduleChatClear() {
   setTimeout(() => {
     chatHistory = [];
     chatClearAt = nextChatClear(Date.now() + 50);
-    io.to('arena').emit('chat:clear', { next: chatClearAt });
+    io.to('arena').emit('chat:clear'); // silent: clients just empty the log (the schedule is not shown to players)
     scheduleChatClear();
   }, Math.max(10, chatClearAt - Date.now()));
 }
@@ -457,7 +457,7 @@ io.on('connection', socket => {
       you: pl.id, profile: ownProfile(acc), world: G.WORLD,
       orbs: Array.from(orbs.values(), o => [o.id, o.x, o.y, o.t]),
       players: Array.from(players.values(), playerMeta),
-      chat: chatHistory, chatNextClear: chatClearAt,
+      chat: chatHistory,
     };
   }
 
@@ -668,6 +668,24 @@ io.on('connection', socket => {
     acct.acc.equipped[cat] = G.DEFAULT_EQUIPPED[cat];
     accountChanged(acct.acc, { looks: true });
     ack({ ok: true, profile: ownProfile(acct.acc) });
+  });
+
+  // ---- trash: delete items for good (no refund). payload { id, qty, slot? }
+  let trashTimes = [];
+  socket.on('inv:trash', async (d, ack) => {
+    ack = safeAck(ack);
+    if (!acct) return ack({ ok: false, error: 'Сначала войдите в аккаунт' });
+    const now = Date.now();
+    trashTimes = trashTimes.filter(t => now - t < 5000);
+    if (trashTimes.length >= 8) return ack({ ok: false, error: 'Не так быстро! Подождите пару секунд.', code: 'rate' });
+    trashTimes.push(now);
+    if (!isObj(d) || typeof d.id !== 'string') return ack({ ok: false, error: 'Неверный запрос' });
+    const a = acct.acc;
+    const r = INV.removeItem(a, d.id, d.qty, 'trash', d.slot);
+    if (!r.ok) return ack({ ok: false, error: r.error, code: r.code });
+    accountChanged(a, { looks: r.unequipped });
+    try { await flush(); } catch (_) { /* stays dirty, retried by the periodic flush */ }
+    ack({ ok: true, item: r.item, qty: r.qty, left: r.left, unequipped: r.unequipped, profile: ownProfile(a) });
   });
 
   socket.on('upgrade', (key, ack) => {

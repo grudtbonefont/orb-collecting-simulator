@@ -219,7 +219,7 @@ async function profileSuite(URL) {
   ok(!received.some(x => x.startsWith('s ')) || L.orbs.size === 0, 'lobby (profile screen) socket gets no arena state');
   const pl = await L.call('play', null);
   L.entered(pl);
-  ok(pl.ok && typeof pl.you === 'number' && pl.orbs.length > 0 && typeof pl.chatNextClear === 'number' && pl.chatNextClear > Date.now(), `Играть → enters the arena (next chat clear in ${Math.round((pl.chatNextClear - Date.now()) / 1000)} s)`);
+  ok(pl.ok && typeof pl.you === 'number' && pl.orbs.length > 0 && !('chatNextClear' in pl), 'Играть → enters the arena (no chat-clear schedule sent)');
   const pl2 = await L.call('play', null);
   ok(!pl2.ok, 'second play refused: ' + pl2.error);
   await L.farm(5, 30000);
@@ -313,12 +313,75 @@ async function shopInventorySuite(URL) {
   const balF = A.profile.balance;
   const bf = await A.emit('buy', 'c_lime');
   ok(!bf.ok && bf.code === 'full' && /Инвентарь полон/.test(bf.error) && A.profile.balance === balF, 'buying with a full inventory refused, no orbs taken: ' + bf.error);
+  const lastShard = A.profile.inventory.length - 1;
+  const tf = await A.emit('inv:trash', { id: 'x_legend_shard', qty: 99, slot: lastShard });
+  const bf2 = await A.emit('buy', 'c_lime');
+  ok(tf.ok && tf.profile.inventory.length === G.INV_SLOTS - 1 && bf2.ok && A.profile.inventory.length === G.INV_SLOTS, 'trashing a stack frees a slot; the purchase then succeeds');
   const g4 = await A.emit('test:grant', { id: 'c_coral', qty: 1, source: 'nope' }), g5 = await A.emit('test:grant', { id: 'x_legend_shard', qty: -3 });
   ok(!g4.ok && !g5.ok, 'grantItem validates source and quantity');
   // upgrades
   const up = await A.emit('upgrade', 'magnet');
   ok(up.ok && up.profile.upgrades.magnet === 1, `magnet upgrade lvl 1 for ${G.UPGRADES.magnet.prices[0]}`);
   ok(foreignProfiles === 0, 'players never receive another player\'s profile');
+  A.close(); B.close();
+}
+
+async function trashSuite(URL) {
+  console.log('--- inventory trash');
+  const A = makeClient(URL), B = makeClient(URL);
+  await A.register('Trash' + rnd()); await B.register('Look' + rnd());
+  await sleep(200);
+  await A.emit('test:orbs', 50000);
+  const nobody = makeClient(URL); await nobody.ready;
+  ok(!(await nobody.call('inv:trash', { id: 'c_coral', qty: 1 })).ok, 'trash needs a login');
+  nobody.close();
+  // unique item: deleted, no refund, can be bought again
+  await A.emit('buy', 'c_coral');
+  const bal = A.profile.balance;
+  const t1 = await A.emit('inv:trash', { id: 'c_coral', qty: 1 });
+  ok(t1.ok && !t1.profile.inventory.some(x => x.id === 'c_coral') && t1.profile.balance === bal && t1.left === 0, 'unique item trashed, no refund');
+  const rb = await A.emit('buy', 'c_coral');
+  ok(rb.ok && rb.profile.balance === bal - G.ITEM_BY_ID.c_coral.price && rb.profile.inventory.some(x => x.id === 'c_coral'), 'trashed shop item can be bought again');
+  // equipped item: reverts to the free default, others see it
+  await A.emit('buy', 'h_tophat'); await A.emit('inv:equip', 'h_tophat');
+  await sleep(200);
+  ok(B.metas.get(A.id).eq.hat === 'h_tophat', 'B sees the equipped hat');
+  const t2 = await A.emit('inv:trash', { id: 'h_tophat', qty: 1 });
+  await sleep(250);
+  ok(t2.ok && t2.unequipped && t2.profile.equipped.hat === G.DEFAULT_EQUIPPED.hat && B.metas.get(A.id).eq.hat === G.DEFAULT_EQUIPPED.hat, 'trashing an equipped item unequips it (back to the default) for everyone');
+  const eqGone = await A.emit('inv:equip', 'h_tophat');
+  ok(!eqGone.ok, 'trashed item can no longer be equipped');
+  // stacks
+  await A.emit('test:grant', { id: 'x_legend_shard', qty: 150, source: 'event' });
+  const idx = () => A.profile.inventory.map((x, i) => [x, i]).filter(([x]) => x.id === 'x_legend_shard');
+  const [[, i99], [, i51]] = idx();
+  const t3 = await A.emit('inv:trash', { id: 'x_legend_shard', qty: 11, slot: i51 });
+  ok(t3.ok && idx().map(([x]) => x.q).join(',') === '99,40' && t3.left === 139, `partial stack trash: 51 → 40 (left ${t3.left})`);
+  const slotsBefore = A.profile.inventory.length;
+  const t4 = await A.emit('inv:trash', { id: 'x_legend_shard', qty: 99, slot: i99 });
+  ok(t4.ok && idx().map(([x]) => x.q).join(',') === '40' && A.profile.inventory.length === slotsBefore - 1, 'whole stack trashed → slot freed');
+  const t5 = await A.emit('inv:trash', { id: 'x_legend_shard', qty: 5 });
+  ok(t5.ok && t5.left === 35, 'trash by item id (no slot) takes from the stacks');
+  // invalid requests
+  const bad = [
+    ['default item', { id: 'c_cyan', qty: 1 }], ['unowned', { id: 'h_crown', qty: 1 }], ['unknown id', { id: 'zz_nope', qty: 1 }], ['__proto__', { id: '__proto__', qty: 1 }],
+    ['qty 0', { id: 'x_legend_shard', qty: 0 }], ['qty -1', { id: 'x_legend_shard', qty: -1 }], ['qty 1.5', { id: 'x_legend_shard', qty: 1.5 }], ['qty "3"', { id: 'x_legend_shard', qty: '3' }],
+    ['more than owned', { id: 'x_legend_shard', qty: 36 }], ['more than in slot', { id: 'x_legend_shard', qty: 41, slot: idx()[0][1] }],
+    ['wrong slot', { id: 'x_legend_shard', qty: 1, slot: 0 }], ['slot out of range', { id: 'x_legend_shard', qty: 1, slot: 999 }],
+    ['qty 2 of a unique', { id: 'c_coral', qty: 2 }], ['not an object', 'c_coral'],
+  ];
+  const res = [];
+  await sleep(5100);
+  for (const [label, d] of bad) { res.push([label, await A.emit('inv:trash', d)]); await sleep(750); } // stay under the rate limit
+  ok(res.every(([, r]) => !r.ok) && A.profile.inventory.some(x => x.id === 'c_coral') && idx().map(([x]) => x.q).join(',') === '35',
+    'refused, nothing removed: ' + res.map(([l, r]) => `${l} → «${r.error}»`).join('; '));
+  ok(/Базовые/.test(res[0][1].error), 'default (free) items cannot be deleted: ' + res[0][1].error);
+  // rate limit
+  await sleep(5100);
+  const burst = [];
+  for (let i = 0; i < 10; i++) burst.push(A.emit('inv:trash', { id: 'x_legend_shard', qty: 1 }));
+  const br = await Promise.all(burst);
+  ok(br.filter(r => r.ok).length === 8 && br.filter(r => r.code === 'rate').length === 2, `rate-limited: 8 deletions per 5 s (${br.filter(r => r.code === 'rate').length} refused)`);
   A.close(); B.close();
 }
 
@@ -374,19 +437,21 @@ async function gameplaySuite(URL) {
 
 // ------------------------------------------------------------------ chat clear cycle + spawn (dedicated server with short timers)
 async function chatClearSuite(URL, period) {
-  console.log('--- chat clear cycle');
+  console.log('--- chat clear cycle (silent)');
   const C = makeClient(URL), E = makeClient(URL);
   const clears = [];
-  E.s.on('chat:clear', d => clears.push({ at: Date.now(), next: d.next }));
+  E.s.on('chat:clear', (...args) => clears.push({ at: Date.now(), args }));
   const rc = await C.register('Clr' + rnd()); await E.register('Clr' + rnd());
-  ok(rc.chatNextClear % period === 0 && rc.chatNextClear > Date.now() && rc.chatNextClear - Date.now() <= period, `next clear is aligned to the ${period} ms cycle`);
-  await C.call('chat', 'до очистки');
+  ok(rc.ok && !('chatNextClear' in rc), 'join payload carries no clear schedule');
+  await C.call('chat', 'сообщение до стирания');
   await waitFor(() => clears.length >= 2, period * 2 + 2000);
-  ok(clears.length >= 2 && clears[1].next - clears[0].next === period && Math.abs(clears[1].at - clears[0].at - period) < 400,
-    `chat:clear broadcast on a fixed cycle (${clears.map(c => new Date(c.next).toISOString().slice(17, 23)).join(', ')})`);
+  const gap = clears.length >= 2 ? clears[1].at - clears[0].at : -1;
+  ok(clears.length >= 2 && Math.abs(gap - period) < 400 && clears.every(c => c.args.length === 0), `chat:clear still fires on a fixed ${period} ms cycle (gap ${gap} ms) with no payload`);
+  const sysAfter = E.chat.filter(m => m.ts >= clears[0].at);
+  ok(!E.chat.some(m => /очищ|очист|cleared/i.test(m.t || '')) && sysAfter.length === 0, 'no system message announces the clear');
   const F = makeClient(URL);
   const rf = await F.register('Clr' + rnd());
-  ok(rf.ok && !rf.chat.some(m => /до очистки/.test(m.t)), `history wiped by the clear (new player sees ${rf.chat.length} old messages)`);
+  ok(rf.ok && !rf.chat.some(m => /до стирания/.test(m.t)), `history wiped by the clear (new player sees ${rf.chat.length} old messages)`);
   C.close(); E.close(); F.close();
 }
 
@@ -546,6 +611,10 @@ async function persistencePhase1(URL, hooks) {
   const q1 = await P.emit('inv:equip', 'c_coral');
   const u1 = await P.emit('upgrade', 'magnet');
   if (hooks) await P.emit('test:grant', { id: 'x_legend_shard', qty: 120, source: 'event' });
+  await P.emit('buy', 's_square'); await P.emit('inv:equip', 's_square');
+  const tr1 = await P.emit('inv:trash', { id: 's_square', qty: 1 });
+  const tr2 = hooks ? await P.emit('inv:trash', { id: 'x_legend_shard', qty: 30 }) : { ok: true };
+  ok(tr1.ok && tr2.ok && P.profile.equipped.shape === 's_circle', 'persistence: trashed an equipped unique item and 30 of 120 shards');
   ok(b1.ok && q1.ok && u1.ok, `persistence: ${name} has ${P.profile.total} total, bought + equipped c_coral, magnet 1, ${P.profile.inventory.length} inventory slots`);
   await sleep(100);
   const snap = JSON.parse(JSON.stringify(P.profile));
@@ -558,6 +627,8 @@ async function persistencePhase2(URL, st) {
   const invSig = p => JSON.stringify((p.inventory || []).map(x => [x.id, x.q, x.src]));
   const same = r.ok && pr.balance === st.snap.balance && pr.total === st.snap.total && invSig(pr) === invSig(st.snap)
     && pr.equipped.color === 'c_coral' && pr.upgrades.magnet === 1;
+  ok(r.ok && !pr.inventory.some(x => x.id === 's_square') && pr.equipped.shape === 's_circle' && pr.inventory.filter(x => x.id === 'x_legend_shard').reduce((n, x) => n + x.q, 0) === 90,
+    'trash survived restart (deleted item not resurrected from the legacy owned list, 90 shards left)');
   ok(same, `data survived restart: balance ${pr.balance}/${st.snap.balance}, total ${pr.total}/${st.snap.total}, inventory ${invSig(pr) === invSig(st.snap) ? 'same' : 'DIFFERENT'}, color ${pr.equipped && pr.equipped.color}`);
   P.close();
   const Q = makeClient(URL);
@@ -576,6 +647,7 @@ function privacyAudit(serverLogs) {
   ok(received.length > 100 && leakedIds.length === 0, `no socket ids in ${received.length} received broadcast/event payloads`);
   const leakedTokens = issuedTokens.filter(t => blob.includes(t) || blob.includes(crypto.createHash('sha256').update(t).digest('hex')));
   ok(leakedTokens.length === 0, 'no session tokens / token hashes in any broadcast');
+  ok(received.filter(r => r.startsWith('chat:clear')).every(r => r === 'chat:clear []') && !/chatNextClear|очищ|очистк/i.test(blob), 'clients never receive the chat-clear schedule or a «cleared» notice');
   ok(!/\$2[aby]\$/.test(blob) && !/passHash|pass_hash|sessionHash|"ip"|address|127\.0\.0\.1|::ffff|"::1"/i.test(blob), 'no password hashes, IP addresses or private fields in broadcasts');
   if (serverLogs != null) {
     ok(!/127\.0\.0\.1|::ffff|::1\b/.test(serverLogs) && !issuedTokens.some(t => serverLogs.includes(t)) && !serverLogs.includes(PASS), 'server log contains no IPs, tokens or passwords');
@@ -622,6 +694,7 @@ async function runMode(label, env, opts) {
   await profileSuite(srv.url);
   if (opts.full) { await chatSuite(srv.url); await gameplaySuite(srv.url); await minigameSuite(srv.url); }
   await shopInventorySuite(srv.url);
+  await trashSuite(srv.url);
   await leaderboardAudit(srv.url);
   const st = await persistencePhase1(srv.url, true);
   const code = await srv.stop(); // SIGTERM while the player is still online -> must flush

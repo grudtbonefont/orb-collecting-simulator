@@ -234,3 +234,33 @@ canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: blo
   .pf-actions .btn.big { min-width: 0; font-size: 16px; padding: 11px 10px; }
   .pf-actions #pfLogout { flex: 1 1 100%; }
 }
+
+/* ---------------------------------------------------------------- inventory trash */
+.inv-bar { display: flex; align-items: flex-start; gap: 10px; }
+.inv-bar .tabs { flex: 1; min-width: 0; }
+.inv-trash { flex: none; border: 1px dashed rgba(255, 100, 120, .45); color: #ff9aa6; border-radius: 12px; padding: 6px 12px; font-size: 14px; cursor: default; transition: .15s; }
+.inv-trash.armed { background: rgba(255, 77, 109, .1); border-style: solid; }
+.inv-trash.over { background: rgba(255, 77, 109, .3); color: #fff; box-shadow: 0 0 16px rgba(255, 77, 109, .5); transform: scale(1.05); }
+.inv-item[draggable=true] { cursor: grab; }
+.trash-btn { position: absolute; top: 6px; left: 6px; width: 30px; height: 30px; border-radius: 9px; border: 1px solid rgba(255, 100, 120, .35);
+  background: rgba(0, 0, 0, .45); font-size: 14px; line-height: 1; cursor: pointer; opacity: .7; padding: 0; touch-action: manipulation; }
+.trash-btn:hover, .trash-btn:focus-visible { opacity: 1; background: rgba(255, 77, 109, .35); }
+.confirm-ov { position: fixed; inset: 0; z-index: 36; display: flex; align-items: center; justify-content: center; background: rgba(3, 5, 12, .7); padding: 14px; }
+.confirm-card { width: min(380px, 100%); background: rgba(16, 20, 40, .98); border: 1px solid rgba(255, 100, 120, .45); border-radius: 18px; padding: 18px 18px 14px;
+  box-shadow: 0 0 50px rgba(255, 77, 109, .2); text-align: center; }
+.confirm-card h3 { margin: 0 0 8px; font-size: 21px; }
+.trash-item { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+#trashPreview { width: 64px; height: 64px; }
+.trash-item .big-icon { font-size: 36px; line-height: 64px; height: 64px; }
+.warn { color: #ff9aa6; font-weight: 600; margin: 8px 0 4px; }
+.trash-qty { margin: 10px 0 2px; }
+.trash-qty label { display: block; font-size: 14px; color: #aab3d9; margin-bottom: 6px; }
+.qty-row { display: flex; gap: 6px; justify-content: center; align-items: center; }
+.qty-row .btn { min-width: 44px; padding: 8px 10px; }
+#trashQty { width: 72px; text-align: center; font-size: 17px; padding: 8px 6px; border-radius: 10px; border: 1px solid rgba(120, 150, 255, .4); background: #0b1024; color: #fff;
+  user-select: text; -webkit-user-select: text; }
+#trashRange { width: 100%; margin-top: 10px; accent-color: #ff4d6d; }
+.confirm-actions { display: flex; gap: 10px; margin-top: 10px; }
+.confirm-actions .btn { flex: 1; padding: 11px; }
+.btn.danger { background: linear-gradient(135deg, #ff4d6d, #c2185b); border: none; color: #fff; }
+@media (max-width: 760px), (pointer: coarse) { .inv-trash { display: none; } .trash-btn { width: 34px; height: 34px; opacity: .85; } }

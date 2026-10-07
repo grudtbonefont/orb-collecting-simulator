@@ -26,6 +26,7 @@
 
   // ------------------------------------------------------------ state
   const socket = io({ transports: ['websocket', 'polling'] });
+  let trashSlot = null, trashBusy = false; // inventory trash dialog
   let joined = false, myName = store.get(NICK_KEY) || '', myId = null, profile = null, sessionScore = 0;
   const players = new Map();   // id -> {id,name,eq,trail:[],dir:{x,y},pos:{x,y}}
   const snapshots = [];        // {time, map}
@@ -44,8 +45,6 @@
   const mySpeed = () => G.speedFor(profile ? profile.upgrades.speed : 0);
   const myPickup = () => G.pickupFor(profile ? profile.upgrades.magnet : 0);
   const fmt = n => Number(n).toLocaleString('ru-RU');
-  const hhmm = ts => new Date(ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-  let chatNextClear = 0;
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const rainbow = (t, off = 0) => `hsl(${((t * 90 + off) % 360 + 360) % 360},100%,62%)`;
   const colorOf = (eq, t) => { const v = itemVal(eq.color) || '#3ee0ff'; return v === 'rainbow' ? rainbow(t) : v; };
@@ -158,8 +157,6 @@
     $('chat').classList.remove('hidden'); $('chatBtn').classList.remove('hidden');
     $('hudName').textContent = '👤 ' + myName;
     resetChat(res.chat || []);
-    chatNextClear = res.chatNextClear || 0;
-    if (chatNextClear) addChat({ sys: true, t: `Чат очищается каждые 15 минут · следующая очистка в ${hhmm(chatNextClear)}` });
     updateHud();
     if (!reconnect) toast(`Добро пожаловать, ${myName}! Собирайте сферы.`, 'ok');
   }
@@ -264,11 +261,7 @@
     updateHud(true);
   });
   socket.on('profile', p => { setProfile(p); });
-  socket.on('chat:clear', d => {
-    chatNextClear = (d && d.next) || 0;
-    resetChat([]);
-    addChat({ sys: true, t: 'Чат очищен' + (chatNextClear ? ` · следующая очистка в ${hhmm(chatNextClear)}` : '') });
-  });
+  socket.on('chat:clear', () => { resetChat([]); }); // periodic server-side wipe: the log just becomes empty
   socket.on('item', d => {
     if (!d) return;
     if (d.error) { toast(d.error, 'err'); return; }
@@ -306,9 +299,10 @@
 
   // ------------------------------------------------------------ input
   const anyModalOnly = () => Array.from(document.querySelectorAll('.modal')).some(m => !m.classList.contains('hidden'));
-  const anyModal = () => anyModalOnly() || !$('profile').classList.contains('hidden');
+  const anyModal = () => anyModalOnly() || !$('profile').classList.contains('hidden') || !$('trashDlg').classList.contains('hidden');
   const typing = () => { const a = document.activeElement; return !!a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA'); };
   window.addEventListener('keydown', e => {
+    if (!$('trashDlg').classList.contains('hidden')) { if (e.code === 'Escape') closeTrash(); return; } // confirm dialog is modal
     if (typing()) return;                 // chat / login inputs: no movement, no hotkeys
     if (joined && chatOpen) { if (e.code === 'Escape') closeChat(); return; }
     if (joined && !anyModal() && !mobileUI() && (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'KeyT') && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -667,7 +661,7 @@
     if (id === 'games') { if (!mgRunning) showGamesList(); updateGameButtons(); }
     updateHud();
   }
-  function closeModals() { document.querySelectorAll('.modal').forEach(m => m.classList.add('hidden')); }
+  function closeModals() { document.querySelectorAll('.modal').forEach(m => m.classList.add('hidden')); closeTrash(); }
   function toggleModal(id) { $(id).classList.contains('hidden') ? openModal(id) : closeModals(); }
   document.querySelectorAll('[data-open]').forEach(b => b.addEventListener('click', () => openModal(b.dataset.open)));
   document.querySelectorAll('.modal .close').forEach(b => b.addEventListener('click', closeModals));
@@ -778,6 +772,14 @@
         el.appendChild(addPreview(cv, Object.assign({}, profile.equipped, { [def.cat]: def.id }), def.cat, { owner: 'inv' }));
       } else { const ic = document.createElement('div'); ic.className = 'big-icon'; ic.style.color = rarityOf(def).color; ic.textContent = def.icon || '🎁'; el.appendChild(ic); }
       if (def.stackable) { const q = document.createElement('span'); q.className = 'qty'; q.textContent = '×' + slot.q; el.appendChild(q); }
+      const tb = document.createElement('button'); tb.type = 'button'; tb.className = 'trash-btn'; tb.title = 'Удалить'; tb.setAttribute('aria-label', 'Удалить ' + def.name); tb.textContent = '🗑';
+      tb.onclick = e => { e.stopPropagation(); openTrash(i); };
+      el.appendChild(tb);
+      if (!mobileUI()) {
+        el.draggable = true;
+        el.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', String(i)); e.dataTransfer.effectAllowed = 'move'; $('invTrash').classList.add('armed'); });
+        el.addEventListener('dragend', () => $('invTrash').classList.remove('armed', 'over'));
+      }
       const nm = document.createElement('div'); nm.className = 'name'; nm.textContent = def.name; el.append(nm, rarityTag(def));
       const src = document.createElement('div'); src.className = 'desc'; src.textContent = SOURCE_NAMES[slot.src] || ''; el.appendChild(src);
       const btn = document.createElement('button');
@@ -795,6 +797,67 @@
       grid.appendChild(em);
     }
   }
+
+  // ------------------------------------------------------------ trash (delete items for good, no refund)
+  const trashZone = $('invTrash');
+  trashZone.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; trashZone.classList.add('over'); });
+  trashZone.addEventListener('dragleave', () => trashZone.classList.remove('over'));
+  trashZone.addEventListener('drop', e => {
+    e.preventDefault(); trashZone.classList.remove('over', 'armed');
+    const i = parseInt(e.dataTransfer.getData('text/plain'), 10);
+    if (Number.isInteger(i)) openTrash(i);
+  });
+  trashZone.addEventListener('click', () => toast('Нажмите 🗑 на предмете или перетащите его сюда'));
+  function trashQty() { const v = parseInt($('trashQty').value, 10); return Number.isFinite(v) ? v : 0; }
+  function setTrashQty(v) {
+    const max = trashSlot ? trashSlot.q : 1;
+    v = Math.max(1, Math.min(max, Math.round(v) || 1));
+    $('trashQty').value = v; $('trashRange').value = v;
+    const def = G.ITEM_BY_ID[trashSlot.id];
+    $('trashOk').textContent = def.stackable ? `Удалить ${v} шт.` : 'Удалить';
+  }
+  function openTrash(i) {
+    if (!profile) return;
+    const slot = profile.inventory[i], def = slot && G.ITEM_BY_ID[slot.id];
+    if (!def) return;
+    trashSlot = { index: i, id: slot.id, q: slot.q };
+    $('trashName').textContent = def.name + (def.stackable ? ` (в ячейке ${slot.q} шт.)` : '');
+    $('trashIcon').textContent = def.icon || '';
+    $('trashIcon').style.color = rarityOf(def).color;
+    pruneHidden('trash');
+    $('trashIcon').classList.toggle('hidden', def.type === 'cosmetic');
+    $('trashPreview').classList.toggle('hidden', def.type !== 'cosmetic');
+    if (def.type === 'cosmetic') addPreview($('trashPreview'), Object.assign({}, profile.equipped, { [def.cat]: def.id }), def.cat, { owner: 'trash' });
+    const equipped = def.type === 'cosmetic' && profile.equipped[def.cat] === def.id;
+    $('trashEquipped').classList.toggle('hidden', !equipped);
+    $('trashQtyBox').classList.toggle('hidden', !def.stackable || slot.q < 2);
+    $('trashRange').max = slot.q;
+    setTrashQty(1);
+    $('trashErr').textContent = '';
+    $('trashDlg').classList.remove('hidden');
+    $('trashCancel').focus();
+  }
+  function closeTrash() { $('trashDlg').classList.add('hidden'); trashSlot = null; }
+  $('trashMinus').onclick = () => setTrashQty(trashQty() - 1);
+  $('trashPlus').onclick = () => setTrashQty(trashQty() + 1);
+  $('trashAll').onclick = () => setTrashQty(trashSlot ? trashSlot.q : 1);
+  $('trashRange').oninput = () => setTrashQty(Number($('trashRange').value));
+  $('trashQty').onchange = () => setTrashQty(trashQty());
+  $('trashCancel').onclick = closeTrash;
+  $('trashDlg').addEventListener('pointerdown', e => { if (e.target === $('trashDlg')) closeTrash(); });
+  $('trashDlg').addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Escape') closeTrash(); if (e.key === 'Enter' && e.target.id === 'trashQty') { e.preventDefault(); setTrashQty(trashQty()); } });
+  $('trashOk').onclick = () => {
+    if (!trashSlot || trashBusy) return;
+    const def = G.ITEM_BY_ID[trashSlot.id], qty = def.stackable ? trashQty() : 1;
+    trashBusy = true; $('trashOk').disabled = true;
+    socket.emit('inv:trash', { id: trashSlot.id, qty, slot: trashSlot.index }, res => {
+      trashBusy = false; $('trashOk').disabled = false;
+      if (!res || !res.ok) { $('trashErr').textContent = (res && res.error) || 'Не удалось удалить'; return; }
+      closeTrash();
+      setProfile(res.profile);
+      toast(`🗑 Удалено: ${def.name}${def.stackable ? ' ×' + qty : ''}${res.unequipped ? ' (снято)' : ''}`);
+    });
+  };
 
   // ------------------------------------------------------------ profile screen
   const fmtDur = ms => { const m = Math.floor((ms || 0) / 60000), h = Math.floor(m / 60); return h ? `${h} ч ${m % 60} мин` : `${m} мин`; };
