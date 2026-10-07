@@ -86,7 +86,7 @@
 <!-- HUD -->
 <div id="hud" class="hidden">
   <div class="panel stats">
-    <div class="balance"><i class="dot c"></i><span id="hudBalance">0</span><small>сфер</small></div>
+    <div class="balance"><i class="cur-orb" aria-hidden="true"></i><span id="hudBalance">0</span><small>сфер</small></div>
     <div class="row">Всего собрано: <b id="hudTotal">0</b></div>
     <div class="row">За сессию: <b id="hudSession">0</b></div>
     <div class="row online"><i class="live"></i>Онлайн: <b id="hudOnline">1</b></div>
@@ -107,7 +107,7 @@
   <div id="orbHelp" class="orb-help hidden" role="dialog" aria-label="Виды сфер">
     <div class="oh-head"><b>Виды сфер</b><button type="button" id="orbHelpClose" class="close" aria-label="Закрыть">✕</button></div>
     <div id="orbHelpList"></div>
-    <p class="muted oh-foot">💎 Осколки тратятся в «Лавке осколков» (магазин). Каждые 6–10 минут на арене проходит событие.</p>
+    <p class="muted oh-foot"><i class="cur-shard" aria-hidden="true"></i> Осколки тратятся в «Лавке осколков» (магазин). Каждые 6–10 минут на арене проходит событие.</p>
   </div>
   <!-- timed arena events: announce banner, active HUD, results -->
   <div id="evBanner" class="ev-banner hidden" role="status" aria-live="polite">
@@ -143,7 +143,7 @@
 <!-- Shop -->
 <div id="shop" class="modal hidden">
   <div class="modal-card wide">
-    <div class="modal-head"><h2>🛒 Магазин</h2><div class="pill"><i class="dot c"></i><span class="bal">0</span></div><button class="close">✕</button></div>
+    <div class="modal-head"><h2>🛒 Магазин</h2><div class="pill"><i class="cur-orb" aria-hidden="true"></i><span class="bal">0</span></div><button class="close">✕</button></div>
     <p class="muted note">Купленные предметы попадают в <b>инвентарь</b> — надеть их можно там (кнопка «Инвентарь» или клавиша I).</p>
     <div class="tabs" id="shopTabs"></div>
     <div class="shop-tools" id="shopTools">
@@ -201,7 +201,7 @@
 <!-- Mini-games -->
 <div id="games" class="modal hidden">
   <div class="modal-card wide">
-    <div class="modal-head"><h2>🎮 Мини-игры</h2><div class="pill"><i class="dot c"></i><span class="bal">0</span></div><button class="close">✕</button></div>
+    <div class="modal-head"><h2>🎮 Мини-игры</h2><div class="pill"><i class="cur-orb" aria-hidden="true"></i><span class="bal">0</span></div><button class="close">✕</button></div>
     <p class="muted note">Мини-игры — для развлечения: в среднем они приносят меньше, чем сбор сфер на арене.</p>
     <div id="gamesList" class="games-list">
       <div class="game-card">

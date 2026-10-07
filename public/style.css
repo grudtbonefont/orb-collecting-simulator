@@ -13,6 +13,13 @@ canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: blo
 .btn.big { font-size: 18px; padding: 12px 26px; }
 .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
 .dot.c { background: #3ee0ff; box-shadow: 0 0 10px #3ee0ff; }
+/* currency icons: glowing orb (balances / orb prices) and gold legendary shard (shard prices) — CSS only, no assets */
+.cur-orb { display: inline-block; width: .8em; height: .8em; border-radius: 50%; vertical-align: -.08em; margin: 0 .08em; flex: none;
+  background: radial-gradient(circle at 34% 30%, #ffffff 0 10%, #b8f7ff 20%, #3ee0ff 48%, #0b86b8 82%, #06507a 100%);
+  box-shadow: 0 0 .35em rgba(62, 224, 255, .85), 0 0 .12em rgba(62, 224, 255, .9); }
+.cur-shard { display: inline-block; width: .72em; height: .88em; vertical-align: -.12em; margin: 0 .08em; flex: none;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 24'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23fff7c2'/%3E%3Cstop offset='.45' stop-color='%23ffd23f'/%3E%3Cstop offset='1' stop-color='%23d98e00'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M10 1 19 9 10 23 1 9Z' fill='url(%23g)' stroke='%23a86a00' stroke-width='.8'/%3E%3Cpath d='M1 9h18M10 1 6.5 9 10 23 13.5 9Z' fill='none' stroke='%23fff3b0' stroke-opacity='.75' stroke-width='.7'/%3E%3C/svg%3E") center / contain no-repeat; filter: drop-shadow(0 0 .18em rgba(255, 204, 51, .85)); }
+.balance .cur-orb { width: .62em; height: .62em; margin-right: .25em; }
 .dot.r { background: #b46bff; box-shadow: 0 0 10px #b46bff; }
 .dot.l { background: #ffcc33; box-shadow: 0 0 10px #ffcc33; }
 .dot.u { background: #5dff8f; box-shadow: 0 0 10px #5dff8f; }

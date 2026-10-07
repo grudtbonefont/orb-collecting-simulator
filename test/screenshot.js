@@ -523,7 +523,7 @@ function bot(url, name) {
     await vp.waitForSelector('#evResult:not(.hidden)', { timeout: 15000 });
     await sleep(400);
     const res = await vp.textContent('#evResult');
-    ok(/итоги/.test(res) && /Вы: 1-е место/.test(res) && /награда \+\d+ ◉/.test(res) && /Viewer/.test(res), 'results card: place, score and reward — ' + res.replace(/\s+/g, ' ').slice(0, 140));
+    ok(/итоги/.test(res) && /Вы: 1-е место/.test(res) && /награда \+\d+/.test(res) && (await vp.$$('#evResult .cur-orb')).length > 0 && /Viewer/.test(res), 'results card: place, score and reward — ' + res.replace(/\s+/g, ' ').slice(0, 140));
     ok(!(await vp.isVisible('#evHud')), 'event HUD hidden after the end');
     await shot(vp, 'screenshot-event-results.png');
     await vp.click('#evResult .close');
@@ -574,19 +574,30 @@ function bot(url, name) {
     const ss = await sp.evaluate(() => ({ have: document.getElementById('shardCount').textContent,
       cards: Array.from(document.querySelectorAll('#shopGrid .ex-item')).map(e => ({ id: e.dataset.item, badge: !!e.querySelector('.ex-badge'), btn: e.querySelector('button').textContent, dis: e.querySelector('button').disabled })) }));
     const EXC = SG.ITEMS.filter(i => i.exclusive);
-    ok(/^110\s💎$/.test(ss.have), 'shard count shown: ' + ss.have);
+    ok(/^110\s*$/.test(ss.have), 'shard count shown: ' + ss.have.trim());
     ok(ss.cards.length === EXC.length && ss.cards.every(c => c.badge) && ss.cards.every((c, i) => !i || SG.ITEM_BY_ID[c.id].shardPrice >= SG.ITEM_BY_ID[ss.cards[i - 1].id].shardPrice),
       `${ss.cards.length} exclusive cards with the «Эксклюзив» badge, cheapest first`);
     const cardOf = id => ss.cards.find(c => c.id === id) || {};
-    ok(/В инвентаре/.test(cardOf('c_void').btn) && /В инвентаре/.test(cardOf('n_shard').btn) && !cardOf('t_comet').dis && cardOf('h_shard_crown').dis && /300 💎/.test(cardOf('h_shard_crown').btn),
+    ok(/В инвентаре/.test(cardOf('c_void').btn) && /В инвентаре/.test(cardOf('n_shard').btn) && !cardOf('t_comet').dis && cardOf('h_shard_crown').dis && /300/.test(cardOf('h_shard_crown').btn),
       'owned → «В инвентаре», affordable → enabled, too expensive → disabled with the shard price');
     await shot(sp, 'screenshot-shard-shop.png');
+    // currency icons: gold shard SVG on shard prices, glowing CSS orb on orb amounts (no emoji left)
+    const ic = await sp.evaluate(() => {
+      const cs = sel => { const e = document.querySelector(sel); return e ? getComputedStyle(e) : null; };
+      const sh = cs('#shopGrid .ex-item .shard-buy .cur-shard, #shopGrid .ex-item button .cur-shard'), orb = cs('#shardExBtn .cur-orb'), hud = cs('.balance .cur-orb'), pill = cs('#shop .pill .cur-orb, .modal .pill .cur-orb');
+      return { shard: sh && sh.backgroundImage, orb: orb && orb.backgroundImage, glow: orb && orb.boxShadow, hud: !!hud, pill: !!pill,
+        buyShards: document.querySelectorAll('#shopGrid .ex-item button .cur-shard').length, have: !!document.querySelector('#shardCount .cur-shard'),
+        emoji: /[💎◉]/u.test(document.getElementById('shop').textContent) };
+    });
+    ok(ic.shard && /ffd23f/i.test(ic.shard) && ic.orb && /radial-gradient/.test(ic.orb) && /rgba\(62, 224, 255/.test(ic.glow) && ic.hud && ic.pill && ic.have && ic.buyShards >= 6 && !ic.emoji,
+      `currency icons: gold shard on ${ic.buyShards} shard prices + count, glowing orb on exchange / balance pill / HUD, no 💎/◉ emoji in the shop`);
+    await shot(sp, 'screenshot-shop-icons.png');
     await sp.locator('#shopGrid [data-item=t_comet] button').click(); await sleep(600);
-    ok(/^40\s💎$/.test(await sp.textContent('#shardCount')) && /В инвентаре/.test(await sp.textContent('#shopGrid [data-item=t_comet] button')), 'buying in the UI spends shards (110 → 40)');
+    ok(/^40\s*$/.test(await sp.textContent('#shardCount')) && /В инвентаре/.test(await sp.textContent('#shopGrid [data-item=t_comet] button')), 'buying in the UI spends shards (110 → 40)');
     const balBeforeEx = Number((await sp.textContent('#hudBalance')).replace(/\s/g, ''));
     await sp.fill('#shardExQty', '2'); await sp.click('#shardExBtn'); await sleep(600);
     const balAfterEx = Number((await sp.textContent('#hudBalance')).replace(/\s/g, ''));
-    ok(/^38\s💎$/.test(await sp.textContent('#shardCount')) && balAfterEx - balBeforeEx >= 2 * SG.SHARD_EXCHANGE.orbs && balAfterEx - balBeforeEx < 2 * SG.SHARD_EXCHANGE.orbs + 30, `exchange in the UI: 2 💎 → +${balAfterEx - balBeforeEx} ◉`);
+    ok(/^38\s*$/.test(await sp.textContent('#shardCount')) && balAfterEx - balBeforeEx >= 2 * SG.SHARD_EXCHANGE.orbs && balAfterEx - balBeforeEx < 2 * SG.SHARD_EXCHANGE.orbs + 30, `exchange in the UI: 2 💎 → +${balAfterEx - balBeforeEx} ◉`);
     await sp.keyboard.press('Escape'); await sp.keyboard.press('KeyI'); await sleep(400);
     ok(await sp.evaluate(() => ['c_void', 'n_shard', 't_comet'].every(id => { const e = document.querySelector(`#invGrid [data-item=${id}]`); return e && e.querySelector('.ex-badge') && /Лавка осколков/.test(e.textContent); })),
       'inventory: exclusives carry the badge and the source «Лавка осколков»');

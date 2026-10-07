@@ -45,6 +45,9 @@
   const mySpeed = () => G.speedFor(profile ? profile.upgrades.speed : 0);
   const myPickup = () => G.pickupFor(profile ? profile.upgrades.magnet : 0);
   const fmt = n => Number(n).toLocaleString('ru-RU');
+  // currency icons (CSS-drawn, see .cur-orb / .cur-shard): use with innerHTML; amounts go through fmt (numbers only)
+  const ORB_I = '<i class="cur-orb" aria-hidden="true"></i>', SHARD_I = '<i class="cur-shard" aria-hidden="true"></i>';
+  const orbsH = n => `${fmt(n)}&nbsp;${ORB_I}`, shardsH = n => `${fmt(n)}&nbsp;${SHARD_I}`;
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const rainbow = (t, off = 0) => `hsl(${((t * 90 + off) % 360 + 360) % 360},100%,62%)`;
   // multi-colour paints (G.PAINTS): colours are cycled slowly — one interpolated colour per call, cheap enough for every frame
@@ -1126,7 +1129,7 @@
   const runnerY = now => (runner ? runner.py + (runner.y - runner.py) * runnerK(now) : 0);
   function rewardText(r) {
     if (!r) return '';
-    const parts = []; if (r.orbs) parts.push(`+${fmt(r.orbs)} ◉`); if (r.shards) parts.push(`+${r.shards} 💎`);
+    const parts = []; if (r.orbs) parts.push('+' + orbsH(r.orbs)); if (r.shards) parts.push('+' + shardsH(r.shards));
     return parts.join(' ');
   }
   function updateEventUi() {
@@ -1175,7 +1178,7 @@
     if (d.kind === 'treasure') sub = `Найдено сокровищ: ${(d.total || 0) - (d.remaining || 0)} из ${d.total || 0}`;
     if (d.you) {
       const unit = EV_UNITS[d.kind];
-      you.textContent = `Вы: ${d.you.place}-е место${unit ? ` · ${fmt(d.you.score)} ${unit}` : ''}` + (d.you.reward ? ` · награда ${rewardText(d.you.reward)}` : d.kind === 'koth' ? ` · для награды нужно ≥ ${def.minScore} очков` : '');
+      you.innerHTML = `Вы: ${Number(d.you.place) | 0}-е место${unit ? ` · ${fmt(d.you.score)} ${unit}` : ''}` + (d.you.reward ? ` · награда ${rewardText(d.you.reward)}` : d.kind === 'koth' ? ` · для награды нужно ≥ ${def.minScore} очков` : '');
       you.classList.add('ok');
     } else you.textContent = 'Вы не участвовали — в следующий раз!';
     if (sub) { const s2 = document.createElement('div'); s2.className = 'evr-sub'; s2.textContent = sub; box.appendChild(s2); }
@@ -1184,7 +1187,7 @@
       const ol = document.createElement('ol'); ol.className = 'evr-list';
       for (const r of d.results) {
         const li = document.createElement('li'); const n = document.createElement('span'); n.textContent = r.name;
-        const v = document.createElement('b'); v.textContent = (EV_UNITS[d.kind] ? fmt(r.score) + ' ' + EV_UNITS[d.kind] : '') + (r.reward ? '  ' + rewardText(r.reward) : '');
+        const v = document.createElement('b'); v.innerHTML = (EV_UNITS[d.kind] ? fmt(r.score) + ' ' + EV_UNITS[d.kind] : '') + (r.reward ? ' ' + rewardText(r.reward) : '');
         li.append(n, v); if (r.name === myName) li.className = 'me'; ol.appendChild(li);
       }
       box.appendChild(ol);
@@ -1263,7 +1266,7 @@
       const v = document.createElement('b'); v.textContent = '+' + ot.value;
       const note = document.createElement('small');
       const share = ot.weight > 0 ? (ot.weight / Object.values(G.POOL_WEIGHTS).reduce((a, b) => a + b, 0) * 100) : 0;
-      note.textContent = [share ? (share >= 1 ? Math.round(share) + '%' : share.toFixed(2).replace('.', ',') + '%') + ' сфер' : '', ot.note || '', ot.shards ? `+${ot.shards} 💎` : ''].filter(Boolean).join(' · ');
+      note.innerHTML = [share ? (share >= 1 ? Math.round(share) + '%' : share.toFixed(2).replace('.', ',') + '%') + ' сфер' : '', ot.note ? esc(ot.note) : '', ot.shards ? '+' + shardsH(ot.shards) : ''].filter(Boolean).join(' · ');
       row.append(cv, nm, v, note); box.appendChild(row);
     }
   }
@@ -1497,15 +1500,15 @@
     if (!maxed) { const nx = document.createElement('div'); nx.className = 'next'; nx.textContent = '→ ' + G.upgradeText(up.key, lvl + 1); eff.appendChild(nx); }
     const btn = document.createElement('button'); btn.className = 'btn' + (maxed ? '' : ' primary');
     if (maxed) { btn.textContent = 'Максимум'; btn.disabled = true; }
-    else { btn.textContent = `Улучшить · ${fmt(price)} ◉`; btn.disabled = profile.balance < price; btn.onclick = () => socket.emit('upgrade', up.key, res => afterAction(res, `${up.name}: уровень ${lvl + 1}!`)); }
+    else { btn.innerHTML = `Улучшить · ${orbsH(price)}`; btn.disabled = profile.balance < price; btn.onclick = () => socket.emit('upgrade', up.key, res => afterAction(res, `${up.name}: уровень ${lvl + 1}!`)); }
     el.append(nm, pips, desc, eff, btn);
     return el;
   }
   function renderShop() {
     if (!profile) return;
     pruneHidden('shop');
-    const tabs = G.CATEGORIES.concat([{ key: 'upgrades', name: '⚡ Улучшения' }, { key: 'shards', name: '💎 Лавка осколков' }]);
-    $('shopTabs').innerHTML = tabs.map(c => `<button class="tab ${c.key === shopTab ? 'active' : ''}" data-tab="${c.key}">${c.name}</button>`).join('');
+    const tabs = G.CATEGORIES.concat([{ key: 'upgrades', name: '⚡ Улучшения' }, { key: 'shards', name: 'Лавка осколков', icon: SHARD_I }]);
+    $('shopTabs').innerHTML = tabs.map(c => `<button class="tab ${c.key === shopTab ? 'active' : ''}" data-tab="${c.key}">${c.icon ? c.icon + ' ' : ''}${c.name}</button>`).join('');
     $('shopTabs').querySelectorAll('.tab').forEach(b => b.onclick = () => { shopTab = b.dataset.tab; renderShop(); });
     const grid = $('shopGrid');
     grid.innerHTML = '';
@@ -1541,7 +1544,7 @@
       const btn = document.createElement('button');
       if (owned) { btn.className = 'btn equipped'; btn.textContent = '✓ В инвентаре'; btn.disabled = true; }
       else {
-        btn.className = 'btn primary'; btn.textContent = `Купить · ${fmt(it.price)} ◉`;
+        btn.className = 'btn primary'; btn.innerHTML = `Купить · ${orbsH(it.price)}`;
         btn.disabled = profile.balance < it.price;
         if (full) btn.title = 'Инвентарь полон';
         btn.onclick = () => socket.emit('buy', it.id, res => afterAction(res, `Куплено: ${it.name} — предмет в инвентаре (I)`));
@@ -1556,17 +1559,17 @@
     const head = document.createElement('div'); head.className = 'shard-head'; head.id = 'shardHead';
     const ico = iconEl(G.SHARD_ID, 'sm');
     const txt = document.createElement('div'); txt.className = 'shard-txt';
-    const b = document.createElement('div'); b.className = 'shard-have'; b.innerHTML = 'У вас осколков: <b id="shardCount"></b>'; b.querySelector('b').textContent = fmt(have) + ' 💎';
+    const b = document.createElement('div'); b.className = 'shard-have'; b.innerHTML = 'У вас осколков: <b id="shardCount"></b>'; b.querySelector('b').innerHTML = shardsH(have);
     const how = document.createElement('div'); how.className = 'muted'; how.textContent = 'Осколки дают легендарные (+1) и мифические (+3) сферы и награды арена-событий. Эксклюзивы нельзя купить за сферы.';
     txt.append(b, how);
     const ex = document.createElement('div'); ex.className = 'shard-ex';
-    const lab = document.createElement('label'); lab.htmlFor = 'shardExQty'; lab.textContent = `Обмен: 1 💎 = ${X.orbs} ◉`;
+    const lab = document.createElement('label'); lab.htmlFor = 'shardExQty'; lab.innerHTML = `Обмен: 1&nbsp;${SHARD_I} = ${orbsH(X.orbs)}`;
     const inp = document.createElement('input'); inp.type = 'number'; inp.id = 'shardExQty'; inp.min = 1; inp.max = Math.max(1, Math.min(X.maxPerTrade, have)); inp.value = 1; inp.inputMode = 'numeric';
     const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn'; btn.id = 'shardExBtn';
     const qty = () => Math.max(1, Math.min(X.maxPerTrade, parseInt(inp.value, 10) || 1));
-    const upd = () => { btn.textContent = `Обменять → ${fmt(qty() * X.orbs)} ◉`; btn.disabled = have < qty(); };
+    const upd = () => { btn.innerHTML = `Обменять → ${orbsH(qty() * X.orbs)}`; btn.disabled = have < qty(); };
     inp.oninput = upd; upd();
-    btn.onclick = () => { const q = qty(); btn.disabled = true; socket.emit('shard:exchange', q, res => afterAction(res, `Обмен: −${q} 💎, +${fmt(q * X.orbs)} ◉`)); };
+    btn.onclick = () => { const q = qty(); btn.disabled = true; socket.emit('shard:exchange', q, res => afterAction(res, `Обмен: −${q} осколк., +${fmt(q * X.orbs)} сфер`)); };
     inp.addEventListener('keydown', e => e.stopPropagation());
     ex.append(lab, inp, btn);
     head.append(ico, txt, ex); grid.appendChild(head);
@@ -1581,9 +1584,9 @@
       const bt = document.createElement('button');
       if (owned) { bt.className = 'btn equipped'; bt.textContent = '✓ В инвентаре'; bt.disabled = true; }
       else {
-        bt.className = 'btn primary shard-buy'; bt.textContent = `Купить · ${fmt(it.shardPrice)} 💎`;
+        bt.className = 'btn primary shard-buy'; bt.innerHTML = `Купить · ${shardsH(it.shardPrice)}`;
         bt.disabled = have < it.shardPrice;
-        if (have < it.shardPrice) bt.title = `Не хватает ${it.shardPrice - have} 💎`;
+        if (have < it.shardPrice) bt.title = `Не хватает ${it.shardPrice - have} осколк.`;
         bt.onclick = () => { bt.disabled = true; socket.emit('shard:buy', it.id, res => afterAction(res, `Куплено: ${it.name} — эксклюзив в инвентаре (I)`)); };
       }
       el.appendChild(bt); grid.appendChild(el);
@@ -1718,7 +1721,7 @@
     }));
     $('pfRankLine').textContent = p.rank ? `🏆 Место в рейтинге: #${p.rank}` : '🏆 Пока без места в рейтинге — соберите первую сферу';
     $('pfSince').textContent = 'Аккаунт создан: ' + fmtDate(p.createdAt);
-    $('pfBalance').textContent = fmt(p.balance) + ' ◉';
+    $('pfBalance').innerHTML = orbsH(p.balance);
     $('pfTotal').textContent = fmt(p.total);
     $('pfRank').textContent = p.rank ? '#' + fmt(p.rank) : '—';
     $('pfTime').textContent = fmtDur(p.playMs != null ? p.playMs : (p.stats && p.stats.playMs));
@@ -1794,7 +1797,7 @@
     const re = G.MINIGAMES.reaction, ru = G.MINIGAMES.rush;
     $('reactionPrizes').textContent = G.REACTION_PRIZES.map(([ms, p]) => `<${ms} мс: ${p}`).join(' · ') + ` · пауза ${re.cooldownMs / 1000} с`;
     $('rushPrizes').textContent = `Выплата: ${Math.round(ru.payoutRate * 100)}% от очков, не больше ${ru.maxPrize} сфер · пауза ${ru.cooldownMs / 1000} с`;
-    document.querySelectorAll('[data-game]').forEach(b => { b.textContent = `Играть — взнос ${G.MINIGAMES[b.dataset.game].fee} ◉`; });
+    document.querySelectorAll('[data-game]').forEach(b => { b.innerHTML = `Играть — взнос ${orbsH(G.MINIGAMES[b.dataset.game].fee)}`; });
   })();
   function updateGameButtons() {
     document.querySelectorAll('[data-game]').forEach(b => { const fee = G.MINIGAMES[b.dataset.game].fee; b.disabled = !!mgRunning || !profile || profile.balance < fee; });
@@ -1894,7 +1897,7 @@
     const name = G.MINIGAMES[r.kind].name;
     const net = r.prize - r.fee;
     const box = $('mgResult');
-    box.innerHTML = `<div>${esc(name)}: ${esc(r.message || '')}</div><span class="big">${r.prize > 0 ? '+' + r.prize + ' ◉' : '0 ◉'}</span>
+    box.innerHTML = `<div>${esc(name)}: ${esc(r.message || '')}</div><span class="big">${r.prize > 0 ? '+' + orbsH(r.prize) : '0&nbsp;' + ORB_I}</span>
       <div class="muted">Взнос ${r.fee} · итог ${net >= 0 ? '+' : ''}${net}${r.bonus > 0 ? ` · «Мастер мини-игр» +${Number(r.bonus) | 0}` : ''}</div>
       <div style="margin-top:10px;display:flex;gap:8px;justify-content:center">
         <button class="btn primary" id="mgAgain">Ещё раз</button><button class="btn" id="mgBack">К списку игр</button></div>`;
