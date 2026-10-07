@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Item Collecting Simulator</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ccircle cx=%2250%22 cy=%2250%22 r=%2240%22 fill=%22%233ee0ff%22/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<!-- Start screen -->
+<div id="start" class="overlay">
+  <div class="start-card">
+    <h1 class="logo">Item Collecting <span>Simulator</span></h1>
+    <p class="subtitle">Собирай светящиеся сферы, соревнуйся с другими игроками, покупай косметику и поднимайся в рейтинге!</p>
+    <form id="joinForm" autocomplete="off">
+      <input id="nick" maxlength="16" placeholder="Ваш ник" autofocus>
+      <button type="submit" class="btn primary big">Играть</button>
+    </form>
+    <div id="joinError" class="error"></div>
+    <div class="orb-legend">
+      <span><i class="dot c"></i>Обычная&nbsp;+1</span>
+      <span><i class="dot r"></i>Редкая&nbsp;+5</span>
+      <span><i class="dot l"></i>Легендарная&nbsp;+25</span>
+    </div>
+    <div class="hint">Управление: <b>WASD</b> / <b>стрелки</b>, или зажмите мышь / палец — персонаж идёт за курсором.<br>Горячие клавиши: <b>B</b> — магазин, <b>M</b> — мини-игры, <b>L</b> — рейтинг.</div>
+    <div class="mini-lb"><h3>🏆 Лучшие сборщики</h3><ol id="startLb"><li class="muted">Загрузка…</li></ol></div>
+  </div>
+</div>
+
+<!-- HUD -->
+<div id="hud" class="hidden">
+  <div class="panel stats">
+    <div class="balance"><i class="dot c"></i><span id="hudBalance">0</span><small>сфер</small></div>
+    <div class="row">Всего собрано: <b id="hudTotal">0</b></div>
+    <div class="row">За сессию: <b id="hudSession">0</b></div>
+    <div class="row online"><i class="live"></i>Онлайн: <b id="hudOnline">1</b></div>
+  </div>
+  <div class="panel top">
+    <h4>Топ арены</h4>
+    <ol id="hudTop"></ol>
+  </div>
+  <div class="menu-buttons">
+    <button class="btn" data-open="shop">🛒 Магазин</button>
+    <button class="btn" data-open="games">🎮 Мини-игры</button>
+    <button class="btn" data-open="lb">🏆 Рейтинг</button>
+  </div>
+  <canvas id="minimap" width="150" height="150"></canvas>
+</div>
+
+<div id="toasts"></div>
+
+<!-- Shop -->
+<div id="shop" class="modal hidden">
+  <div class="modal-card wide">
+    <div class="modal-head"><h2>🛒 Магазин</h2><div class="pill"><i class="dot c"></i><span class="bal">0</span></div><button class="close">✕</button></div>
+    <div class="tabs" id="shopTabs"></div>
+    <div class="grid" id="shopGrid"></div>
+  </div>
+</div>
+
+<!-- Mini-games -->
+<div id="games" class="modal hidden">
+  <div class="modal-card wide">
+    <div class="modal-head"><h2>🎮 Мини-игры</h2><div class="pill"><i class="dot c"></i><span class="bal">0</span></div><button class="close">✕</button></div>
+    <div id="gamesList" class="games-list">
+      <div class="game-card">
+        <div class="game-icon">⚡</div>
+        <h3>Реакция</h3>
+        <p>Дождитесь зелёного экрана и нажмите как можно быстрее. Нажмёте раньше — взнос сгорит.</p>
+        <p class="prizes">&lt;300 мс: <b>25</b> · &lt;400 мс: <b>18</b> · &lt;550 мс: <b>12</b> · &lt;800 мс: <b>6</b></p>
+        <button class="btn primary" data-game="reaction">Играть — взнос 10 ◉</button>
+      </div>
+      <div class="game-card">
+        <div class="game-icon">🌀</div>
+        <h3>Сферный шторм</h3>
+        <p>20 секунд: кликайте (тапайте) по появляющимся сферам. Голубая +1, золотая +3, красная бомба −3. Очки = выигрыш в сферах.</p>
+        <p class="prizes">Хороший результат: 25–40 сфер</p>
+        <button class="btn primary" data-game="rush">Играть — взнос 15 ◉</button>
+      </div>
+    </div>
+    <div id="reactionArea" class="mg-area hidden"><div id="reactionBox" class="reaction-box">Ждите зелёного…</div></div>
+    <div id="rushArea" class="mg-area hidden">
+      <div class="rush-bar"><span>Очки: <b id="rushScore">0</b></span><span>Время: <b id="rushTime">20.0</b></span></div>
+      <canvas id="rushCanvas" width="600" height="400"></canvas>
+    </div>
+    <div id="mgResult" class="mg-result hidden"></div>
+  </div>
+</div>
+
+<!-- Leaderboard -->
+<div id="lb" class="modal hidden">
+  <div class="modal-card">
+    <div class="modal-head"><h2>🏆 Глобальный рейтинг</h2><button class="close">✕</button></div>
+    <p class="muted">Место определяется по общему количеству собранных сфер за всё время (а не по текущему балансу).</p>
+    <div id="lbMe" class="lb-me"></div>
+    <table class="lb-table"><thead><tr><th>#</th><th>Игрок</th><th>Собрано всего</th></tr></thead><tbody id="lbBody"></tbody></table>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="shared.js"></script>
+<script src="client.js"></script>
+</body>
+</html>
