@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
 <title>Orb Collecting Simulator</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ccircle cx=%2250%22 cy=%2250%22 r=%2240%22 fill=%22%233ee0ff%22/%3E%3C/svg%3E">
 <link rel="stylesheet" href="style.css">
@@ -15,17 +15,33 @@
   <div class="start-card">
     <h1 class="logo">Orb Collecting <span>Simulator</span></h1>
     <p class="subtitle">Собирай светящиеся сферы, соревнуйся с другими игроками, покупай косметику и поднимайся в рейтинге!</p>
-    <form id="joinForm" autocomplete="off">
-      <input id="nick" maxlength="16" placeholder="Ваш ник" autofocus>
-      <button type="submit" class="btn primary big">Играть</button>
-    </form>
-    <div id="joinError" class="error"></div>
+    <div id="resumeBox" class="resume hidden">
+      <div id="resumeText" class="resume-text">Входим…</div>
+      <div class="resume-actions">
+        <button type="button" id="resumeBtn" class="btn primary big">Играть</button>
+        <button type="button" id="resumeLogout" class="btn">Выйти</button>
+      </div>
+    </div>
+    <div id="authBox">
+      <div class="auth-tabs" role="tablist">
+        <button type="button" class="auth-tab active" data-mode="login" role="tab">Вход</button>
+        <button type="button" class="auth-tab" data-mode="register" role="tab">Регистрация</button>
+      </div>
+      <form id="authForm" class="auth-form" novalidate>
+        <input id="nick" name="username" autocomplete="username" maxlength="20" placeholder="Ник" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <input id="pass" name="password" type="password" autocomplete="current-password" maxlength="72" placeholder="Пароль">
+        <input id="pass2" name="password2" type="password" autocomplete="new-password" maxlength="72" placeholder="Повторите пароль" class="hidden">
+        <div id="authRules" class="rules hidden">Ник: 3–20 символов — английские буквы, цифры и не более одного «_» (не в начале и не в конце).<br>Пароль: от 6 до 72 символов.</div>
+        <button type="submit" id="authSubmit" class="btn primary big">Войти</button>
+      </form>
+    </div>
+    <div id="joinError" class="error" role="alert"></div>
     <div class="orb-legend">
       <span><i class="dot c"></i>Обычная&nbsp;+1</span>
       <span><i class="dot r"></i>Редкая&nbsp;+5</span>
       <span><i class="dot l"></i>Легендарная&nbsp;+25</span>
     </div>
-    <div class="hint">Управление: <b>WASD</b> / <b>стрелки</b>, или зажмите мышь / палец — персонаж идёт за курсором.<br>Горячие клавиши: <b>B</b> — магазин, <b>M</b> — мини-игры, <b>L</b> — рейтинг.</div>
+    <div class="hint">Управление: <b>WASD</b> / <b>стрелки</b>, или зажмите мышь / палец — персонаж идёт за курсором.<br>Горячие клавиши: <b>B</b> — магазин, <b>M</b> — мини-игры, <b>L</b> — рейтинг, <b>Enter</b> / <b>T</b> — чат.</div>
     <div class="mini-lb"><h3>🏆 Лучшие сборщики</h3><ol id="startLb"><li class="muted">Загрузка…</li></ol></div>
   </div>
 </div>
@@ -37,6 +53,7 @@
     <div class="row">Всего собрано: <b id="hudTotal">0</b></div>
     <div class="row">За сессию: <b id="hudSession">0</b></div>
     <div class="row online"><i class="live"></i>Онлайн: <b id="hudOnline">1</b></div>
+    <div class="row who"><span id="hudName"></span><button type="button" id="logoutBtn" class="link-btn">Выйти</button></div>
   </div>
   <div class="panel top">
     <h4>Топ арены</h4>
@@ -51,6 +68,18 @@
 </div>
 
 <div id="toasts"></div>
+
+<!-- Chat: compact panel on desktop, button + sheet on phones -->
+<div id="chat" class="chat hidden">
+  <div class="chat-head"><span>💬 Чат арены</span><button type="button" id="chatClose" class="close" aria-label="Закрыть чат">✕</button></div>
+  <div id="chatLog" class="chat-log" aria-live="polite"></div>
+  <form id="chatForm" class="chat-form" autocomplete="off">
+    <input id="chatInput" maxlength="120" placeholder="Enter — написать в чат" enterkeyhint="send" autocomplete="off" autocorrect="off">
+    <button type="submit" class="btn chat-send" aria-label="Отправить">➤</button>
+  </form>
+</div>
+<button type="button" id="chatBtn" class="chat-btn hidden" aria-label="Открыть чат">💬<span id="chatBadge" class="badge hidden">0</span></button>
+<div id="chatToast" class="chat-toast hidden"></div>
 
 <!-- Shop -->
 <div id="shop" class="modal hidden">
@@ -102,6 +131,7 @@
 
 <script src="/socket.io/socket.io.js"></script>
 <script src="shared.js"></script>
+<script src="rules.js"></script>
 <script src="client.js"></script>
 </body>
 </html>

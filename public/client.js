@@ -12,19 +12,21 @@
   resize();
   window.addEventListener('resize', resize);
 
-  // ------------------------------------------------------------ identity
-  function genToken() {
-    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
-    const a = new Uint8Array(16); (window.crypto || {}).getRandomValues ? crypto.getRandomValues(a) : a.forEach((_, i) => a[i] = Math.random() * 256);
-    return Array.from(a, b => b.toString(16).padStart(2, '0')).join('');
-  }
-  let token = localStorage.getItem('ics_token');
-  if (!token || !/^[A-Za-z0-9-]{16,64}$/.test(token)) { token = genToken(); localStorage.setItem('ics_token', token); }
-  $('nick').value = localStorage.getItem('ics_nick') || '';
+  // ------------------------------------------------------------ identity (session token issued by the server)
+  const TOKEN_KEY = 'ocs_session', NICK_KEY = 'ocs_nick';
+  const store = {
+    get: k => { try { return localStorage.getItem(k); } catch (_) { return null; } },
+    set: (k, v) => { try { localStorage.setItem(k, v); } catch (_) { /* private mode */ } },
+    del: k => { try { localStorage.removeItem(k); } catch (_) { /* ignore */ } },
+  };
+  store.del('ics_token'); store.del('ics_nick'); // old prototype keys
+  let token = store.get(TOKEN_KEY);
+  if (token && !/^[A-Za-z0-9_-]{43}$/.test(token)) { token = null; store.del(TOKEN_KEY); }
+  $('nick').value = store.get(NICK_KEY) || '';
 
   // ------------------------------------------------------------ state
   const socket = io({ transports: ['websocket', 'polling'] });
-  let joined = false, wantJoin = false, myName = '', myId = null, profile = null, sessionScore = 0;
+  let joined = false, wantPlay = !!token, myName = store.get(NICK_KEY) || '', myId = null, profile = null, sessionScore = 0;
   const players = new Map();   // id -> {id,name,eq,trail:[],dir:{x,y},pos:{x,y}}
   const snapshots = [];        // {time, map}
   const orbs = new Map();      // id -> {x,y,t,born}
@@ -32,6 +34,10 @@
   const me = { x: 0, y: 0 }, prevMe = { x: 0, y: 0 }, corr = { x: 0, y: 0 }, cam = { x: 0, y: 0 };
   let pending = [], seq = 0, lastStepAt = 0, myDir = { x: 1, y: 0 };
   const keys = {};
+  const MQ = window.matchMedia('(max-width: 760px), (pointer: coarse)');
+  const mobileUI = () => MQ.matches;
+  let chatOpen = false, unread = 0, chatToastTimer = null;
+  const chatLog = $('chatLog'), chatInput = $('chatInput');
   const pointer = { down: false, x: 0, y: 0 };
 
   const itemVal = id => (G.ITEM_BY_ID[id] || {}).value;
@@ -51,46 +57,118 @@
     while ($('toasts').children.length > 4) $('toasts').firstChild.remove();
   }
 
-  // ------------------------------------------------------------ join / connection
-  $('joinForm').addEventListener('submit', e => {
-    e.preventDefault();
-    const name = $('nick').value.trim();
-    if (name.length < 2) { $('joinError').textContent = 'Введите ник (минимум 2 символа)'; return; }
-    myName = name; wantJoin = true; doJoin();
+  // ------------------------------------------------------------ auth / connection
+  let authMode = 'login', authPending = false;
+  const setErr = msg => { $('joinError').textContent = msg || ''; };
+  function setAuthMode(mode) {
+    authMode = mode;
+    document.querySelectorAll('.auth-tab').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+    const reg = mode === 'register';
+    $('pass2').classList.toggle('hidden', !reg);
+    $('authRules').classList.toggle('hidden', !reg);
+    $('pass').setAttribute('autocomplete', reg ? 'new-password' : 'current-password');
+    $('authSubmit').textContent = reg ? 'Создать аккаунт' : 'Войти';
+    setErr('');
+  }
+  document.querySelectorAll('.auth-tab').forEach(b => b.addEventListener('click', () => setAuthMode(b.dataset.mode)));
+  $('nick').addEventListener('input', () => {
+    if (authMode !== 'register') return;
+    const v = $('nick').value.trim();
+    setErr(v.length >= 3 ? (RULES.nicknameError(v) || '') : '');
   });
-  function doJoin() {
-    if (!socket.connected) { $('joinError').textContent = 'Подключение к серверу…'; return; }
-    socket.emit('join', { name: myName, token }, res => {
-      if (!res || !res.ok) { wantJoin = false; joined = false; $('joinError').textContent = (res && res.error) || 'Ошибка входа'; showStart(); return; }
-      $('joinError').textContent = '';
-      localStorage.setItem('ics_nick', myName);
-      myId = res.you; profile = res.profile; myName = profile.name; sessionScore = 0;
-      players.clear(); orbs.clear(); snapshots.length = 0; pending = []; seq = 0; fx.length = 0;
-      for (const p of res.players) addPlayer(p);
-      const mine = players.get(myId);
-      me.x = prevMe.x = mine.pos.x; me.y = prevMe.y = mine.pos.y; corr.x = corr.y = 0;
-      const now = performance.now();
-      for (const [id, x, y, t] of res.orbs) orbs.set(id, { x, y, t, born: now - 1000 });
-      joined = true;
-      $('start').classList.add('hidden'); $('hud').classList.remove('hidden');
-      updateHud();
-      toast(`Добро пожаловать, ${myName}! Собирайте сферы.`, 'ok');
+  $('authForm').addEventListener('submit', e => {
+    e.preventDefault();
+    if (authPending) return;
+    const name = $('nick').value.trim(), password = $('pass').value, confirm = $('pass2').value;
+    if (!name) { setErr('Введите ник'); $('nick').focus(); return; }
+    if (authMode === 'register') {
+      const ne = RULES.nicknameError(name); if (ne) { setErr(ne); $('nick').focus(); return; }
+      const pe = RULES.passwordError(password); if (pe) { setErr(pe); $('pass').focus(); return; }
+      if (password !== confirm) { setErr('Пароли не совпадают'); $('pass2').focus(); return; }
+    } else if (!password) { setErr('Введите пароль'); $('pass').focus(); return; }
+    if (!socket.connected) { setErr('Нет связи с сервером, подождите…'); socket.connect(); return; }
+    authPending = true; $('authSubmit').disabled = true; setErr('');
+    const payload = { mode: authMode, name, password };
+    if (authMode === 'register') payload.confirm = confirm;
+    socket.emit('auth', payload, res => {
+      authPending = false; $('authSubmit').disabled = false;
+      if (!res || !res.ok) { setErr((res && res.error) || 'Ошибка входа'); return; }
+      token = res.token; store.set(TOKEN_KEY, token);
+      $('pass').value = ''; $('pass2').value = '';
+      wantPlay = true;
+      enterGame(res);
+    });
+  });
+  function tryResume() {
+    if (!token || joined || authPending) return;
+    if (!socket.connected) { showResume('Подключение к серверу…', false); socket.connect(); return; } // resumes on 'connect'
+    authPending = true;
+    showResume('Входим как ' + (myName || 'игрок') + '…', false);
+    socket.emit('resume', { token }, res => {
+      authPending = false;
+      if (res && res.ok) { enterGame(res); return; }
+      if (res && res.expired) { token = null; store.del(TOKEN_KEY); wantPlay = false; showStart(); setErr(res.error); return; }
+      wantPlay = false; showStart(); setErr((res && res.error) || 'Не удалось войти');
     });
   }
+  function enterGame(res) {
+    setErr('');
+    myId = res.you; profile = res.profile; myName = profile.name; sessionScore = 0;
+    store.set(NICK_KEY, myName); $('nick').value = myName;
+    players.clear(); orbs.clear(); snapshots.length = 0; pending = []; seq = 0; fx.length = 0;
+    for (const p of res.players) addPlayer(p);
+    const mine = players.get(myId);
+    me.x = prevMe.x = mine.pos.x; me.y = prevMe.y = mine.pos.y; corr.x = corr.y = 0;
+    const now = performance.now();
+    for (const [id, x, y, t] of res.orbs) orbs.set(id, { x, y, t, born: now - 1000 });
+    joined = true;
+    $('start').classList.add('hidden'); $('hud').classList.remove('hidden');
+    $('chat').classList.remove('hidden'); $('chatBtn').classList.remove('hidden');
+    $('hudName').textContent = '👤 ' + myName;
+    resetChat(res.chat || []);
+    updateHud();
+    toast(`Добро пожаловать, ${myName}! Собирайте сферы.`, 'ok');
+  }
+  function showResume(text, buttons) {
+    $('resumeBox').classList.remove('hidden'); $('authBox').classList.add('hidden');
+    $('resumeText').textContent = text;
+    $('resumeBtn').classList.toggle('hidden', !buttons); $('resumeLogout').classList.toggle('hidden', !buttons);
+  }
   function showStart() {
+    joined = false;
     $('start').classList.remove('hidden'); $('hud').classList.add('hidden');
+    $('chat').classList.add('hidden'); $('chatBtn').classList.add('hidden'); closeChat();
     document.querySelectorAll('.modal').forEach(m => m.classList.add('hidden'));
+    if (token) showResume('Вы вошли как ' + (myName || 'игрок'), true);
+    else { $('resumeBox').classList.add('hidden'); $('authBox').classList.remove('hidden'); }
     loadStartLb();
   }
-  socket.on('connect', () => { if (wantJoin) doJoin(); else if ($('joinError').textContent === 'Подключение к серверу…') $('joinError').textContent = ''; });
-  socket.on('disconnect', () => { if (joined) toast('Соединение потеряно, переподключаемся…', 'err'); joined = false; });
-  socket.on('kicked', msg => { wantJoin = false; joined = false; $('joinError').textContent = msg; showStart(); });
+  function logout() {
+    const t = token;
+    token = null; store.del(TOKEN_KEY); wantPlay = false;
+    if (socket.connected) socket.emit('logout', { token: t }, () => {});
+    showStart(); setAuthMode('login'); $('pass').value = '';
+    toast('Вы вышли из аккаунта');
+  }
+  $('logoutBtn').addEventListener('click', logout);
+  $('resumeLogout').addEventListener('click', logout);
+  $('resumeBtn').addEventListener('click', () => { wantPlay = true; tryResume(); });
+  if (token) showResume('Входим как ' + (myName || 'игрок') + '…', false);
+
+  socket.on('connect', () => { if (wantPlay && token) tryResume(); else if (/связи/.test($('joinError').textContent)) setErr(''); });
+  socket.on('disconnect', () => {
+    authPending = false; $('authSubmit').disabled = false;
+    if (joined) toast('Соединение потеряно, переподключаемся…', 'err');
+    joined = false;
+  });
+  socket.on('kicked', msg => { wantPlay = false; showStart(); setErr(msg); });
 
   function addPlayer(p) {
     players.set(p.id, { id: p.id, name: p.name, eq: p.eq, trail: [], dir: { x: 1, y: 0 }, pos: { x: p.x, y: p.y }, last: { x: p.x, y: p.y } });
   }
   socket.on('pjoin', p => { if (!players.has(p.id)) addPlayer(p); });
   socket.on('pleave', id => players.delete(id));
+  socket.on('chat', m => addChat(m, true));
   socket.on('pmeta', p => { const pl = players.get(p.id); if (pl) { pl.eq = p.eq; pl.name = p.name; } });
   socket.on('sping', v => socket.emit('spong', v));
   socket.on('announce', a => toast('✨ ' + a.text));
@@ -138,7 +216,11 @@
   socket.on('profile', p => { profile = p; updateHud(); if (!$('shop').classList.contains('hidden')) renderShop(); });
   socket.on('top', d => {
     $('hudOnline').textContent = d.online;
-    $('hudTop').innerHTML = d.top.map(([id, name, s]) => `<li class="${id === myId ? 'me' : ''}">${esc(name)} <b>${fmt(s)}</b></li>`).join('');
+    const ol = $('hudTop'); ol.textContent = '';
+    for (const [id, name, s] of d.top) {
+      const li = document.createElement('li'); if (id === myId) li.className = 'me';
+      li.append(String(name) + ' '); const b = document.createElement('b'); b.textContent = fmt(s); li.appendChild(b); ol.appendChild(li);
+    }
   });
 
   function updateHud(bump) {
@@ -153,8 +235,13 @@
 
   // ------------------------------------------------------------ input
   const anyModal = () => Array.from(document.querySelectorAll('.modal')).some(m => !m.classList.contains('hidden'));
+  const typing = () => { const a = document.activeElement; return !!a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA'); };
   window.addEventListener('keydown', e => {
-    if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
+    if (typing()) return;                 // chat / login inputs: no movement, no hotkeys
+    if (joined && chatOpen) { if (e.code === 'Escape') closeChat(); return; }
+    if (joined && !anyModal() && !mobileUI() && (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'KeyT') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault(); chatInput.focus(); return;
+    }
     keys[e.code] = true;
     if (!joined) return;
     if (e.code === 'Escape') closeModals();
@@ -172,7 +259,7 @@
   window.addEventListener('pointercancel', () => { pointer.down = false; });
 
   function getDir() {
-    if (anyModal()) return { x: 0, y: 0 };
+    if (anyModal() || chatOpen) return { x: 0, y: 0 };
     let x = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
     let y = (keys.KeyS || keys.ArrowDown ? 1 : 0) - (keys.KeyW || keys.ArrowUp ? 1 : 0);
     if (x || y) { const l = Math.hypot(x, y); return { x: x / l, y: y / l }; }
@@ -566,22 +653,35 @@
   }
 
   // ------------------------------------------------------------ leaderboard
-  function lbRows(list) {
-    return list.map(p => `<tr class="${p.name === myName ? 'me' : ''}"><td>${p.rank <= 3 ? ['🥇', '🥈', '🥉'][p.rank - 1] : p.rank}</td>
-      <td><i class="dot" style="background:${p.color === 'rainbow' ? 'linear-gradient(90deg,#f55,#ff5,#5f5,#5ff,#a5f)' : p.color};box-shadow:0 0 8px ${p.color === 'rainbow' ? '#fff' : p.color}"></i>${esc(p.name)}${p.online ? '<span class="on" title="онлайн"></span>' : ''}</td>
-      <td class="num">${fmt(p.total)}</td></tr>`).join('');
+  const safeColor = c => (c === 'rainbow' || /^#[0-9a-fA-F]{3,8}$/.test(c) ? c : '#3ee0ff');
+  function lbRow(p) {
+    const tr = document.createElement('tr'); if (p.name === myName) tr.className = 'me';
+    const td1 = document.createElement('td'); td1.textContent = p.rank <= 3 ? ['🥇', '🥈', '🥉'][p.rank - 1] : p.rank;
+    const td2 = document.createElement('td');
+    const dot = document.createElement('i'); dot.className = 'dot';
+    const c = safeColor(p.color);
+    dot.style.background = c === 'rainbow' ? 'linear-gradient(90deg,#f55,#ff5,#5f5,#5ff,#a5f)' : c;
+    dot.style.boxShadow = '0 0 8px ' + (c === 'rainbow' ? '#fff' : c);
+    td2.append(dot, String(p.name));
+    if (p.online) { const on = document.createElement('span'); on.className = 'on'; on.title = 'онлайн'; td2.appendChild(on); }
+    const td3 = document.createElement('td'); td3.className = 'num'; td3.textContent = fmt(p.total);
+    tr.append(td1, td2, td3);
+    return tr;
   }
+  function msgRow(text) { const tr = document.createElement('tr'); const td = document.createElement('td'); td.colSpan = 3; td.className = 'muted'; td.textContent = text; tr.appendChild(td); return tr; }
   function loadLb() {
-    $('lbBody').innerHTML = '<tr><td colspan="3" class="muted">Загрузка…</td></tr>';
+    const body = $('lbBody'); body.replaceChildren(msgRow('Загрузка…'));
     fetch(`/api/leaderboard?limit=50&name=${encodeURIComponent(myName)}`).then(r => r.json()).then(d => {
-      $('lbBody').innerHTML = lbRows(d.players) || '<tr><td colspan="3" class="muted">Пока пусто — станьте первым!</td></tr>';
-      $('lbMe').innerHTML = d.me ? `Ваше место: <b>#${d.me.rank}</b> из ${d.totalPlayers} · собрано ${fmt(d.me.total)} сфер` : 'Соберите хотя бы одну сферу, чтобы попасть в рейтинг.';
-    }).catch(() => { $('lbBody').innerHTML = '<tr><td colspan="3">Ошибка загрузки</td></tr>'; });
+      body.replaceChildren(...(d.players.length ? d.players.map(lbRow) : [msgRow('Пока пусто — станьте первым!')]));
+      $('lbMe').textContent = d.me ? `Ваше место: #${d.me.rank} из ${d.totalPlayers} · собрано ${fmt(d.me.total)} сфер` : 'Соберите хотя бы одну сферу, чтобы попасть в рейтинг.';
+    }).catch(() => { body.replaceChildren(msgRow('Ошибка загрузки')); });
   }
   function loadStartLb() {
+    const ol = $('startLb');
+    const li = (text, cls, num) => { const el = document.createElement('li'); if (cls) el.className = cls; el.textContent = text; if (num != null) { const b = document.createElement('b'); b.textContent = num; el.append(' ', b); } return el; };
     fetch('/api/leaderboard?limit=5').then(r => r.json()).then(d => {
-      $('startLb').innerHTML = d.players.length ? d.players.map(p => `<li>${esc(p.name)} <b>${fmt(p.total)}</b></li>`).join('') : '<li class="muted">Пока никого — будьте первым!</li>';
-    }).catch(() => { $('startLb').innerHTML = '<li class="muted">Не удалось загрузить</li>'; });
+      ol.replaceChildren(...(d.players.length ? d.players.map(p => li(p.name, '', fmt(p.total))) : [li('Пока никого — будьте первым!', 'muted')]));
+    }).catch(() => { ol.replaceChildren(li('Не удалось загрузить', 'muted')); });
   }
   loadStartLb();
 
@@ -703,5 +803,94 @@
     if ($('games').classList.contains('hidden')) toast(`${name}: ${r.prize > 0 ? '+' + r.prize + ' сфер' : 'без выигрыша'}`, r.prize > 0 ? 'ok' : 'err');
     if (r.prize > 0) floaters.push({ x: dispMe.x, y: dispMe.y - 40, text: '+' + r.prize, color: '#ffcc33', start: performance.now(), big: true });
     updateGameButtons();
+  });
+
+  // ------------------------------------------------------------ chat
+  // User content is only ever rendered with textContent (never innerHTML).
+  function nameColorize(el, c) {
+    if (c === 'rainbow') el.classList.add('rainbow-text');
+    else if (typeof c === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(c)) el.style.color = c;
+  }
+  function chatLine(m) {
+    const el = document.createElement('div');
+    el.className = 'chat-msg' + (m.sys ? ' sys' : '') + (m.notice ? ' notice' : '') + (m.n && m.n === myName ? ' mine' : '');
+    if (m.n) { const n = document.createElement('span'); n.className = 'n'; n.textContent = String(m.n); nameColorize(n, m.c); el.append(n, ': '); }
+    const t = document.createElement('span'); t.className = 't'; t.textContent = String(m.t == null ? '' : m.t); el.appendChild(t);
+    return el;
+  }
+  function addChat(m, live) {
+    if (!m || typeof m !== 'object') return;
+    const atBottom = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 40;
+    chatLog.appendChild(chatLine(m));
+    while (chatLog.childElementCount > 80) chatLog.firstElementChild.remove();
+    if (atBottom || m.notice || (m.n && m.n === myName)) chatLog.scrollTop = chatLog.scrollHeight;
+    if (live && joined && mobileUI() && !chatOpen && m.n && m.n !== myName) { unread++; updateBadge(); showChatToast(m); }
+  }
+  function resetChat(history) {
+    chatLog.textContent = ''; unread = 0; updateBadge();
+    for (const m of history) addChat(m, false);
+    chatLog.scrollTop = chatLog.scrollHeight;
+  }
+  function updateBadge() {
+    const b = $('chatBadge');
+    b.textContent = unread > 9 ? '9+' : String(unread);
+    b.classList.toggle('hidden', unread === 0);
+  }
+  function showChatToast(m) {
+    const el = $('chatToast');
+    el.replaceChildren(chatLine(m));
+    el.classList.remove('hidden', 'fade');
+    clearTimeout(chatToastTimer);
+    chatToastTimer = setTimeout(() => { el.classList.add('fade'); chatToastTimer = setTimeout(() => el.classList.add('hidden'), 450); }, 3200);
+  }
+  // keep the sheet exactly inside the visible area while the on-screen keyboard is open
+  function fitSheet() {
+    const chat = $('chat'), vv = window.visualViewport;
+    if (!chatOpen || !vv) { chat.style.top = ''; chat.style.height = ''; return; }
+    chat.style.top = Math.max(0, vv.offsetTop) + 'px';
+    chat.style.height = vv.height + 'px';
+  }
+  if (window.visualViewport) { visualViewport.addEventListener('resize', fitSheet); visualViewport.addEventListener('scroll', fitSheet); }
+  function openChat() {
+    if (!joined) return;
+    chatOpen = true; unread = 0; updateBadge();
+    for (const k in keys) keys[k] = false;
+    pointer.down = false;
+    $('chat').classList.add('open'); $('chatToast').classList.add('hidden');
+    fitSheet();
+    chatLog.scrollTop = chatLog.scrollHeight;
+  }
+  function closeChat() {
+    chatOpen = false;
+    $('chat').classList.remove('open');
+    if (document.activeElement === chatInput) chatInput.blur();
+    fitSheet();
+  }
+  $('chatBtn').addEventListener('click', openChat);
+  $('chatClose').addEventListener('click', closeChat);
+  if (MQ.addEventListener) MQ.addEventListener('change', () => { if (!mobileUI()) closeChat(); });
+  chatInput.addEventListener('focus', () => { for (const k in keys) keys[k] = false; pointer.down = false; $('chat').classList.add('active'); });
+  chatInput.addEventListener('blur', () => $('chat').classList.remove('active'));
+  chatInput.addEventListener('keydown', e => {
+    e.stopPropagation();
+    if (e.key === 'Escape') { e.preventDefault(); chatInput.blur(); if (mobileUI()) closeChat(); }
+  });
+  let lastSend = 0;
+  $('chatForm').addEventListener('submit', e => {
+    e.preventDefault();
+    const text = chatInput.value.trim();
+    if (!text) { if (!mobileUI()) chatInput.blur(); return; }
+    if (!joined || !socket.connected) { addChat({ notice: true, t: 'Нет связи с сервером' }); return; }
+    const now = Date.now();
+    if (now - lastSend < 300) return;
+    lastSend = now;
+    socket.emit('chat', text, res => {
+      if (!res || !res.ok) {
+        addChat({ notice: true, t: (res && res.error) || 'Сообщение не отправлено' });
+        if (!chatInput.value) chatInput.value = text; // let the player retry
+      }
+    });
+    chatInput.value = '';
+    if (!mobileUI()) chatInput.blur();
   });
 })();

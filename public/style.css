@@ -25,10 +25,21 @@ canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: blo
   filter: drop-shadow(0 0 18px rgba(120, 160, 255, .35)); }
 .logo span { display: block; }
 .subtitle { color: #aab3d9; margin: 6px 0 18px; }
-#joinForm { display: flex; gap: 10px; }
-#nick { flex: 1; min-width: 0; font-size: 18px; padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(120, 150, 255, .4);
-  background: #0b1024; color: #fff; outline: none; }
-#nick:focus { border-color: #3ee0ff; box-shadow: 0 0 12px rgba(62, 224, 255, .4); }
+.auth-tabs { display: flex; gap: 6px; margin-bottom: 10px; background: rgba(255, 255, 255, .04); border-radius: 14px; padding: 4px; }
+.auth-tab { flex: 1; background: transparent; border: none; color: #aab3d9; font-size: 16px; font-weight: 700; padding: 9px 10px; border-radius: 10px; cursor: pointer; }
+.auth-tab.active { background: rgba(62, 224, 255, .16); color: #fff; box-shadow: inset 0 0 0 1px rgba(62, 224, 255, .5); }
+.auth-form { display: flex; flex-direction: column; gap: 10px; }
+.auth-form input { width: 100%; font-size: 17px; padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(120, 150, 255, .4);
+  background: #0b1024; color: #fff; outline: none; user-select: text; -webkit-user-select: text; }
+.auth-form input:focus { border-color: #3ee0ff; box-shadow: 0 0 12px rgba(62, 224, 255, .4); }
+.rules { font-size: 12.5px; color: #8a93b8; text-align: left; line-height: 1.45; }
+.resume { padding: 6px 0 2px; }
+.resume-text { font-size: 17px; margin-bottom: 12px; color: #dfe6ff; }
+.resume-actions { display: flex; gap: 10px; justify-content: center; }
+.link-btn { background: none; border: none; color: #8fb8ff; font-size: 13px; cursor: pointer; padding: 0 0 0 8px; pointer-events: auto; text-decoration: underline; }
+.link-btn:hover { color: #fff; }
+.row.who { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; color: #dfe6ff; max-width: 220px; }
+.row.who span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .error { color: #ff7b8a; min-height: 22px; margin-top: 8px; font-size: 14px; }
 .orb-legend { display: flex; justify-content: center; gap: 14px; flex-wrap: wrap; font-size: 14px; color: #c8cff0; margin: 6px 0 12px; }
 .hint { font-size: 13px; color: #8a93b8; line-height: 1.5; }
@@ -103,6 +114,52 @@ canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: blo
 .lb-table td.num { color: #ffcc33; font-weight: 700; }
 .lb-me { margin: 6px 0 10px; font-weight: 600; }
 .on { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #3ddc8c; margin-left: 6px; vertical-align: 2px; }
+/* ---------------------------------------------------------------- chat (desktop: compact panel bottom-left) */
+.chat { position: fixed; left: 12px; bottom: 12px; width: 340px; z-index: 6; display: flex; flex-direction: column;
+  background: rgba(10, 14, 30, .42); border: 1px solid rgba(110, 140, 255, .16); border-radius: 14px; backdrop-filter: blur(4px); transition: background .2s, border-color .2s; }
+.chat.active { background: rgba(10, 14, 30, .85); border-color: rgba(62, 224, 255, .45); }
+.chat-head { display: none; }
+.chat-log { max-height: 160px; min-height: 24px; overflow-y: auto; padding: 8px 10px 2px; font-size: 13px; line-height: 1.35; overscroll-behavior: contain;
+  scrollbar-width: thin; scrollbar-color: rgba(120, 150, 255, .35) transparent; user-select: text; -webkit-user-select: text; }
+.chat-msg { overflow-wrap: anywhere; margin: 1px 0; color: #e6eaff; text-shadow: 0 1px 2px rgba(0, 0, 0, .9); }
+.chat-msg .n { font-weight: 700; color: #fff; }
+.chat-msg.sys { color: #8a93b8; font-style: italic; font-size: 12px; }
+.chat-msg.notice { color: #ff9aa6; }
+.rainbow-text { background: linear-gradient(90deg, #ff5f6d, #ffc371, #9dff4f, #3ee0ff, #b46bff); -webkit-background-clip: text; background-clip: text; color: transparent !important; text-shadow: none; }
+.chat-form { display: flex; gap: 6px; padding: 6px; }
+#chatInput { flex: 1; min-width: 0; font-size: 14px; padding: 7px 10px; border-radius: 10px; border: 1px solid rgba(120, 150, 255, .28);
+  background: rgba(6, 9, 20, .6); color: #fff; outline: none; user-select: text; -webkit-user-select: text; }
+#chatInput:focus { border-color: #3ee0ff; }
+#chatInput::placeholder { color: #7480a8; }
+.chat-send { padding: 5px 12px; font-size: 14px; }
+.chat-btn { display: none; }
+.chat-toast { display: none; }
+@media (max-width: 1180px) and (min-width: 761px) { .chat { bottom: 66px; width: 300px; } }
+
+/* ---------------------------------------------------------------- phones / touch: chat button + full-screen sheet */
+@media (max-width: 760px), (pointer: coarse) {
+  .chat { display: none; }
+  .chat.open { display: flex; position: fixed; left: 0; right: 0; top: 0; bottom: auto; width: auto; height: 100%; z-index: 45; border-radius: 0; border: none;
+    background: rgba(6, 9, 20, .96); backdrop-filter: none; }
+  .chat.open .chat-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; padding-top: calc(10px + env(safe-area-inset-top));
+    font-weight: 700; font-size: 17px; border-bottom: 1px solid rgba(110, 140, 255, .2); }
+  .chat.open .chat-head .close { font-size: 26px; padding: 4px 8px; }
+  .chat.open .chat-log { flex: 1; max-height: none; font-size: 15px; padding: 10px 14px; }
+  .chat.open .chat-msg { margin: 3px 0; }
+  .chat.open .chat-form { padding: 8px 10px; padding-bottom: calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid rgba(110, 140, 255, .2); }
+  #chatInput { font-size: 16px; padding: 10px 12px; } /* 16px avoids iOS zoom-on-focus */
+  .chat-send { font-size: 18px; padding: 8px 16px; }
+  .chat-btn { display: flex; align-items: center; justify-content: center; position: fixed; left: 12px; bottom: calc(70px + env(safe-area-inset-bottom)); z-index: 6;
+    width: 48px; height: 48px; border-radius: 50%; font-size: 22px; background: rgba(20, 28, 60, .85); border: 1px solid rgba(120, 150, 255, .45); color: #fff;
+    box-shadow: 0 0 14px rgba(62, 224, 255, .25); cursor: pointer; touch-action: manipulation; }
+  .badge { position: absolute; top: -4px; right: -4px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 10px; background: #ff4d6d; color: #fff;
+    font-size: 12px; font-weight: 800; line-height: 20px; text-align: center; box-shadow: 0 0 8px rgba(255, 77, 109, .7); }
+  .chat-toast { display: block; position: fixed; top: calc(6px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); z-index: 7; pointer-events: none;
+    max-width: min(88vw, 420px); background: rgba(10, 14, 30, .82); border: 1px solid rgba(110, 140, 255, .3); border-radius: 12px; padding: 5px 12px;
+    font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 1; transition: opacity .45s; }
+  .chat-toast .chat-msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chat-toast.fade { opacity: 0; }
+}
 @media (max-width: 640px) {
   .top { width: 150px; font-size: 12px; }
   .stats { min-width: 140px; font-size: 12px; padding: 8px 10px; }
@@ -110,4 +167,8 @@ canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: blo
   #minimap { width: 100px; height: 100px; bottom: 70px; }
   .menu-buttons .btn { font-size: 13px; padding: 8px 10px; }
   .logo { font-size: 30px; }
+  .start-card { padding: 22px 16px; }
+  .row.who { max-width: 150px; }
+  #toasts { top: auto; bottom: calc(190px + env(safe-area-inset-bottom)); width: 86vw; }
+  .toast { font-size: 13px; padding: 6px 12px; text-align: center; max-width: 86vw; }
 }

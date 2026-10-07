@@ -5,13 +5,16 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node test/multiplayer-test.js"
+    "test": "node test/multiplayer-test.js",
+    "test:ui": "node test/screenshot.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "express": "^5.2.1",
+    "pg": "^8.23.1",
     "socket.io": "^4.8.4"
   },
   "devDependencies": {
