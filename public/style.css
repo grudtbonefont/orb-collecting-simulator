@@ -71,7 +71,13 @@ canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: blo
 .top li.me { color: #3ee0ff; font-weight: 700; }
 .menu-buttons { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; gap: 8px; pointer-events: auto; }
 .menu-buttons .btn i { font-style: normal; margin-right: 6px; }
-#minimap { position: absolute; right: 12px; bottom: 12px; border-radius: 12px; border: 1px solid rgba(110, 140, 255, .3); background: rgba(8, 12, 26, .75); }
+.radar { position: absolute; right: 12px; bottom: 12px; width: 150px; height: 150px; z-index: 4; }
+#minimap { display: block; width: 100%; height: 100%; border-radius: 50%; border: 1px solid rgba(90, 255, 170, .35); background: rgba(4, 16, 14, .78); box-shadow: 0 0 14px rgba(60, 255, 160, .15); }
+.radar-toggle { position: absolute; left: -4px; top: -4px; width: 24px; height: 24px; border-radius: 50%; border: 1px solid rgba(90, 255, 170, .45); background: rgba(6, 20, 18, .92);
+  color: #8dffc4; font: 700 13px/1 system-ui, sans-serif; cursor: pointer; padding: 0; pointer-events: auto; }
+.radar.collapsed { width: 34px; height: 34px; }
+.radar.collapsed #minimap { display: none; }
+.radar.collapsed .radar-toggle { left: 0; top: 0; width: 34px; height: 34px; font-size: 16px; }
 
 #toasts { position: fixed; top: 74px; left: 50%; transform: translateX(-50%); z-index: 40; display: flex; flex-direction: column; gap: 6px; align-items: center; pointer-events: none; }
 .toast { background: rgba(14, 20, 44, .92); border: 1px solid rgba(255, 204, 51, .5); color: #ffe08a; padding: 8px 16px; border-radius: 12px;
@@ -206,7 +212,8 @@ canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: blo
   .top { width: 150px; font-size: 12px; }
   .stats { min-width: 140px; font-size: 12px; padding: 8px 10px; }
   .balance { font-size: 22px; }
-  #minimap { width: 100px; height: 100px; bottom: 70px; }
+  .radar { width: 92px; height: 92px; bottom: 70px; right: 10px; }
+  .radar.collapsed { width: 34px; height: 34px; }
   .menu-buttons .btn { font-size: 13px; padding: 8px 10px; }
   .logo { font-size: 30px; }
   .start-card { padding: 22px 16px; }

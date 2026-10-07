@@ -315,6 +315,11 @@ function tierEventRules() {
   const kinds = l => G.compassTargets(l, list, me, evz).map(t => t.kind + (t.kind === 'e' ? '@' + t.x : '')).join(',');
   ok(kinds(0) === '' && kinds(1) === 'l,m' && G.compassTargets(1, list, me, evz).every(t => t.dist === null) && kinds(2) === 'l,m,e@1200' && G.compassTargets(2, list, me, null).every(t => t.dist > 0) && kinds(3) === 'l,m,event,e@1200,event',
     `«Чутьё легенды»: lvl1 ${kinds(1)} · lvl2 ${kinds(2)} (nearest epic in ${G.SENSE_EPIC_RANGE} px, distances) · lvl3 ${kinds(3)} (treasures, event zone)`);
+  // «Радар»: only common/uncommon (+ faint rare) orbs within range; never epic/legendary/mythic/treasure (rain orbs flagged ev but c/u/r are fine)
+  const rlist = list.concat([{ t: 'u', x: 1000, y: 1500 }, { t: 'r', x: 900, y: 1200 }, { t: 'c', x: 1000, y: 1000 + G.RADAR.range + 1 }, { t: 'c', x: 1300, y: 1100, ev: 1 }, { t: 'x', x: 1000, y: 1001 }]);
+  const rb = G.radarBlips(rlist, me), rt = rb.map(b => b.t).join(',');
+  ok(rt === 'c,u,r,c' && rb.every(b => b.d <= G.RADAR.range) && rb.find(b => b.t === 'r').a < 0.5 && !rb.some(b => ['e', 'l', 'm', 't'].includes(b.t)) && Object.keys(G.RADAR.tiers).join() === 'c,u,r',
+    `«Радар» filter: ${rt} (epic/legendary/mythic/treasure and out-of-range orbs dropped, rare faint)`);
   // events: rewards are a bonus of a few minutes of farming, timings, schedule
   const RATE = 100, E = G.EVENTS, rewards = [].concat(E.koth.rewards, [E.koth.solo, E.koth.participation, E.runner.reward]);
   ok(G.EVENT_KEYS.join(',') === 'rain,koth,treasure,runner' && E.rain.durationMs === 45000 && rewards.every(r => r.orbs + r.shards * G.SHARD_EXCHANGE.orbs <= 4 * RATE && r.shards <= 2) &&
@@ -445,6 +450,32 @@ async function eventSuite(URL) {
 }
 
 // «Лавка осколков»: exclusives for shards only (needs hooks)
+async function pushSuite(URL) {
+  console.log('--- player pushing');
+  const A = makeClient(URL), B = makeClient(URL);
+  await A.register('PushA' + rnd()); await B.register('PushB' + rnd());
+  const D = G.PLAYER_R * 2, dist = () => Math.hypot(A.pos.x - B.pos.x, A.pos.y - B.pos.y);
+  // pure rule: overlapping circles end up exactly touching, inside the world
+  const pr = [{ x: 500, y: 500 }, { x: 500, y: 500 }, { x: 20, y: 20 }, { x: 30, y: 25 }]; G.separatePlayers(pr); G.separatePlayers(pr);
+  ok(Math.hypot(pr[0].x - pr[1].x, pr[0].y - pr[1].y) >= D - 0.01 && Math.hypot(pr[2].x - pr[3].x, pr[2].y - pr[3].y) >= D - 0.5 && pr.every(p => p.x >= G.PLAYER_R && p.y >= G.PLAYER_R), 'separatePlayers: stacked / cornered players are pushed apart, never out of bounds');
+  await A.emit('test:tp', { x: 1500, y: 2700 }); await B.emit('test:tp', { x: 1500, y: 2700 });
+  await sleep(300);
+  ok(dist() >= D - 0.5 && dist() < D + 15, `two players on the same spot get separated (distance ${dist().toFixed(1)}, min ${D})`);
+  await A.emit('test:tp', { x: 1000, y: 2700 }); await B.emit('test:tp', { x: 1060, y: 2700 }); await sleep(200);
+  const b0 = { ...B.pos };
+  let minD = 1e9;
+  for (let i = 0; i < 30; i++) { A.s.emit('input', { s: ++A.seq, x: 1, y: 0 }); await sleep(50); minD = Math.min(minD, dist()); }
+  await sleep(200);
+  const pushed = B.pos.x - b0.x, maxIdeal = G.speedFor(0) * 1.5 + 40;
+  ok(pushed > 120 && pushed < maxIdeal && minD > D - 13 && Math.abs(B.pos.y - b0.y) < 5, `a walking player shoves a standing one: B moved ${pushed.toFixed(0)} px in 1.5 s (A walks ≤ ${(G.speedFor(0) * 1.5).toFixed(0)}), never overlapping much (min ${minD.toFixed(1)})`);
+  // against the world edge: B stays in bounds, A can't walk through
+  await B.emit('test:tp', { x: G.WORLD.w - G.PLAYER_R, y: 2000 }); await A.emit('test:tp', { x: G.WORLD.w - 100, y: 2000 }); await sleep(200);
+  for (let i = 0; i < 20; i++) { A.s.emit('input', { s: ++A.seq, x: 1, y: 0 }); await sleep(50); }
+  await sleep(200);
+  ok(B.pos.x <= G.WORLD.w - G.PLAYER_R && A.pos.x < B.pos.x && dist() >= D - 1, `pinned at the wall: B stays in the world (x ${B.pos.x}), A stops against B (gap ${dist().toFixed(1)})`);
+  A.close(); B.close();
+}
+
 async function shardShopSuite(URL) {
   console.log('--- «Лавка осколков»');
   const S = makeClient(URL), W = makeClient(URL);
@@ -742,6 +773,7 @@ async function upgradeSuite(URL) {
   const capped = await A.emit('test:upgrades', { speed: 99 });
   ok(capped.ok && capped.profile.upgrades.speed === G.UPGRADES.speed.max, 'a level above the max is clamped to the max');
   const B = makeClient(URL); await B.register('Base' + rnd());
+  await A.emit('test:tp', { x: 700, y: 400 }); await B.emit('test:tp', { x: 2300, y: 2600 }); // away from everyone (players push each other)
   await sleep(300);
   const moveTen = async c => { const p0 = { ...c.pos }; const dir = p0.x > G.WORLD.w / 2 ? -1 : 1; for (let i = 0; i < 10; i++) c.s.emit('input', { s: ++c.seq, x: dir, y: 0 }); await sleep(900); return Math.hypot(c.pos.x - p0.x, c.pos.y - p0.y); };
   const [dA, dB] = await Promise.all([moveTen(A), moveTen(B)]);
@@ -1103,7 +1135,7 @@ async function runMode(label, env, opts) {
   if (opts.legacy) await migrationSuite(srv.url, opts.legacy, label);
   await authSuite(srv.url);
   await profileSuite(srv.url);
-  if (opts.full) { await chatSuite(srv.url); await gameplaySuite(srv.url); await minigameSuite(srv.url); await upgradeSuite(srv.url); await newItemsSuite(srv.url); await tiersSuite(srv.url); await eventSuite(srv.url); }
+  if (opts.full) { await chatSuite(srv.url); await gameplaySuite(srv.url); await minigameSuite(srv.url); await upgradeSuite(srv.url); await newItemsSuite(srv.url); await tiersSuite(srv.url); await eventSuite(srv.url); await pushSuite(srv.url); }
   await shardShopSuite(srv.url);
   await shopInventorySuite(srv.url);
   await trashSuite(srv.url);
@@ -1148,7 +1180,7 @@ async function runCycleMode() {
     tierEventRules();
     const tmp = path.join(os.tmpdir(), `ocs-ev-${process.pid}.json`);
     const srv = await startServer(3101, { DATA_FILE: tmp, OCS_TEST_HOOKS: '1' });
-    await tiersSuite(srv.url); await eventSuite(srv.url); await shardShopSuite(srv.url);
+    await tiersSuite(srv.url); await eventSuite(srv.url); await pushSuite(srv.url); await shardShopSuite(srv.url);
     await srv.stop(); fs.rmSync(tmp, { force: true });
     privacyAudit(await schedulerSuite());
   } else if (process.env.OCS_TEST_ONLY === 'upgrades') {

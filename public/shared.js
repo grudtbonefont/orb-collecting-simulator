@@ -232,6 +232,18 @@
   }
   // «Чутьё легенды» compass targets (client display; every position here is public anyway).
   // lvl 1: legendary + mythic orbs · lvl 2: + nearest epic within SENSE_EPIC_RANGE, distances · lvl 3: + event targets.
+  // «Радар» (sonar minimap): only plentiful tiers. Epic / legendary / mythic orbs, event treasures and the runner
+  // never show up (that's the compass' job). Pure function over data the client already has; the server sends nothing extra.
+  const RADAR = { range: 900, periodMs: 3000, sweepMs: 1100, tiers: { c: 1, u: 1, r: 0.35 } }; // tier → blip strength (rare is faint)
+  function radarBlips(orbList, me, range = RADAR.range) {
+    const out = [];
+    for (const o of orbList) {
+      const a = RADAR.tiers[o.t]; if (!a) continue;
+      const dx = o.x - me.x, dy = o.y - me.y, d = Math.hypot(dx, dy);
+      if (d <= range) out.push({ x: o.x, y: o.y, t: o.t, a, d });
+    }
+    return out;
+  }
   function compassTargets(level, orbList, me, ev) {
     const lvl = upLevel('sense', level), out = [];
     if (lvl < 1 || !me) return out;
@@ -268,6 +280,44 @@
   const skillPrize = (prize, level) => prize > 0 ? Math.round(prize * (1 + upValue('skill', level) / 100)) : prize;
 
   // Apply one movement input step (STEP_DT seconds). dx,dy is a direction vector with length <= 1.
+  // Player pushing (server-authoritative): players are solid circles. Overlaps are split so that whoever walks INTO the
+  // other gets the smaller share — a moving player shoves a standing one (at ≈ 2/3 speed); two players pushing head-on
+  // stall. «Ускорение» gives at most +2 % push strength per level. A light knockback (≤ PUSH.maxKnock px/tick, decays)
+  // pops the shoved player away. Everything stays inside the world.
+  const PUSH = { knock: 2.5, maxKnock: 5, decay: 0.7, speedEdge: 0.02, passes: 2 };
+  const clampP = p => { p.x = Math.min(WORLD.w - PLAYER_R, Math.max(PLAYER_R, p.x)); p.y = Math.min(WORLD.h - PLAYER_R, Math.max(PLAYER_R, p.y)); };
+  // list: [{ x, y, mx, my (movement this tick), lvl (speed level), kx, ky }] — mutated in place
+  function separatePlayers(list) {
+    const D = PLAYER_R * 2, ref = BASE_SPEED * STEP_DT;
+    for (const p of list) { // knockback from earlier shoves
+      if (p.kx || p.ky) { p.x += p.kx; p.y += p.ky; p.kx *= PUSH.decay; p.ky *= PUSH.decay; if (Math.hypot(p.kx, p.ky) < 0.2) p.kx = p.ky = 0; clampP(p); }
+    }
+    for (let pass = 0; pass < PUSH.passes; pass++) {
+      for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+        const a = list[i], b = list[j];
+        let dx = b.x - a.x, dy = b.y - a.y; const d2 = dx * dx + dy * dy;
+        if (d2 >= D * D) continue;
+        let d = Math.sqrt(d2);
+        if (d < 1e-3) { dx = a.x < WORLD.w / 2 ? 1 : -1; dy = 0; d = 1; } // exactly on top of each other
+        const nx = dx / d, ny = dy / d, overlap = D - Math.min(d, D);
+        const aa = Math.min(1, Math.max(0, ((a.mx || 0) * nx + (a.my || 0) * ny) / ref)); // how hard a walks into b
+        const bb = Math.min(1, Math.max(0, -((b.mx || 0) * nx + (b.my || 0) * ny) / ref));
+        const sa = 1 + aa * (1 + PUSH.speedEdge * (a.lvl || 0)), sb = 1 + bb * (1 + PUSH.speedEdge * (b.lvl || 0));
+        const shareB = sa / (sa + sb);
+        const bx0 = b.x, by0 = b.y, ax0 = a.x, ay0 = a.y;
+        b.x += nx * overlap * shareB; b.y += ny * overlap * shareB; clampP(b);
+        a.x -= nx * overlap * (1 - shareB); a.y -= ny * overlap * (1 - shareB); clampP(a);
+        // whatever a wall blocked goes to the other player
+        const left = overlap - (Math.hypot(b.x - bx0, b.y - by0) + Math.hypot(a.x - ax0, a.y - ay0));
+        if (left > 0.01) { const mb = Math.hypot(b.x - bx0, b.y - by0) < overlap * shareB - 0.01; const q = mb ? a : b, s = mb ? -1 : 1; q.x += s * nx * left; q.y += s * ny * left; clampP(q); }
+        if (pass === 0 && Math.abs(aa - bb) > 0.3) { // light knockback for the one being shoved
+          const v = aa > bb ? b : a, s = aa > bb ? 1 : -1, k = PUSH.knock * Math.abs(aa - bb);
+          v.kx = (v.kx || 0) + s * nx * k; v.ky = (v.ky || 0) + s * ny * k;
+          const m = Math.hypot(v.kx, v.ky); if (m > PUSH.maxKnock) { v.kx *= PUSH.maxKnock / m; v.ky *= PUSH.maxKnock / m; }
+        }
+      }
+    }
+  }
   function applyInput(pos, dx, dy, speed) {
     let len = Math.hypot(dx, dy);
     if (!isFinite(len)) return;
@@ -282,7 +332,7 @@
 
   const api = {
     WORLD, PLAYER_R, BASE_SPEED, TICK_MS, STEP_DT, ORB_TYPES, ORB_RANK, ORB_LEGEND, POOL_WEIGHTS, RAIN_WEIGHTS, rollOrbType, expectedOrbValue, CATEGORIES, INV_CATEGORIES, RARITIES, ITEMS, ITEM_BY_ID, INV_SLOTS, PAINTS,
-    DEFAULT_EQUIPPED, DEFAULT_OWNED, UPGRADES, UPGRADE_KEYS, upLevel, upValue, jackpotChance, upgradeText, orbReward, skillPrize, compassTargets, SENSE_EPIC_RANGE,
+    DEFAULT_EQUIPPED, DEFAULT_OWNED, UPGRADES, UPGRADE_KEYS, upLevel, upValue, jackpotChance, upgradeText, orbReward, skillPrize, compassTargets, SENSE_EPIC_RANGE, RADAR, radarBlips, PUSH, separatePlayers,
     EVENTS, EVENT_KEYS, EVENT_SCHEDULE, SHARD_ID, SHARD_EXCHANGE,
     MINIGAMES, REACTION_PRIZES, rushPrize, speedFor, pickupFor, applyInput,
   };

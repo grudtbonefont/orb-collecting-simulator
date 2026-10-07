@@ -998,7 +998,7 @@
     }
     ctx.restore();
     drawCompass(t, now);
-    if (frameNo % 4 === 0) drawMinimap(now);
+    if (frameNo % 2 === 0) drawMinimap(now);
     drawPreviews(t, now);
     if (rushActive) drawRush(now);
   }
@@ -1061,27 +1061,53 @@
     }
   }
 
-  const mm = $('minimap'), mctx = mm.getContext('2d');
-  const MM_DOT = { r: 2, e: 3, l: 4, m: 4.5, t: 4.5 };
+  // «Радар»: sonar minimap around the player. A pulse every RADAR.periodMs expands outwards; each blip lights up when
+  // the wave reaches it and fades until the next pulse. Only common/uncommon (+ faint rare) orbs and players — see G.radarBlips.
+  const mm = $('minimap'), mctx = mm.getContext('2d'), radarBox = $('radar'), radarBtn = $('radarToggle');
+  let radarSnap = { at: -1e9, me: null, blips: [], pls: [] };
+  const setRadarCollapsed = c => { radarBox.classList.toggle('collapsed', c); radarBtn.textContent = c ? '📡' : '–'; try { localStorage.setItem('ocs_radar', c ? '0' : '1'); } catch (e) {} };
+  setRadarCollapsed((() => { try { return localStorage.getItem('ocs_radar') === '0'; } catch (e) { return false; } })());
+  radarBtn.addEventListener('click', () => setRadarCollapsed(!radarBox.classList.contains('collapsed')));
+  window.OCSRadar = () => ({ tiers: radarSnap.blips.map(b => b.t), players: radarSnap.pls.length, collapsed: radarBox.classList.contains('collapsed') });
   function drawMinimap(now) {
-    const s = mm.width / G.WORLD.w;
-    mctx.clearRect(0, 0, mm.width, mm.height);
-    if (evState && evState.zone) { // event zone (everyone sees it)
-      const z = evState.zone;
-      mctx.fillStyle = evState.phase === 'active' ? 'rgba(255,204,51,0.28)' : 'rgba(255,204,51,0.12)'; mctx.strokeStyle = '#ffcc33';
-      mctx.beginPath(); mctx.arc(z.x * s, z.y * s, Math.max(4, z.r * s), 0, Math.PI * 2); mctx.fill(); mctx.stroke();
+    if (radarBox.classList.contains('collapsed') || !dispMe) return;
+    const R = G.RADAR, S = mm.width, c = S / 2, k = (c - 4) / R.range;
+    if (now - radarSnap.at >= R.periodMs) { // new pulse: snapshot what the wave will reveal
+      radarSnap = { at: now, me: { x: dispMe.x, y: dispMe.y }, blips: G.radarBlips(orbs.values(), dispMe),
+        pls: Array.from(players.values()).filter(p => p.pos && p.id !== myId && Math.hypot(p.pos.x - dispMe.x, p.pos.y - dispMe.y) <= R.range).map(p => ({ x: p.pos.x, y: p.pos.y, d: Math.hypot(p.pos.x - dispMe.x, p.pos.y - dispMe.y), col: colorOf(p.eq, 0) })) };
     }
-    mctx.strokeStyle = 'rgba(120,150,255,0.35)'; mctx.strokeRect(cam.x * s, cam.y * s, W * s, H * s);
-    for (const o of orbs.values()) {
-      const d = MM_DOT[o.t]; if (!d) continue; // common / uncommon: too many to show
-      mctx.fillStyle = orbDef(o.t).color; mctx.fillRect(o.x * s - d / 2, o.y * s - d / 2, d, d);
+    const age = now - radarSnap.at, wave = age / R.sweepMs; // wave: 0 → 1 while it crosses the radar
+    mctx.clearRect(0, 0, S, S);
+    mctx.save(); mctx.beginPath(); mctx.arc(c, c, c - 1, 0, Math.PI * 2); mctx.clip();
+    mctx.strokeStyle = 'rgba(90,255,170,0.14)'; mctx.lineWidth = 1;
+    for (const f of [1 / 3, 2 / 3]) { mctx.beginPath(); mctx.arc(c, c, (c - 4) * f, 0, Math.PI * 2); mctx.stroke(); }
+    mctx.beginPath(); mctx.moveTo(c, 0); mctx.lineTo(c, S); mctx.moveTo(0, c); mctx.lineTo(S, c); mctx.stroke();
+    const px = (x, y) => [c + (x - dispMe.x) * k, c + (y - dispMe.y) * k];
+    // world edge
+    const [ex0, ey0] = px(0, 0), [ex1, ey1] = px(G.WORLD.w, G.WORLD.h);
+    mctx.strokeStyle = 'rgba(255,120,120,0.35)'; mctx.strokeRect(ex0, ey0, ex1 - ex0, ey1 - ey0);
+    if (evState && evState.zone) { // «Царь горы» zone is public and may be shown
+      const z = evState.zone, [zx, zy] = px(z.x, z.y);
+      mctx.fillStyle = evState.phase === 'active' ? 'rgba(255,204,51,0.25)' : 'rgba(255,204,51,0.1)'; mctx.strokeStyle = 'rgba(255,204,51,0.8)';
+      mctx.beginPath(); mctx.arc(zx, zy, Math.max(4, z.r * k), 0, Math.PI * 2); mctx.fill(); mctx.stroke();
     }
-    if (runner) { mctx.fillStyle = '#c6fdff'; mctx.beginPath(); mctx.arc(runnerX(now) * s, runnerY(now) * s, 3 + Math.sin(now / 120), 0, Math.PI * 2); mctx.fill(); }
-    for (const pl of players.values()) {
-      if (!pl.pos) continue;
-      mctx.fillStyle = pl.id === myId ? '#ffffff' : colorOf(pl.eq, 0);
-      mctx.beginPath(); mctx.arc(pl.pos.x * s, pl.pos.y * s, pl.id === myId ? 3.5 : 2.5, 0, Math.PI * 2); mctx.fill();
+    const blip = (b, r, col) => {
+      const lit = (b.d / R.range) * R.sweepMs; if (age < lit) return; // the wave hasn't reached it yet
+      const a = Math.max(0, 1 - (age - lit) / (R.periodMs - lit)) * (b.a || 1); if (a <= 0.02) return;
+      const [x, y] = px(b.x, b.y); mctx.globalAlpha = a; mctx.fillStyle = col;
+      mctx.beginPath(); mctx.arc(x, y, r, 0, Math.PI * 2); mctx.fill();
+    };
+    const sc = S / 150;
+    for (const b of radarSnap.blips) blip(b, (b.t === 'c' ? 1.4 : 1.8) * sc, b.t === 'r' ? '#b46bff' : '#7dffb8');
+    for (const p of radarSnap.pls) blip(p, 3 * sc, p.col);
+    mctx.globalAlpha = 1;
+    if (wave < 1) { // the pulse wave
+      mctx.strokeStyle = `rgba(110,255,180,${0.85 * (1 - wave)})`; mctx.lineWidth = 2 * sc;
+      mctx.beginPath(); mctx.arc(c, c, wave * (c - 4), 0, Math.PI * 2); mctx.stroke();
     }
+    mctx.restore();
+    mctx.fillStyle = '#ffffff'; mctx.beginPath(); mctx.arc(c, c, 3 * sc, 0, Math.PI * 2); mctx.fill(); // you
+    if (S >= 120) { mctx.fillStyle = 'rgba(141,255,196,0.75)'; mctx.font = '700 10px Segoe UI, sans-serif'; mctx.textAlign = 'center'; mctx.fillText('РАДАР', c, S - 10); }
   }
 
   // ------------------------------------------------------------ timed arena events (server-run; the client only shows them)

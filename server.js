@@ -958,6 +958,12 @@ io.on('connection', socket => {
       ack({ ok: true, event: publicEvent() });
     });
     // spawn one orb of each requested tier in a ring around the caller or {x,y} (screenshots / rarity tests)
+    socket.on('test:tp', (d, ack) => { // move own player to a point (tests only)
+      ack = safeAck(ack);
+      if (!pl || !isObj(d) || !Number.isFinite(d.x) || !Number.isFinite(d.y)) return ack({ ok: false });
+      pl.x = Math.min(G.WORLD.w - G.PLAYER_R, Math.max(G.PLAYER_R, d.x)); pl.y = Math.min(G.WORLD.h - G.PLAYER_R, Math.max(G.PLAYER_R, d.y)); pl.inputs.length = 0; pl.kx = pl.ky = 0;
+      ack({ ok: true });
+    });
     socket.on('test:spawn', (d, ack) => {
       ack = safeAck(ack);
       if (!pl || !isObj(d) || !Array.isArray(d.types)) return ack({ ok: false });
@@ -1046,6 +1052,7 @@ function tick() {
   const now = Date.now(), dt = Math.min(250, now - lastTickAt);
   lastTickAt = now;
   for (const pl of players.values()) {
+    pl.x0 = pl.x; pl.y0 = pl.y;
     pl.budget = Math.min(pl.budget + 1, 6);
     while (pl.inputs.length > 12) pl.lastSeq = pl.inputs.shift().s; // keep latency bounded
     const speed = G.speedFor(pl.acc.upgrades.speed);
@@ -1064,6 +1071,11 @@ function tick() {
       if (pl.jackpots) msg.j = pl.jackpots; // «Удача» find: a common/uncommon orb counted as epic
       pl.socket.emit('bal', msg); pl.gained = 0; pl.lucky = 0; pl.jackpots = 0;
     }
+  }
+  if (players.size > 1) { // players push each other apart (G.separatePlayers)
+    const list = [];
+    for (const pl of players.values()) { pl.mx = pl.x - pl.x0; pl.my = pl.y - pl.y0; pl.lvl = pl.acc.upgrades.speed || 0; list.push(pl); }
+    G.separatePlayers(list);
   }
   spawnTick(now);
   eventTick(now, dt);

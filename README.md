@@ -85,6 +85,10 @@ Previously 380 orbs refilled instantly with 2 % legendaries regardless of player
 
 Pool average ≈ 1.43 per orb. Each tier has its own look on the arena and minimap; the «?» button (or H) opens a legend. Old cached clients draw unknown tiers with the common sprite.
 
+**Pushing:** players are solid circles (server-authoritative, `G.separatePlayers` every tick). Overlaps are split so that whoever walks into the other gets the smaller share: a moving player shoves a standing one at ≈ 2/3 of their speed (e.g. out of the «Царь горы» zone), and two players pushing head-on stall. There is a light knockback (≤ 5 px/tick, decaying), «Ускорение» adds at most +2 % push strength per level, and players are always kept inside the world (a player pinned at the edge stops the pusher).
+
+**«Радар»** (bottom-right, collapsible with its button; 92 px on phones): a sonar view of ±900 px around you, where a wave every 3 s briefly lights up players and common/uncommon (faint: rare) orbs. Epic, legendary and mythic orbs, event treasures and the runner never appear (the compass handles those); the «Царь горы» zone is shown. It is drawn client-side from data the client already receives (`G.radarBlips`), and the server sends nothing extra. Screenshot: `screenshot-radar.png`.
+
 ## Arena events (server-authoritative, `G.EVENTS` / `eventTick` in `server.js`)
 Scheduler: only while ≥ 1 player is online, one event every **6–10 min** (random), never the same kind twice in a row, never while a legendary orb is alive or imminent (the legendary waits until 20 s after the event). Each event is announced **25 s** ahead (banner with countdown and rules), then a HUD shows timer/progress, then everyone gets the results (top 5 names + scores + rewards and their own line). Rewards are paid by the server only to players online at the end; shards go through `grantItem(..., 'event')`. If everyone leaves, the event is cancelled.
 

@@ -540,6 +540,17 @@ function bot(url, name) {
     ok(legend.join(' ') === 'c:+1 u:+2 r:+5 e:+10 l:+25 m:+50 t:+50', 'orb legend popover lists every tier with its value: ' + legend.join(' '));
     await shot(vp, 'screenshot-orb-rarities.png');
     await vp.click('#orbHelpClose');
+    // ---------------- «Радар»: the same ring of every tier is next to the viewer; only c/u/r may show up
+    await sleep(3100); await vp.waitForFunction(() => window.OCSRadar && window.OCSRadar().tiers.length > 0, null, { timeout: 5000 });
+    await sleep(900); // mid-pulse: wave out, blips lit
+    const rad = await vp.evaluate(() => window.OCSRadar());
+    ok(rad.tiers.length > 0 && rad.tiers.every(t => ['c', 'u', 'r'].includes(t)) && ['c', 'u', 'r'].every(t => rad.tiers.includes(t)),
+      `radar shows only common/uncommon/rare blips (${rad.tiers.length}) + ${rad.players} player(s); epic/legendary/mythic/treasure hidden`);
+    await shot(vp, 'screenshot-radar.png');
+    await vp.click('#radarToggle');
+    const rc = await vp.evaluate(() => ({ c: window.OCSRadar().collapsed, h: document.getElementById('minimap').offsetHeight }));
+    await vp.click('#radarToggle');
+    ok(rc.c && rc.h === 0 && !(await vp.evaluate(() => window.OCSRadar().collapsed)), 'radar collapses and expands with its button');
     botMode = 'circle';
 
     // ---------------- «Лавка осколков»: an account with shards (granted via the test hook), two exclusives bought over the socket
