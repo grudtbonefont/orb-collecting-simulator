@@ -601,6 +601,20 @@ function bot(url, name) {
     await sp.keyboard.press('Escape'); await sp.keyboard.press('KeyI'); await sleep(400);
     ok(await sp.evaluate(() => ['c_void', 'n_shard', 't_comet'].every(id => { const e = document.querySelector(`#invGrid [data-item=${id}]`); return e && e.querySelector('.ex-badge') && /Лавка осколков/.test(e.textContent); })),
       'inventory: exclusives carry the badge and the source «Лавка осколков»');
+    // ---------------- mini-games menu: 6 games, fees with the orb icon; one round of «Угадай чашу» in the UI
+    await sp.keyboard.press('Escape'); await sleep(200); await sp.keyboard.press('KeyM'); await sleep(400);
+    const gm = await sp.evaluate(() => Array.from(document.querySelectorAll('#gamesList [data-game]')).map(b => ({ k: b.dataset.game, icon: !!b.querySelector('.cur-orb'), dis: b.disabled })));
+    ok(gm.map(g => g.k).join() === 'reaction,rush,memory,shell,throw,chain' && gm.every(g => g.icon && !g.dis), 'mini-games window lists all 6 games, fees shown with the orb icon: ' + gm.map(g => g.k).join(', '));
+    await shot(sp, 'screenshot-minigames-6.png');
+    await sp.click('#gamesList [data-game=shell]'); await sleep(1900);
+    ok(await sp.isVisible('#mg2Canvas') && /Следите|Запомните/.test(await sp.textContent('#mg2Info')), '«Угадай чашу» runs in the shared game canvas: ' + await sp.textContent('#mg2Info'));
+    await shot(sp, 'screenshot-minigame-shell.png');
+    await sp.waitForFunction(() => /Где сфера/.test(document.getElementById('mg2Info').textContent), null, { timeout: 8000 });
+    const cb = await sp.locator('#mg2Canvas').boundingBox();
+    await sp.mouse.click(cb.x + cb.width * 300 / 600, cb.y + cb.height * 260 / 400);
+    await sp.waitForSelector('#mgResult:not(.hidden)', { timeout: 6000 });
+    const mr = await sp.textContent('#mgResult');
+    ok(/Угадай чашу: (Угадали|Мимо)/.test(mr) && /Взнос 10/.test(mr), 'cup picked by tap → server result shown: ' + mr.replace(/\s+/g, ' ').slice(0, 80));
     await sctx.close();
 
     for (const b of abots) b.close();

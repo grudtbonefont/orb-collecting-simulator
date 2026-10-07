@@ -704,6 +704,94 @@ async function trashSuite(URL) {
   A.close(); B.close();
 }
 
+async function newGamesSuite(URL) {
+  console.log('--- menu mini-games: Память / Угадай чашу / Точный бросок / Цепочка');
+  const M = G.MINIGAMES, maxSkill = G.UPGRADES.skill.max, FARM = 100;
+  // economy: even flawless back-to-back play with «Мастер мини-игр» maxed earns < half of farming (≈ 100/min)
+  const rates = ['reaction', 'rush', 'memory', 'shell', 'throw', 'chain'].map(k => {
+    const mx = k === 'reaction' ? G.REACTION_PRIZES[0][1] : M[k].maxPrize;
+    return [k, (G.skillPrize(mx, maxSkill) - M[k].fee) / (G.minigameMinMs(k) + M[k].cooldownMs) * 60000];
+  });
+  ok(rates.every(([, r]) => r < FARM / 2), 'flawless play incl. cooldowns + «Мастер мини-игр» 3 stays < 50/min: ' + rates.map(([k, r]) => `${k} ${r.toFixed(0)}`).join(', '));
+  ok(M.shell.prize / M.shell.cups < M.shell.fee && G.memoryPrize(M.memory.freeRounds) === 0 && G.memoryPrize(99) === M.memory.maxPrize && G.throwPrize(999) === M.throw.maxPrize &&
+    G.throwPoints(0) > G.throwPoints(0.03) && G.throwPoints(0.03) > G.throwPoints(0.05) && G.throwPoints(0.2) === 0 && G.chainPrize(1000) === M.chain.maxPrize && G.chainPrize(99999) === 0,
+    `payout tables: blind shell guess EV ${(M.shell.prize / 3).toFixed(1)} < fee ${M.shell.fee}; memory ≤ ${M.memory.maxPrize}, throw ≤ ${M.throw.maxPrize} (closer = more), chain ≤ ${M.chain.maxPrize}`);
+  const cl = []; const mk = async n => { const c = makeClient(URL); await c.register(n + rnd()); await c.emit('test:orbs', 500); cl.push(c); return c; };
+  const once = (c, ev, ms = 8000) => new Promise((res, rej) => { const t = setTimeout(() => rej(new Error('timeout ' + ev)), ms); c.s.once(ev, d => { clearTimeout(t); res(d); }); });
+  // «Память»
+  const A = await mk('Mem'), B = await mk('Mem');
+  let bal = A.profile.balance, show = once(A, 'mg:memory:show'), result = once(A, 'mg:result', 20000);
+  ok((await A.emit('mg:start', 'memory')).ok, 'memory started');
+  let sh = await show; await sleep(G.memoryShowMs(1) + 200);
+  show = once(A, 'mg:memory:show');
+  let r = await A.emit('mg:act', { round: 1, input: sh.seq });
+  sh = await show;
+  ok(r.ok && r.right && sh.round === 2 && sh.seq.length === 2, 'memory: round 1 repeated → round 2 shows a sequence of 2 (only the part played so far)');
+  r = await A.emit('mg:act', { round: 2, input: sh.seq }); // instantly, before the sequence could even be shown
+  let res = await result; await sleep(150);
+  ok(r.cheat && res.prize === 0 && /отклонён/.test(res.message) && A.profile.balance === bal - M.memory.fee, 'memory: answer faster than the sequence is shown → rejected, prize 0');
+  r = await A.emit('mg:start', 'memory');
+  ok(!r.ok && r.cooldown > 0, 'memory cooldown: ' + r.error);
+  bal = B.profile.balance; result = once(B, 'mg:result', 30000); show = once(B, 'mg:memory:show');
+  await B.emit('mg:start', 'memory');
+  for (let round = 1; round <= 4; round++) {
+    sh = await show; await sleep(G.memoryShowMs(round) + round * 150);
+    if (round === 1) ok(!(await B.emit('mg:act', { round: 2, input: sh.seq })).ok && !(await B.emit('mg:act', { round: 1, input: [0, 1, 2, 3, 0] })).ok, 'memory: wrong round / over-long input refused');
+    if (round < 4) show = once(B, 'mg:memory:show');
+    const input = round < 4 ? sh.seq : sh.seq.map((c, i) => (i === round - 1 ? (c + 1) % 4 : c));
+    r = await B.emit('mg:act', { round, input });
+  }
+  res = await result; await sleep(150);
+  ok(res.rounds === 3 && res.prize === G.memoryPrize(3) && B.profile.balance === bal - M.memory.fee + res.prize, `memory: 3 rounds then a mistake → ${res.prize} (= ${M.memory.perRound} × (3 − ${M.memory.freeRounds}))`);
+  // «Угадай чашу»
+  const C = await mk('Cup'), D = await mk('Cup');
+  let setup = once(C, 'mg:shell:setup'); result = once(C, 'mg:result');
+  await C.emit('mg:start', 'shell'); let su = await setup;
+  ok(su.swaps.length === M.shell.swaps && su.swaps.every(([a, b]) => a !== b && a >= 0 && b < 3) && !('final' in su) && !('cup' in su), 'shell: setup has the start + visible swaps only (no hidden cup field)');
+  r = await C.emit('mg:act', { cup: 0 }); res = await result;
+  ok(r.cheat && res.prize === 0 && Number.isInteger(res.cup), 'shell: picking before the shuffle ends → rejected, prize 0');
+  bal = D.profile.balance; setup = once(D, 'mg:shell:setup'); result = once(D, 'mg:result', 15000);
+  await D.emit('mg:start', 'shell'); su = await setup;
+  const fin = G.shellFinal(su.start, su.swaps);
+  await sleep(G.shellShuffleMs(su.swaps) + 100);
+  ok(!(await D.emit('mg:act', { cup: 7 })).ok, 'shell: invalid cup refused');
+  await D.emit('mg:act', { cup: fin }); res = await result; await sleep(150);
+  ok(res.cup === fin && res.pick === fin && res.prize === M.shell.prize && D.profile.balance === bal - M.shell.fee + M.shell.prize, `shell: following the swaps finds the orb (revealed cup ${res.cup} = animation result) → +${res.prize}`);
+  // «Точный бросок»
+  const E = await mk('Throw');
+  bal = E.profile.balance; result = once(E, 'mg:result', 30000);
+  const got = [];
+  E.s.on('mg:throw:start', async d => {
+    const early = await E.emit('mg:act', { i: d.i, pts: 10, pos: d.target });
+    // aim: wait until the marker is near the target (server time, RTT-compensated server-side)
+    let t = 400; while (Math.abs(G.throwPos(t, d.period, d.phase) - d.target) > 0.01 && t < 4000) t += 5;
+    await sleep(t);
+    const st = await E.emit('mg:act', { i: d.i, pts: 10 }); const dup = await E.emit('mg:act', { i: d.i });
+    got.push({ d, early, st, dup });
+  });
+  await E.emit('mg:start', 'throw'); res = await result; await sleep(150);
+  ok(got.length === 3 && got.every(g => g.early.early && !g.early.ok && g.st.ok && !g.dup.ok && g.st.pts === G.throwPoints(Math.abs(g.st.pos - g.d.target))),
+    'throw: stop < 250 ms refused, double stop refused, points computed by the server from time (claimed pts ignored): ' + got.map(g => g.st.pts).join('/'));
+  ok(res.total === got.reduce((n, g) => n + g.st.pts, 0) && res.prize === G.throwPrize(res.total) && res.prize <= M.throw.maxPrize && E.profile.balance === bal - M.throw.fee + res.prize,
+    `throw: 3 throws → ${res.total} points → prize ${res.prize} (cap ${M.throw.maxPrize})`);
+  // «Цепочка»
+  const F = await mk('Chain');
+  bal = F.profile.balance; setup = once(F, 'mg:chain:setup'); result = once(F, 'mg:result', 20000);
+  await F.emit('mg:start', 'chain'); su = await setup;
+  const o = su.orbs;
+  const pre = await F.emit('mg:act', { n: 1, x: o[0].x, y: o[0].y });
+  await sleep(su.startIn + 50);
+  const order = await F.emit('mg:act', { n: 2, x: o[1].x, y: o[1].y }), far = await F.emit('mg:act', { n: 1, x: o[0].x + 200, y: o[0].y });
+  const t1 = await F.emit('mg:act', { n: 1, x: o[0].x, y: o[0].y }), fast = await F.emit('mg:act', { n: 2, x: o[1].x, y: o[1].y });
+  ok(o.length === M.chain.n && !pre.ok && !order.ok && !far.ok && t1.ok && fast.fast, 'chain: taps before the start, out of order, off the orb or faster than 120 ms apart are refused');
+  for (let n = 2; n <= M.chain.n; n++) { await sleep(M.chain.minTapGapMs + 15); r = await F.emit('mg:act', { n, x: o[n - 1].x + 5, y: o[n - 1].y - 5 }); }
+  res = await result; await sleep(150);
+  ok(r.done && res.ms > 0 && res.prize === G.chainPrize(res.ms) && F.profile.balance === bal - M.chain.fee + res.prize, `chain: 1…${M.chain.n} in ${res.ms} ms → +${res.prize}`);
+  r = await F.emit('mg:start', 'chain');
+  ok(!r.ok && r.cooldown > 0, 'chain cooldown: ' + r.error);
+  for (const c of cl) c.close();
+}
+
 async function minigameSuite(URL) {
   console.log('--- mini-games');
   const A = makeClient(URL), B = makeClient(URL);
@@ -1135,7 +1223,7 @@ async function runMode(label, env, opts) {
   if (opts.legacy) await migrationSuite(srv.url, opts.legacy, label);
   await authSuite(srv.url);
   await profileSuite(srv.url);
-  if (opts.full) { await chatSuite(srv.url); await gameplaySuite(srv.url); await minigameSuite(srv.url); await upgradeSuite(srv.url); await newItemsSuite(srv.url); await tiersSuite(srv.url); await eventSuite(srv.url); await pushSuite(srv.url); }
+  if (opts.full) { await chatSuite(srv.url); await gameplaySuite(srv.url); await minigameSuite(srv.url); await newGamesSuite(srv.url); await upgradeSuite(srv.url); await newItemsSuite(srv.url); await tiersSuite(srv.url); await eventSuite(srv.url); await pushSuite(srv.url); }
   await shardShopSuite(srv.url);
   await shopInventorySuite(srv.url);
   await trashSuite(srv.url);
@@ -1183,6 +1271,11 @@ async function runCycleMode() {
     await tiersSuite(srv.url); await eventSuite(srv.url); await pushSuite(srv.url); await shardShopSuite(srv.url);
     await srv.stop(); fs.rmSync(tmp, { force: true });
     privacyAudit(await schedulerSuite());
+  } else if (process.env.OCS_TEST_ONLY === 'games') {
+    const tmp = path.join(os.tmpdir(), `ocs-mg-${process.pid}.json`);
+    const srv = await startServer(3101, { DATA_FILE: tmp, OCS_TEST_HOOKS: '1' });
+    await minigameSuite(srv.url); await newGamesSuite(srv.url);
+    await srv.stop(); fs.rmSync(tmp, { force: true });
   } else if (process.env.OCS_TEST_ONLY === 'upgrades') {
     upgradeRules();
     const tmp = path.join(os.tmpdir(), `ocs-up-${process.pid}.json`);

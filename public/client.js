@@ -1004,6 +1004,7 @@
     if (frameNo % 2 === 0) drawMinimap(now);
     drawPreviews(t, now);
     if (rushActive) drawRush(now);
+    if (mg2) drawMg2(now);
   }
 
   // «Чутьё легенды» compass: arrows at the screen edge to the rarest orbs (and, at level 3, to event targets).
@@ -1785,18 +1786,24 @@
   loadStartLb();
 
   // ------------------------------------------------------------ mini-games
+  let mg2 = null; // state of the current memory / shell / throw / chain game
   let mgRunning = null, reactionState = null, rushActive = false, rushStart = 0, rushScore = 0;
   let rushTargets = [];
   const rushPops = [];
   function showGamesList() {
     $('gamesList').classList.remove('hidden');
-    $('reactionArea').classList.add('hidden'); $('rushArea').classList.add('hidden');
+    $('reactionArea').classList.add('hidden'); $('rushArea').classList.add('hidden'); $('mg2Area').classList.add('hidden'); mg2 = null;
     $('mgResult').classList.add('hidden');
   }
   (function gameTexts() {
     const re = G.MINIGAMES.reaction, ru = G.MINIGAMES.rush;
     $('reactionPrizes').textContent = G.REACTION_PRIZES.map(([ms, p]) => `<${ms} мс: ${p}`).join(' · ') + ` · пауза ${re.cooldownMs / 1000} с`;
     $('rushPrizes').textContent = `Выплата: ${Math.round(ru.payoutRate * 100)}% от очков, не больше ${ru.maxPrize} сфер · пауза ${ru.cooldownMs / 1000} с`;
+    const M = G.MINIGAMES;
+    $('memoryPrizes').innerHTML = `+${M.memory.perRound} за раунд после ${M.memory.freeRounds}-го, до ${orbsH(M.memory.maxPrize)} · пауза ${M.memory.cooldownMs / 1000} с`;
+    $('shellPrizes').innerHTML = `Угадали — ${orbsH(M.shell.prize)} · пауза ${M.shell.cooldownMs / 1000} с`;
+    $('throwPrizes').innerHTML = `Очки ${M.throw.points.map(p => p[1]).join('/')} за бросок → ${Math.round(M.throw.payoutRate * 100)}%, до ${orbsH(M.throw.maxPrize)} · пауза ${M.throw.cooldownMs / 1000} с`;
+    $('chainPrizes').innerHTML = M.chain.prizes.map(([ms, p]) => `<${ms / 1000} с: ${p}`).join(' · ') + ` · пауза ${M.chain.cooldownMs / 1000} с`;
     document.querySelectorAll('[data-game]').forEach(b => { b.innerHTML = `Играть — взнос ${orbsH(G.MINIGAMES[b.dataset.game].fee)}`; });
   })();
   function updateGameButtons() {
@@ -1814,6 +1821,10 @@
         reactionState = 'wait';
         const box = $('reactionBox'); box.className = 'reaction-box'; box.textContent = 'Ждите зелёного…';
         $('reactionArea').classList.remove('hidden');
+      } else if (kind !== 'rush') {
+        mg2 = { kind, start: performance.now(), info: 'Приготовьтесь…' };
+        $('mg2Info').textContent = mg2.info; $('mg2Time').textContent = '';
+        $('mg2Area').classList.remove('hidden');
       } else {
         rushActive = true; rushStart = performance.now(); rushScore = 0; rushTargets = []; rushPops.length = 0;
         $('rushScore').textContent = '0';
@@ -1894,6 +1905,13 @@
 
   socket.on('mg:result', r => {
     mgRunning = null; reactionState = null; rushActive = false;
+    if (mg2 && mg2.kind === r.kind && (r.kind === 'shell' || r.kind === 'throw' || r.kind === 'memory')) { // let the reveal play for a moment
+      mg2.reveal = r; mg2.revealAt = performance.now(); mg2.over = true;
+      setTimeout(() => showMgResult(r), r.kind === 'shell' ? 1400 : 900);
+    } else showMgResult(r);
+  });
+  function showMgResult(r) {
+    mg2 = null; $('mg2Area').classList.add('hidden');
     const name = G.MINIGAMES[r.kind].name;
     const net = r.prize - r.fee;
     const box = $('mgResult');
@@ -1908,7 +1926,128 @@
     if ($('games').classList.contains('hidden')) toast(`${name}: ${r.prize > 0 ? '+' + r.prize + ' сфер' : 'без выигрыша'}`, r.prize > 0 ? 'ok' : 'err');
     if (r.prize > 0) floaters.push({ x: dispMe.x, y: dispMe.y - 40, text: '+' + r.prize, color: '#ffcc33', start: performance.now(), big: true });
     updateGameButtons();
+  }
+
+  // ---- the four newer menu games share one canvas (600×400). The server owns every outcome; the client only shows it.
+  const m2cv = $('mg2Canvas'), m2 = m2cv.getContext('2d');
+  const MEM_COLORS = ['#ff4d6d', '#5dff8f', '#3ea8ff', '#ffcc33'], MEM_POS = [[200, 115], [400, 115], [200, 285], [400, 285]];
+  const SHELL_X = [150, 300, 450];
+  const setInfo = t => { if (mg2 && mg2.info !== t) { mg2.info = t; $('mg2Info').textContent = t; } };
+  const act = (d, cb) => socket.emit('mg:act', d, res => cb && cb(res || {}));
+  socket.on('mg:memory:show', d => { if (!mg2 || mg2.kind !== 'memory') return; Object.assign(mg2, { round: d.round, seq: d.seq, on: d.onMs, gap: d.gapMs, lead: d.leadMs, t0: performance.now(), input: [], flash: null, sent: false }); });
+  socket.on('mg:shell:setup', d => {
+    if (!mg2 || mg2.kind !== 'shell') return;
+    let t = d.showMs; const sw = d.swaps.map(([a, b, ms]) => { const o = { a, b, from: t, ms }; t += ms; return o; });
+    Object.assign(mg2, { ball: d.start, sw, endAt: t, t0: performance.now(), picked: null });
   });
+  socket.on('mg:throw:start', d => { if (!mg2 || mg2.kind !== 'throw') return; mg2.cur = Object.assign({}, d, { t0: performance.now(), stop: null }); mg2.hist = mg2.hist || []; });
+  socket.on('mg:throw:stopped', d => { if (mg2 && mg2.cur && mg2.cur.i === d.i) { mg2.cur.stop = { pos: d.pos, pts: 0 }; mg2.hist.push(0); } });
+  socket.on('mg:chain:setup', d => { if (!mg2 || mg2.kind !== 'chain') return; Object.assign(mg2, { orbs: d.orbs.map(o => Object.assign({}, o)), goAt: performance.now() + d.startIn, next: 1, limit: d.limitMs }); });
+  function m2pt(e) { const r = m2cv.getBoundingClientRect(); return [(e.clientX - r.left) * (m2cv.width / r.width), (e.clientY - r.top) * (m2cv.height / r.height)]; }
+  function throwStop() {
+    const c = mg2 && mg2.kind === 'throw' && mg2.cur; if (!c || c.stop || c.sending) return;
+    c.sending = true; c.localStop = performance.now();
+    act({ i: c.i }, res => { c.sending = false; if (res.ok) { c.stop = { pos: res.pos, pts: res.pts }; mg2.hist.push(res.pts); } else if (res.early) { c.localStop = null; } });
+  }
+  m2cv.addEventListener('pointerdown', e => {
+    if (!mg2 || mg2.over) return; e.preventDefault();
+    const [x, y] = m2pt(e), now = performance.now();
+    if (mg2.kind === 'memory' && mg2.seq && !mg2.sent && now - mg2.t0 >= mg2.lead + mg2.seq.length * (mg2.on + mg2.gap)) {
+      const c = MEM_POS.findIndex(([px, py]) => Math.hypot(x - px, y - py) <= 75); if (c < 0) return;
+      mg2.input.push(c); mg2.flash = { c, at: now };
+      const k = mg2.input.length - 1, wrong = mg2.input[k] !== mg2.seq[k];
+      if (wrong || mg2.input.length === mg2.seq.length) { mg2.sent = true; act({ round: mg2.round, input: mg2.input.slice() }); }
+    } else if (mg2.kind === 'shell' && mg2.sw && mg2.picked == null && now - mg2.t0 >= mg2.endAt) {
+      const slot = SHELL_X.findIndex(px => Math.abs(x - px) < 65 && y > 150 && y < 330); if (slot < 0) return;
+      mg2.picked = slot; act({ cup: slot });
+    } else if (mg2.kind === 'throw') throwStop();
+    else if (mg2.kind === 'chain' && mg2.orbs && now >= mg2.goAt) {
+      const o = mg2.orbs[mg2.next - 1]; if (!o || Math.hypot(x - o.x, y - o.y) > o.r * 1.25) { mg2.miss = now; return; }
+      o.hit = now; mg2.next++;
+      act({ n: o.n, x: Math.round(x), y: Math.round(y) }, res => { if (!res.ok) { o.hit = null; mg2.next = Math.min(mg2.next, o.n); } });
+    }
+  });
+  document.addEventListener('keydown', e => { if (e.code === 'Space' && mg2 && mg2.kind === 'throw' && !$('games').classList.contains('hidden')) { e.preventDefault(); throwStop(); } });
+  function orbBall(x, y, r, color, alpha) {
+    m2.save(); m2.globalAlpha = alpha == null ? 1 : alpha; m2.shadowColor = color; m2.shadowBlur = r * 0.8;
+    const g = m2.createRadialGradient(x - r * 0.3, y - r * 0.35, 1, x, y, r); g.addColorStop(0, '#fff'); g.addColorStop(0.35, color); g.addColorStop(1, color);
+    m2.fillStyle = g; m2.beginPath(); m2.arc(x, y, r, 0, Math.PI * 2); m2.fill(); m2.restore();
+  }
+  function drawCup(x, y, lift) {
+    m2.save(); m2.translate(x, y - lift);
+    const g = m2.createLinearGradient(-55, 0, 55, 0); g.addColorStop(0, '#5a3df0'); g.addColorStop(0.5, '#9b7dff'); g.addColorStop(1, '#4a2fd0');
+    m2.fillStyle = g; m2.beginPath(); m2.moveTo(-40, -70); m2.lineTo(40, -70); m2.lineTo(56, 30); m2.lineTo(-56, 30); m2.closePath(); m2.fill();
+    m2.fillStyle = '#c9b8ff'; m2.fillRect(-60, 24, 120, 10); m2.fillStyle = 'rgba(255,255,255,0.25)'; m2.fillRect(-28, -62, 10, 80);
+    m2.restore();
+  }
+  function drawMg2(now) {
+    const g = m2; g.setTransform(1, 0, 0, 1, 0, 0); g.fillStyle = '#070b18'; g.fillRect(0, 0, 600, 400);
+    const k = mg2.kind, R = mg2.reveal;
+    if (k === 'memory') {
+      let lit = -1, phase = 'wait';
+      if (mg2.seq) {
+        const t = now - mg2.t0 - mg2.lead, step = mg2.on + mg2.gap, i = Math.floor(t / step);
+        if (t < 0) phase = 'look'; else if (i < mg2.seq.length) { phase = 'show'; if (t - i * step < mg2.on) lit = mg2.seq[i]; } else phase = 'input';
+      }
+      if (mg2.flash && now - mg2.flash.at < 220) lit = mg2.flash.c;
+      MEM_POS.forEach(([x, y], c) => orbBall(x, y, lit === c ? 74 : 64, MEM_COLORS[c], lit === c ? 1 : 0.32));
+      setInfo(R ? `Пройдено раундов: ${R.rounds}` : !mg2.seq ? 'Приготовьтесь…' : phase === 'input' ? `Раунд ${mg2.round}: повторите (${mg2.input.length}/${mg2.seq.length})` : `Раунд ${mg2.round}: запоминайте`);
+      $('mg2Time').textContent = mg2.round ? `раунд ${mg2.round}/${G.MINIGAMES.memory.maxRounds}` : '';
+    } else if (k === 'shell') {
+      const slotX = SHELL_X; let xs = SHELL_X.slice(), ys = [0, 0, 0]; const lift = [0, 0, 0], ballSlot = mg2.ball;
+      // pos[c] = slot of cup c; each swap exchanges the cups in two slots (arc animation); the orb stays with its cup
+      const pos = [0, 1, 2];
+      if (mg2.sw) {
+        const t = now - mg2.t0; let anim = null;
+        for (const s of mg2.sw) {
+          if (t >= s.from + s.ms) { const ca = pos.indexOf(s.a), cb = pos.indexOf(s.b); pos[ca] = s.b; pos[cb] = s.a; }
+          else { if (t > s.from) anim = s; break; }
+        }
+        xs = pos.map(p => slotX[p]);
+        if (anim) {
+          const ca = pos.indexOf(anim.a), cb = pos.indexOf(anim.b), u = (t - anim.from) / anim.ms, e = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2, h = Math.sin(u * Math.PI) * 26;
+          xs[ca] = slotX[anim.a] + (slotX[anim.b] - slotX[anim.a]) * e; ys[ca] = -h; xs[cb] = slotX[anim.b] + (slotX[anim.a] - slotX[anim.b]) * e; ys[cb] = h;
+        }
+        const showing = t < G.MINIGAMES.shell.showMs;
+        if (showing) lift[pos.indexOf(ballSlot)] = 70 * Math.sin(Math.min(1, t / G.MINIGAMES.shell.showMs) * Math.PI);
+        if (R) { const u = Math.min(1, (now - mg2.revealAt) / 350); lift[pos.indexOf(R.cup)] = 70 * u; if (R.pick != null && R.pick !== R.cup) lift[pos.indexOf(R.pick)] = 40 * u; }
+        if (showing || R) { const bx = slotX[R ? R.cup : ballSlot]; orbBall(bx, 268, 22, '#3ee0ff'); }
+        setInfo(R ? (R.prize > 0 ? 'Угадали!' : 'Мимо!') : showing ? 'Запомните, где сфера' : t < mg2.endAt ? 'Следите за чашей…' : mg2.picked != null ? 'Проверяем…' : 'Где сфера? Выберите чашу');
+      } else setInfo('Приготовьтесь…');
+      for (let c = 0; c < 3; c++) drawCup(xs[c], 290 + ys[c], lift[c]);
+      if (mg2.picked != null && !R) { g.strokeStyle = '#ffcc33'; g.lineWidth = 3; g.strokeRect(slotX[mg2.picked] - 62, 200, 124, 140); }
+      $('mg2Time').textContent = '';
+    } else if (k === 'throw') {
+      const c = mg2.cur, X0 = 60, X1 = 540, Y = 200, W2 = X1 - X0;
+      g.fillStyle = '#141b36'; g.fillRect(X0, Y - 18, W2, 36);
+      if (c) {
+        const bands = G.MINIGAMES.throw.points.slice().reverse(), cols = ['rgba(255,204,51,0.18)', 'rgba(255,204,51,0.35)', 'rgba(255,204,51,0.6)', '#ffcc33'];
+        bands.forEach(([d], i) => { const a = Math.max(0, c.target - d), b = Math.min(1, c.target + d); g.fillStyle = cols[i]; g.fillRect(X0 + a * W2, Y - 18, (b - a) * W2, 36); });
+        const pos = c.stop ? (c.stop.pos == null ? null : c.stop.pos) : G.throwPos((c.localStop || now) - c.t0, c.period, c.phase);
+        if (pos != null) { const x = X0 + pos * W2; g.fillStyle = '#fff'; g.shadowColor = '#3ee0ff'; g.shadowBlur = 12; g.beginPath(); g.moveTo(x, Y - 26); g.lineTo(x - 9, Y - 40); g.lineTo(x + 9, Y - 40); g.fill(); g.fillRect(x - 2, Y - 24, 4, 48); g.shadowBlur = 0; }
+        g.font = '800 30px Segoe UI, sans-serif'; g.textAlign = 'center'; g.fillStyle = '#ffcc33';
+        if (c.stop) g.fillText(c.stop.pos == null ? 'Не успели' : c.stop.pts ? `+${c.stop.pts}` : 'Мимо', 300, 300);
+        const total = (mg2.hist || []).reduce((a, b) => a + b, 0);
+        setInfo(`Бросок ${c.i + 1}/${c.of} · очки: ${total}`);
+        g.font = '600 16px Segoe UI, sans-serif'; g.fillStyle = '#aab3d9'; g.fillText('Тапните или нажмите пробел, чтобы остановить', 300, 120);
+      } else setInfo('Приготовьтесь…');
+      $('mg2Time').textContent = '';
+    } else if (k === 'chain') {
+      if (mg2.orbs) {
+        const left = mg2.goAt - now;
+        for (const o of mg2.orbs) {
+          const done = o.n < mg2.next; if (done && o.hit && now - o.hit > 250) continue;
+          orbBall(o.x, o.y, o.r, o.n === mg2.next ? '#ffcc33' : '#3ee0ff', done ? Math.max(0, 1 - (now - o.hit) / 250) : left > 0 ? 0.5 : 1);
+          g.fillStyle = '#071022'; g.font = '800 22px Segoe UI, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(String(o.n), o.x, o.y + 1);
+        }
+        g.textBaseline = 'alphabetic';
+        if (left > 0) { g.fillStyle = '#fff'; g.font = '800 64px Segoe UI, sans-serif'; g.textAlign = 'center'; g.fillText(String(Math.ceil(left / 400)), 300, 220); }
+        if (mg2.miss && now - mg2.miss < 200) { g.strokeStyle = 'rgba(255,77,109,0.7)'; g.lineWidth = 6; g.strokeRect(3, 3, 594, 394); }
+        setInfo(left > 0 ? 'Приготовьтесь…' : `Следующая: ${Math.min(mg2.next, G.MINIGAMES.chain.n)}`);
+        $('mg2Time').textContent = left > 0 ? '' : ((Math.min(now - mg2.goAt, mg2.limit)) / 1000).toFixed(2) + ' с';
+      } else setInfo('Приготовьтесь…');
+    }
+  }
 
   // ------------------------------------------------------------ chat
   // User content is only ever rendered with textContent (never innerHTML).

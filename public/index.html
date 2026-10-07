@@ -218,11 +218,43 @@
         <p class="prizes" id="rushPrizes"></p>
         <button class="btn primary" data-game="rush">Играть</button>
       </div>
+      <div class="game-card">
+        <div class="game-icon">🧠</div>
+        <h3>Память</h3>
+        <p>Сферы загораются по очереди — повторите последовательность. Каждый раунд она длиннее на одну.</p>
+        <p class="prizes" id="memoryPrizes"></p>
+        <button class="btn primary" data-game="memory">Играть</button>
+      </div>
+      <div class="game-card">
+        <div class="game-icon">🥤</div>
+        <h3>Угадай чашу</h3>
+        <p>Сфера прячется под одну из трёх чаш, чаши перемешиваются. Следите и выберите нужную.</p>
+        <p class="prizes" id="shellPrizes"></p>
+        <button class="btn primary" data-game="shell">Играть</button>
+      </div>
+      <div class="game-card">
+        <div class="game-icon">🎯</div>
+        <h3>Точный бросок</h3>
+        <p>Метка бегает по шкале — остановите её в цели (тап / пробел). 3 броска, чем ближе к центру, тем больше очков.</p>
+        <p class="prizes" id="throwPrizes"></p>
+        <button class="btn primary" data-game="throw">Играть</button>
+      </div>
+      <div class="game-card">
+        <div class="game-icon">🔢</div>
+        <h3>Цепочка</h3>
+        <p>Нажимайте сферы с номерами 1…8 по порядку как можно быстрее.</p>
+        <p class="prizes" id="chainPrizes"></p>
+        <button class="btn primary" data-game="chain">Играть</button>
+      </div>
     </div>
     <div id="reactionArea" class="mg-area hidden"><div id="reactionBox" class="reaction-box">Ждите зелёного…</div></div>
     <div id="rushArea" class="mg-area hidden">
       <div class="rush-bar"><span>Очки: <b id="rushScore">0</b></span><span>Время: <b id="rushTime">20.0</b></span></div>
       <canvas id="rushCanvas" width="600" height="400"></canvas>
+    </div>
+    <div id="mg2Area" class="mg-area hidden">
+      <div class="rush-bar"><span id="mg2Info"></span><b id="mg2Time"></b></div>
+      <canvas id="mg2Canvas" width="600" height="400"></canvas>
     </div>
     <div id="mgResult" class="mg-result hidden"></div>
   </div>

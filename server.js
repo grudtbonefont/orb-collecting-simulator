@@ -159,7 +159,7 @@ function addOrb(t, pos, evKind) {
   orbs.set(o.id, o);
   cells[o.cell].add(o.id);
   pendingAdds.push(evKind ? [o.id, o.x, o.y, o.t, 1] : [o.id, o.x, o.y, o.t]);
-  if (t === 'm' && !evKind && io) io.to('arena').emit('announce', { text: 'Появилась мифическая сфера (+50 и 3 осколка)! Ищите на мини-карте.', x: o.x, y: o.y });
+  if (t === 'm' && !evKind && io) io.to('arena').emit('announce', { text: 'Появилась мифическая сфера (+50 и 3 осколка)! Её покажет компас «Чутьё легенды».', x: o.x, y: o.y });
   return o;
 }
 function removeOrb(o, byPlayerId) {
@@ -198,7 +198,7 @@ function spawnTick(now) {
       const pos = pickSpot();
       if (pos) {
         addOrb('l', pos);
-        io.to('arena').emit('announce', { text: 'Появилась легендарная сфера (+25)! Ищите на мини-карте.', x: pos.x, y: pos.y });
+        io.to('arena').emit('announce', { text: 'Появилась легендарная сфера (+25)! Её покажет компас «Чутьё легенды».', x: pos.x, y: pos.y });
         nextLegendAt = now + rand(SPAWN.legendMin, SPAWN.legendMax);
       }
     } else nextLegendAt = now + 5000;
@@ -538,8 +538,26 @@ function finishMinigame(pl, info) {
     result.score = mg.score; result.hits = mg.hits;
     result.message = `Очки: ${mg.score} (попаданий: ${mg.hits}) → выплата ${Math.round(def.payoutRate * 100)}% от очков, максимум ${def.maxPrize}`;
     if (mg.score > (s.bestRush || 0)) s.bestRush = mg.score;
+  } else if (mg.kind === 'memory') {
+    result.rounds = mg.done;
+    prize = G.memoryPrize(mg.done);
+    result.message = info.timeout ? `Время вышло. Пройдено раундов: ${mg.done}` : mg.done >= def.maxRounds ? `Идеально! Все ${def.maxRounds} раундов` : `Ошибка. Пройдено раундов: ${mg.done}`;
+    if (mg.done > (s.bestMemory || 0)) s.bestMemory = mg.done;
+  } else if (mg.kind === 'shell') {
+    result.cup = mg.final; result.pick = info.pick == null ? null : info.pick; // the hidden cup is revealed only now
+    if (info.pick === mg.final) { prize = def.prize; result.message = 'Угадали! Сфера была здесь.'; }
+    else result.message = info.timeout ? 'Время вышло — чаша не выбрана.' : 'Мимо! Сфера была под другой чашей.';
+  } else if (mg.kind === 'throw') {
+    const total = mg.pts.reduce((a, b) => a + b, 0);
+    result.points = mg.pts; result.total = total;
+    prize = G.throwPrize(total);
+    result.message = `Очки за броски: ${mg.pts.join(' + ') || 0} = ${total}`;
+  } else if (mg.kind === 'chain') {
+    if (info.ms != null) { result.ms = info.ms; prize = G.chainPrize(info.ms); result.message = `Цепочка собрана за ${(info.ms / 1000).toFixed(2)} с`; if (!s.bestChain || info.ms < s.bestChain) s.bestChain = info.ms; }
+    else result.message = `Время вышло: собрано ${mg.next - 1} из ${def.n}`;
   }
-  if (info.aborted && mg.kind === 'reaction') prize = 0;
+  if (info.cheat) { prize = 0; result.message = 'Результат отклонён сервером (неправдоподобно быстро).'; }
+  if (info.aborted && mg.kind !== 'rush') prize = 0;
   const basePrize = prize;
   prize = G.skillPrize(prize, pl.acc.upgrades.skill); // «Мастер мини-игр»: +5/10/15 %, perfect play stays below half of farming
   if (prize !== basePrize) result.bonus = prize - basePrize;
@@ -591,8 +609,102 @@ function startMinigame(pl, kind) {
       t += 280 + Math.random() * 260;
     }
     mg.timers.push(setTimeout(() => { if (pl.mg === mg) finishMinigame(pl, {}); }, def.duration + 300));
+  } else if (kind === 'memory') {
+    mg.seq = Array.from({ length: def.maxRounds }, () => crypto.randomInt(def.colors)); mg.round = 0; mg.done = 0;
+    setTimeout(() => memoryRound(pl, mg), 50);
+  } else if (kind === 'shell') {
+    mg.start = crypto.randomInt(def.cups);
+    mg.swaps = [];
+    for (let i = 0; i < def.swaps; i++) {
+      const a = crypto.randomInt(def.cups), b = (a + 1 + crypto.randomInt(def.cups - 1)) % def.cups;
+      mg.swaps.push([a, b, Math.round(def.swapMsFrom + (def.swapMsTo - def.swapMsFrom) * i / (def.swaps - 1))]);
+    }
+    mg.final = G.shellFinal(mg.start, mg.swaps);
+    mg.pickFrom = Date.now() + G.shellShuffleMs(mg.swaps) - 150;
+    setTimeout(() => { if (pl.mg === mg) pl.socket.emit('mg:shell:setup', { start: mg.start, swaps: mg.swaps, showMs: def.showMs }); }, 0);
+    mg.timers.push(setTimeout(() => { if (pl.mg === mg) finishMinigame(pl, { timeout: true }); }, G.shellShuffleMs(mg.swaps) + def.pickTimeoutMs));
+  } else if (kind === 'throw') {
+    mg.pts = []; mg.i = -1;
+    setTimeout(() => throwNext(pl, mg), 50);
+  } else if (kind === 'chain') {
+    const orbsList = [];
+    while (orbsList.length < def.n) {
+      const x = 50 + crypto.randomInt(def.w - 100), y = 50 + crypto.randomInt(def.h - 100);
+      if (orbsList.every(o => Math.hypot(o.x - x, o.y - y) > def.r * 2 + 18) || orbsList.length && Math.random() < 0.002) orbsList.push({ n: orbsList.length + 1, x, y, r: def.r });
+    }
+    mg.orbs = orbsList; mg.next = 1; mg.lastTap = 0; mg.goAt = Date.now() + def.countdownMs;
+    setTimeout(() => { if (pl.mg === mg) pl.socket.emit('mg:chain:setup', { orbs: orbsList, startIn: def.countdownMs, limitMs: def.limitMs }); }, 0);
+    mg.timers.push(setTimeout(() => { if (pl.mg === mg) finishMinigame(pl, { timeout: true }); }, def.countdownMs + def.limitMs));
   }
   return { ok: true, kind, duration: def.duration };
+}
+// «Память»: show the next round (only the part of the sequence played so far), wait for the attempt
+function memoryRound(pl, mg) {
+  if (pl.mg !== mg) return;
+  const def = G.MINIGAMES.memory;
+  mg.round++; mg.roundAt = Date.now();
+  pl.socket.emit('mg:memory:show', { round: mg.round, seq: mg.seq.slice(0, mg.round), onMs: def.onMs, gapMs: def.gapMs, leadMs: def.leadMs });
+  clearTimeout(mg.roundTimer);
+  mg.roundTimer = setTimeout(() => { if (pl.mg === mg) finishMinigame(pl, { timeout: true }); }, G.memoryShowMs(mg.round) + def.inputBaseMs + mg.round * def.inputMsPerStep);
+  mg.timers.push(mg.roundTimer);
+}
+// «Точный бросок»: the server picks target, speed and phase; the marker position is a pure function of time
+function throwNext(pl, mg) {
+  if (pl.mg !== mg) return;
+  const def = G.MINIGAMES.throw;
+  mg.i++;
+  if (mg.i >= def.throws) return finishMinigame(pl, {});
+  mg.cur = { i: mg.i, target: Math.round((0.15 + Math.random() * 0.7) * 1000) / 1000, period: Math.round(def.periodMin + Math.random() * (def.periodMax - def.periodMin)), phase: Math.round(Math.random() * 1000) / 1000, at: Date.now(), done: false };
+  pl.socket.emit('mg:throw:start', { i: mg.cur.i, of: def.throws, target: mg.cur.target, period: mg.cur.period, phase: mg.cur.phase });
+  const cur = mg.cur;
+  mg.timers.push(setTimeout(() => { if (pl.mg === mg && !cur.done) { cur.done = true; mg.pts.push(0); pl.socket.emit('mg:throw:stopped', { i: cur.i, pos: null, pts: 0 }); mg.timers.push(setTimeout(() => throwNext(pl, mg), def.gapMs)); } }, def.throwTimeoutMs));
+}
+// Actions for the menu games added later (memory / shell / throw / chain). Everything is checked against server state & time.
+function minigameAct(pl, d) {
+  const mg = pl.mg, now = Date.now();
+  if (!mg || !isObj(d) || (mg.acts = (mg.acts || 0) + 1) > 300) return { ok: false };
+  const def = G.MINIGAMES[mg.kind];
+  if (mg.kind === 'memory') {
+    if (d.round !== mg.round || !Array.isArray(d.input) || d.input.length > mg.round || mg.answered === mg.round) return { ok: false };
+    mg.answered = mg.round;
+    const elapsed = now - mg.roundAt, need = G.memoryShowMs(mg.round) - 100 + d.input.length * def.minInputMs;
+    const right = d.input.length === mg.round && d.input.every((c, i) => c === mg.seq[i]);
+    if (right && elapsed < need) { finishMinigame(pl, { cheat: true }); return { ok: false, cheat: true }; }
+    if (!right) { finishMinigame(pl, {}); return { ok: true, right: false }; }
+    mg.done = mg.round;
+    if (mg.round >= def.maxRounds) { finishMinigame(pl, {}); return { ok: true, right: true }; }
+    clearTimeout(mg.roundTimer);
+    mg.timers.push(setTimeout(() => memoryRound(pl, mg), def.pauseMs));
+    return { ok: true, right: true };
+  }
+  if (mg.kind === 'shell') {
+    const cup = d.cup;
+    if (!Number.isInteger(cup) || cup < 0 || cup >= def.cups) return { ok: false };
+    if (now < mg.pickFrom) { finishMinigame(pl, { cheat: true }); return { ok: false, cheat: true }; } // picked before the shuffle ended
+    finishMinigame(pl, { pick: cup });
+    return { ok: true };
+  }
+  if (mg.kind === 'throw') {
+    const cur = mg.cur;
+    if (!cur || cur.done || d.i !== cur.i) return { ok: false };
+    const t = now - cur.at - Math.min(Math.max(pl.rtt || 0, 0), 300); // the client saw the marker ~1 RTT later
+    if (t < def.minStopMs) return { ok: false, early: true };
+    cur.done = true;
+    const pos = G.throwPos(t, cur.period, cur.phase), pts = G.throwPoints(Math.abs(pos - cur.target));
+    mg.pts.push(pts);
+    mg.timers.push(setTimeout(() => throwNext(pl, mg), def.gapMs));
+    return { ok: true, i: cur.i, pos: Math.round(pos * 1000) / 1000, pts };
+  }
+  if (mg.kind === 'chain') {
+    const o = mg.orbs[mg.next - 1];
+    if (now < mg.goAt - 100 || d.n !== mg.next || !o) return { ok: false };
+    if (mg.lastTap && now - mg.lastTap < def.minTapGapMs) return { ok: false, fast: true };
+    if (!(Math.hypot(Number(d.x) - o.x, Number(d.y) - o.y) <= o.r * 1.3 + 4)) return { ok: false };
+    mg.lastTap = now; mg.next++;
+    if (mg.next > def.n) { finishMinigame(pl, { ms: Math.max(0, now - mg.goAt) }); return { ok: true, n: o.n, done: true }; }
+    return { ok: true, n: o.n };
+  }
+  return { ok: false };
 }
 
 // ---------------------------------------------------------------- sockets
@@ -992,6 +1104,11 @@ io.on('connection', socket => {
     if (mg.phase === 'wait') return finishMinigame(pl, { early: true });
     const rt = Math.max(80, Math.round(Date.now() - mg.goAt - Math.min(pl.rtt / 2, 150)));
     finishMinigame(pl, { rt });
+  });
+  socket.on('mg:act', (d, ack) => {
+    ack = safeAck(ack);
+    if (!pl || !pl.mg || !['memory', 'shell', 'throw', 'chain'].includes(pl.mg.kind)) return ack({ ok: false });
+    ack(minigameAct(pl, d));
   });
   socket.on('mg:rush:hit', (m, ack) => {
     ack = safeAck(ack);

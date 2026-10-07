@@ -208,7 +208,39 @@
   const MINIGAMES = {
     reaction: { key: 'reaction', name: 'Реакция', fee: 10, cooldownMs: 15000 },
     rush: { key: 'rush', name: 'Сферный шторм', fee: 20, duration: 20000, w: 600, h: 400, payoutRate: 0.75, maxPrize: 40, cooldownMs: 20000 },
+    // «Память»: repeat a growing sequence of 4 coloured orbs; prize 3 per round after the first 2, cap 30 (12 rounds)
+    memory: { key: 'memory', name: 'Память', fee: 10, cooldownMs: 20000, colors: 4, maxRounds: 12, onMs: 450, gapMs: 200, leadMs: 700, pauseMs: 500,
+      minInputMs: 120, inputMsPerStep: 1200, inputBaseMs: 3000, freeRounds: 2, perRound: 3, maxPrize: 30 },
+    // «Угадай чашу»: follow the orb under 3 cups; win = 16 (fee 10) → blind guessing loses (EV 5.3), perfect tracking stays far below farming
+    shell: { key: 'shell', name: 'Угадай чашу', fee: 10, prize: 16, maxPrize: 16, cooldownMs: 15000, cups: 3, swaps: 9, showMs: 1000, swapMsFrom: 420, swapMsTo: 220, pickTimeoutMs: 8000 },
+    // «Точный бросок»: 3 throws, stop the marker in the target; points by distance (bar = 0..1), prize 80 % of points, cap 24
+    throw: { key: 'throw', name: 'Точный бросок', fee: 10, cooldownMs: 25000, throws: 3, points: [[0.015, 10], [0.035, 7], [0.06, 4], [0.1, 1]], payoutRate: 0.8, maxPrize: 24,
+      periodMin: 1300, periodMax: 1800, minStopMs: 250, gapMs: 900, throwTimeoutMs: 6000 },
+    // «Цепочка»: tap orbs 1..8 in order; prize by time
+    chain: { key: 'chain', name: 'Цепочка', fee: 10, cooldownMs: 20000, n: 8, w: 600, h: 400, r: 28, countdownMs: 1200, limitMs: 15000, minTapGapMs: 120,
+      prizes: [[3500, 18], [4500, 14], [6000, 10], [8000, 6], [10000, 3]], maxPrize: 18 },
   };
+  const memoryPrize = rounds => { const d = MINIGAMES.memory; return Math.max(0, Math.min(d.maxPrize, (Math.min(rounds, d.maxRounds) - d.freeRounds) * d.perRound)); };
+  const memoryShowMs = round => { const d = MINIGAMES.memory; return d.leadMs + round * (d.onMs + d.gapMs); };
+  // shell game: cups are swapped by slot; the orb follows its cup
+  const shellFinal = (start, swaps) => swaps.reduce((b, [x, y]) => (b === x ? y : b === y ? x : b), start);
+  const shellShuffleMs = swaps => MINIGAMES.shell.showMs + swaps.reduce((n, s) => n + s[2], 0);
+  // throw: marker goes 0 → 1 → 0 once per period, starting at phase
+  const throwPos = (t, period, phase) => { const u = ((t / period + phase) % 1 + 1) % 1; return u < 0.5 ? u * 2 : 2 - u * 2; };
+  const throwPoints = d => { for (const [lim, p] of MINIGAMES.throw.points) if (d <= lim) return p; return 0; };
+  const throwPrize = total => Math.max(0, Math.min(MINIGAMES.throw.maxPrize, Math.round(total * MINIGAMES.throw.payoutRate)));
+  const chainPrize = ms => { for (const [lim, p] of MINIGAMES.chain.prizes) if (ms < lim) return p; return 0; };
+  // fastest humanly-allowed full game (ms) — used for the "less than half of farming" rule
+  function minigameMinMs(kind) {
+    const d = MINIGAMES[kind];
+    if (kind === 'reaction') return 1500 + 80;
+    if (kind === 'rush') return d.duration;
+    if (kind === 'memory') { let t = 0; for (let r = 1; r <= d.maxRounds; r++) t += memoryShowMs(r) + r * d.minInputMs + d.pauseMs; return t; }
+    if (kind === 'shell') { let t = d.showMs; for (let i = 0; i < d.swaps; i++) t += d.swapMsFrom + (d.swapMsTo - d.swapMsFrom) * i / (d.swaps - 1); return t; }
+    if (kind === 'throw') return d.throws * (d.minStopMs + d.gapMs);
+    if (kind === 'chain') return d.countdownMs + (d.n - 1) * d.minTapGapMs;
+    return 0;
+  }
   const REACTION_PRIZES = [ [250, 16], [320, 12], [400, 10], [550, 6], [750, 3] ]; // [ms threshold, prize]
   const rushPrize = score => Math.max(0, Math.min(MINIGAMES.rush.maxPrize, Math.floor(score * MINIGAMES.rush.payoutRate)));
 
@@ -334,7 +366,7 @@
     WORLD, PLAYER_R, BASE_SPEED, TICK_MS, STEP_DT, ORB_TYPES, ORB_RANK, ORB_LEGEND, POOL_WEIGHTS, RAIN_WEIGHTS, rollOrbType, expectedOrbValue, CATEGORIES, INV_CATEGORIES, RARITIES, ITEMS, ITEM_BY_ID, INV_SLOTS, PAINTS,
     DEFAULT_EQUIPPED, DEFAULT_OWNED, UPGRADES, UPGRADE_KEYS, upLevel, upValue, jackpotChance, upgradeText, orbReward, skillPrize, compassTargets, SENSE_EPIC_RANGE, RADAR, radarBlips, PUSH, separatePlayers,
     EVENTS, EVENT_KEYS, EVENT_SCHEDULE, SHARD_ID, SHARD_EXCHANGE,
-    MINIGAMES, REACTION_PRIZES, rushPrize, speedFor, pickupFor, applyInput,
+    MINIGAMES, REACTION_PRIZES, rushPrize, memoryPrize, memoryShowMs, shellFinal, shellShuffleMs, throwPos, throwPoints, throwPrize, chainPrize, minigameMinMs, speedFor, pickupFor, applyInput,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.G = api;

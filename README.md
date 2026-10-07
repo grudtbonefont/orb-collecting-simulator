@@ -152,6 +152,11 @@ All six maxed cost 105 900. With orb rarities (Oct 2026, 6 + 6 runs, `test/measu
 - Before: Магнит +14 px per level (up to +70 px), Ускорение +6 % per level (up to +30 %), 300…6 000 / 400…7 200.
 
 - Mini-games are for fun and pay **less than farming**:
+  - Память: fee 10, a growing sequence of 4 coloured orbs (12 rounds max); prize 3 per round after round 2, up to 30; cooldown 20 s. The server sends only the part of the sequence played so far, times each answer (faster than the sequence can be shown → rejected).
+  - Угадай чашу: fee 10, the orb is shown under one of 3 cups, 9 visible swaps; win 16, cooldown 15 s. The server picks the cup and the swaps (the animation replays exactly those), reveals the cup only in the result; picking before the shuffle ends is rejected. Blind guessing: EV 5.3 < fee.
+  - Точный бросок: fee 10, 3 throws; the marker position is a server-side function of time (RTT-compensated), points 10 / 7 / 4 / 1 by distance; prize 80 % of points, up to 24; cooldown 25 s. Stops < 250 ms are refused.
+  - Цепочка: fee 10, tap orbs 1…8 in order; prize < 3.5 s 18, < 4.5 s 14, < 6 s 10, < 8 s 6, < 10 s 3; cooldown 20 s. The server checks order, position and ≥ 120 ms between taps.
+  - Flawless back-to-back play incl. cooldowns with «Мастер мини-игр» 3 (tested in `npm test`): Реакция 29, Сферный шторм 39, Память 16, Угадай чашу 25, Точный бросок 38, Цепочка 30 orbs/min (farming ≈ 100). Screenshots: `screenshot-minigames-6.png`, `screenshot-minigame-shell.png`.
   - Реакция: fee 10, prize by reaction time < 250 ms 16, < 320 ms 12, < 400 ms 10, < 550 ms 6, < 750 ms 3; cooldown 15 s. Typical players roughly break even. (Before: 25 / 18 / 12 / 6, no cooldown.)
   - Сферный шторм: fee 20 (was 15), payout 75 % of the score capped at 40 (was 100 %, uncapped), cooldown 20 s. A perfect run nets at most +20 per 40 s ≈ 30 orbs/min vs ≈ 80 when farming.
 
