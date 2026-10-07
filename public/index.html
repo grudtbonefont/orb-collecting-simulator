@@ -38,10 +38,13 @@
     <div id="joinError" class="error" role="alert"></div>
     <div class="orb-legend">
       <span><i class="dot c"></i>Обычная&nbsp;+1</span>
+      <span><i class="dot u"></i>Необычная&nbsp;+2</span>
       <span><i class="dot r"></i>Редкая&nbsp;+5</span>
+      <span><i class="dot e"></i>Эпическая&nbsp;+10</span>
       <span><i class="dot l"></i>Легендарная&nbsp;+25</span>
+      <span><i class="dot m"></i>Мифическая&nbsp;+50</span>
     </div>
-    <div class="hint">Управление: <b>WASD</b> / <b>стрелки</b>, или зажмите мышь / палец — персонаж идёт за курсором.<br>Горячие клавиши: <b>P</b> — профиль, <b>I</b> — инвентарь, <b>B</b> — магазин, <b>M</b> — мини-игры, <b>L</b> — рейтинг, <b>Enter</b> / <b>T</b> — чат.</div>
+    <div class="hint">Управление: <b>WASD</b> / <b>стрелки</b>, или зажмите мышь / палец — персонаж идёт за курсором.<br>Горячие клавиши: <b>P</b> — профиль, <b>I</b> — инвентарь, <b>B</b> — магазин, <b>M</b> — мини-игры, <b>L</b> — рейтинг, <b>H</b> — виды сфер, <b>Enter</b> / <b>T</b> — чат.</div>
     <div class="mini-lb"><h3>🏆 Лучшие сборщики</h3><ol id="startLb"><li class="muted">Загрузка…</li></ol></div>
   </div>
 </div>
@@ -100,6 +103,27 @@
     <button class="btn" data-open="lb" title="Рейтинг (L)"><i>🏆</i><span>Рейтинг</span></button>
   </div>
   <canvas id="minimap" width="150" height="150"></canvas>
+  <button type="button" id="helpBtn" class="help-btn" title="Виды сфер (H)" aria-label="Виды сфер">?</button>
+  <div id="orbHelp" class="orb-help hidden" role="dialog" aria-label="Виды сфер">
+    <div class="oh-head"><b>Виды сфер</b><button type="button" id="orbHelpClose" class="close" aria-label="Закрыть">✕</button></div>
+    <div id="orbHelpList"></div>
+    <p class="muted oh-foot">💎 Осколки тратятся в «Лавке осколков» (магазин). Каждые 6–10 минут на арене проходит событие.</p>
+  </div>
+  <!-- timed arena events: announce banner, active HUD, results -->
+  <div id="evBanner" class="ev-banner hidden" role="status" aria-live="polite">
+    <div class="ev-icon" id="evBIcon"></div>
+    <div class="ev-body">
+      <div class="ev-title"><span id="evBName"></span><b id="evBCount" class="ev-count"></b></div>
+      <div class="ev-desc" id="evBDesc"></div>
+      <div class="ev-bar"><i id="evBBar"></i></div>
+    </div>
+  </div>
+  <div id="evHud" class="ev-hud hidden" role="status">
+    <div class="ev-head"><span id="evHIcon" class="ev-icon-sm"></span><b id="evHName"></b><span id="evHTime" class="ev-time"></span></div>
+    <div class="ev-bar"><i id="evHBar"></i></div>
+    <div id="evHInfo" class="ev-info"></div>
+  </div>
+  <div id="evResult" class="ev-result hidden" role="status" aria-live="polite"></div>
 </div>
 
 <div id="toasts"></div>

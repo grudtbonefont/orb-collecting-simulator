@@ -66,11 +66,52 @@ Global arena chat (logged-in players only), last 50 messages are sent on join, j
 | target orbs on the field | `clamp(70 + 30 × players online, 90, 320)` → 90 when empty, 160 with 3 players, 320 from 9 players |
 | world / grid | 3000 × 3000 px split into 10 × 10 cells of 300 px |
 | placement | best-of-6 emptiest random cells, then up to 8 random points per cell (Poisson-disc-like): ≥ 70 px from any other orb, ≥ 220 px from every player |
-| rarity | common (+1) 90 %, rare (+5) 10 % |
+| rarity | see «Orb rarities» below |
 | refill | a collected orb respawns 3–9 s later somewhere else; orbs added because more players joined fade in over ~4 s; ≤ 4 spawns per tick |
 | legendary (+25) | timed event, never part of the normal pool: first one 60 s after start, then every 90–150 s (only while someone is online), at most 1 alive, disappears after 75 s, announced to everyone; picking it up also grants a «Легендарный осколок» |
 
 Previously 380 orbs refilled instantly with 2 % legendaries regardless of player count; now the field scales with the player count and is evenly spread. `GET /api/health` shows `orbs` and `targetOrbs`.
+
+## Orb rarities (`G.ORB_TYPES` in `public/shared.js`)
+| tier | value | spawn weight (of 10 000) | color | notes |
+|---|---|---|---|---|
+| обычная (c) | +1 | 8 224 (82.2 %) | `#3ee0ff` cyan | |
+| необычная (u) | +2 | 1 200 (12 %) | `#5dff8f` green | |
+| редкая (r) | +5 | 460 (4.6 %) | `#b46bff` violet | |
+| эпическая (e) | +10 | 110 (1.1 %) | `#ff9a2e` orange, glow + spikes | |
+| легендарная (l) | +25 | timed, never in the pool | `#ffcc33` gold | + 1 «Легендарный осколок», announced |
+| мифическая (m) | +50 | 6 (0.06 %), max 1 alive, vanishes after 60 s | `#ff3d6e` crimson, rotating rays | + 3 осколка, announced |
+| сокровище (t) | +50 | events only | `#ffe680` | + 1 осколок (event «Охота за сокровищем») |
+
+Pool average ≈ 1.43 per orb. Each tier has its own look on the arena and minimap; the «?» button (or H) opens a legend. Old cached clients draw unknown tiers with the common sprite.
+
+## Arena events (server-authoritative, `G.EVENTS` / `eventTick` in `server.js`)
+Scheduler: only while ≥ 1 player is online, one event every **6–10 min** (random), never the same kind twice in a row, never while a legendary orb is alive or imminent (the legendary waits until 20 s after the event). Each event is announced **25 s** ahead (banner with countdown and rules), then a HUD shows timer/progress, then everyone gets the results (top 5 names + scores + rewards and their own line). Rewards are paid by the server only to players online at the end; shards go through `grantItem(..., 'event')`. If everyone leaves, the event is cancelled.
+
+| event | duration | rules | rewards |
+|---|---|---|---|
+| Сферный дождь | 45 s | 40 + 25 per player (≤ 220) extra orbs (c/u/r/e mix) fall; leftovers vanish at the end | whatever you collect (paid on pickup) |
+| Царь горы | 60 s | stand in a zone (r = 230 px, shown on the arena + minimap); +1 point per second inside | 1st 200 ◉ + 2 💎, 2nd 120 ◉ + 1 💎, 3rd 80 ◉, others ≥ 10 points 20 ◉; alone: 100 ◉ + 1 💎; < 10 points: nothing |
+| Охота за сокровищем | 90 s | 3 treasure orbs (+1 per 4 players, ≤ 6) placed ≥ 900 px from players; the HUD says how many are left | each treasure 50 ◉ + 1 💎 |
+| Сфера-беглец | 60 s | a fast orb (175 px/s) flees from the closest player; position streamed to all | the catcher: 120 ◉ + 2 💎 |
+
+Rewards are worth ≈ 1–2.5 min of farming. Env: `EVENT_EVERY_MS` (unset = random 6–10 min, `0` = events off, `N` = fixed interval), `EVENT_ANNOUNCE_MS` (default 25 000), `EVENT_DURATION_MS` (override all durations, for testing). Stats: `eventsPlayed`, `eventWins` (added with default 0).
+
+## «Лавка осколков» (shard shop)
+Exclusive cosmetics that **cannot be bought with orbs**, only with «Легендарный осколок» (shards are taken with `removeItem(..., 'shard_shop')`; all-or-nothing if the inventory is full). They have their own icons, arena rendering and an «Эксклюзив» badge in the inventory/shop.
+
+| item | category | shards |
+|---|---|---|
+| Пустота | цвет | 40 |
+| Осколочный ник | цвет ника | 50 |
+| Хвост кометы | след | 70 |
+| Кристалл | форма | 90 |
+| Спутники | шапка | 120 |
+| Кристальный след | след | 150 |
+| Призма | цвет | 200 |
+| Осколочная корона | шапка | 300 |
+
+All 8 together: 1 020 shards. Exchange: **1 shard → 40 orbs** (balance only, not the all-time total; up to 99 per trade). Shard income (estimate): legendary orbs ≈ up to 30/h if you catch every one, mythic orbs ≈ 7/h server-wide, events ≈ 2–4/h → a typical active player gets ≈ 15–35 shards/h, so the top item takes ≈ 8–20 h of play. Socket: `shard:buy(itemId)`, `shard:exchange(qty)` (rate limited 8 / 5 s).
 
 ## Economy
 Measured with greedy bots on the new spawn settings (`node test/measure-earn-rate.js <bots> <seconds>` against a scratch server, no upgrades): **≈ 80–110 orbs/min** per player with 1–4 players online (≈ 80 used for pricing; humans are usually a bit slower, upgrades make it faster).
@@ -98,11 +139,11 @@ Optional, server-authoritative (applied in `collectAround` / the movement step /
 | Магнит | pickup radius +10 / +19 / +26 / +32 / +36 px (base 20 → 56 max) | 300 / 900 / 2 400 / 5 500 / 11 000 | 20 100 |
 | Ускорение | speed +6 / +10 / +13 / +16 / +18 % (230 → 271 px/s max) | 400 / 1 100 / 2 800 / 6 000 / 12 000 | 22 300 |
 | Множитель сфер | every orb ×1.05 / 1.10 / 1.15 / 1.20 / 1.25 (fractions are carried per player, so +5 % of a 1-orb pickup is never rounded away) | 600 / 1 600 / 3 800 / 8 000 / 15 000 | 29 000 |
-| Удача | 3 / 6 / 8 / 10 / 12 % chance that a collected orb counts twice (the client shows «×2!») | 500 / 1 400 / 3 400 / 7 000 / 13 000 | 25 300 |
-| Чутьё легенды | 1: arrow at the screen edge towards the legendary orb · 2: + distance · 3: + a heads-up 15 s before a legendary appears (no position) | 500 / 1 500 / 4 000 | 6 000 |
+| Удача | 2 / 4 / 6 / 7 / 8 % chance that a collected orb counts twice (the client shows «×2!»); from level 3 also a «находка»: 0.5 / 0.75 / 1 % of common/uncommon pickups count as an epic (+10) | 500 / 1 400 / 3 400 / 7 000 / 13 000 | 25 300 |
+| Чутьё легенды (компас) | 1: arrows to the legendary and mythic orbs · 2: + arrow to the nearest epic within 1 500 px, distances · 3: + heads-up 15 s before a legendary and arrows to event targets (zone, treasures, runner) | 500 / 1 500 / 4 000 | 6 000 |
 | Мастер мини-игр | mini-game prizes +5 / +10 / +15 % (perfect play still nets < half of farming: ≤ 39 orbs/min in «Сферный шторм») | 300 / 900 / 2 000 | 3 200 |
 
-All six maxed cost 105 900. Measured income (greedy bot, `UPGRADES=max node test/measure-earn-rate.js 1 90 <url>` against fresh scratch servers with `OCS_TEST_HOOKS=1`, 12 runs each, one bot per server): **no upgrades 102 orbs/min (94–113), everything maxed 182 orbs/min (152–230) → ×1.79 on average (+79 %), median ×1.72 (+72 %)**; repeated batches with the same settings vary by roughly ±7 %, so treat it as ≈ +70–80 %. Multiplier × luck alone is ×1.40 (1.25 × 1.12); speed and magnet add the rest.
+All six maxed cost 105 900. With orb rarities (Oct 2026, 6 + 6 runs, `test/measure-earn-rate.js`): **no upgrades ≈ 106 orbs/min (79–119), everything maxed ≈ 181 orbs/min (158–220) → ×1.71**; luck was retuned so the larger orb values don't inflate it. Previous measurement (greedy bot, `UPGRADES=max node test/measure-earn-rate.js 1 90 <url>` against fresh scratch servers with `OCS_TEST_HOOKS=1`, 12 runs each, one bot per server): **no upgrades 102 orbs/min (94–113), everything maxed 182 orbs/min (152–230) → ×1.79 on average (+79 %), median ×1.72 (+72 %)**; repeated batches with the same settings vary by roughly ±7 %, so treat it as ≈ +70–80 %. Multiplier × luck alone is ×1.40 (1.25 × 1.12); speed and magnet add the rest.
 - Existing players keep their levels: magnet and speed still have 5 levels and map 1:1 onto the new curves, the new upgrades start at 0. A stored level above a max (not possible today) would be clamped and refunded at that upgrade's last price.
 - Before: Магнит +14 px per level (up to +70 px), Ускорение +6 % per level (up to +30 %), 300…6 000 / 400…7 200.
 
@@ -132,8 +173,8 @@ Logs: `logs/server.log`. Deployed on Render: build `npm install --omit=dev`, sta
     UPGRADES=max node test/measure-earn-rate.js 1 90 http://localhost:3110   # income measurement against a scratch server started with OCS_TEST_HOOKS=1
     node test/seed-demo.js [file]              # demo accounts (password demo-pass-123) into a JSON data file
 
-`npm test` covers: auth, profile data, chat moderation + the clear cycle, spawn distribution (count vs players, spread, gaps, no spawns on players, rarity share, legendary event), price sanity, shop purchases, inventory limit / stacking / full-inventory refusal, equip & unequip from the inventory, trash (unique items, partial / whole stacks, equipped items, invalid requests, rate limit, re-buying, persistence across restarts), the silent chat clear (no schedule or notice reaches clients), mini-game payouts and cooldowns, persistence across restarts, migration of old-format accounts (JSON and Postgres) upgrades (price tables, diminishing curves, caps, exact multiplier accounting with carried fractions, luck, speed, mini-game skill, legendary heads-up only for «Чутьё легенды» 3, level migration), income with everything maxed vs none (3 + 3 fresh servers in parallel; skip with `OCS_TEST_INCOME=0`), every new cosmetic bought / equipped / seen by others / trashed, catalog rules (tier price ranges, unchanged old ids and prices) and a privacy audit of everything clients received. `OCS_TEST_HOOKS=1` enables test-only socket events (`test:grant`, `test:orbs`, `test:upgrades`) — the test runner sets it for its own servers; never set it in production.
-Screenshots: `screenshot-profile.png`, `screenshot-profile-mobile.png`, `screenshot-inventory.png`, `screenshot-inventory-mobile.png`, `screenshot-trash-confirm.png`, `screenshot-shop.png`, `screenshot-shop-mobile.png`, `screenshot-shop-upgrades.png`, `screenshot-icons-all.png` (every item + upgrade icon), `screenshot-arena-cosmetics.png` (players wearing new cosmetics), plus the login / chat screenshots.
+`npm test` covers: auth, profile data, chat moderation + the clear cycle, spawn distribution (count vs players, spread, gaps, no spawns on players, rarity share, legendary event), price sanity, shop purchases, inventory limit / stacking / full-inventory refusal, equip & unequip from the inventory, trash (unique items, partial / whole stacks, equipped items, invalid requests, rate limit, re-buying, persistence across restarts), the silent chat clear (no schedule or notice reaches clients), mini-game payouts and cooldowns, persistence across restarts, migration of old-format accounts (JSON and Postgres) upgrades (price tables, diminishing curves, caps, exact multiplier accounting with carried fractions, luck, speed, mini-game skill, legendary heads-up only for «Чутьё легенды» 3, level migration), income with everything maxed vs none (3 + 3 fresh servers in parallel; skip with `OCS_TEST_INCOME=0`), every new cosmetic bought / equipped / seen by others / trashed, catalog rules (tier price ranges, unchanged old ids and prices) and a privacy audit of everything clients received. Also: orb tier weights / roll distribution / pool income, luck «находка» and compass levels, every arena event (rain, king of the hill with placed rewards, treasure, runner, cancelling), the event scheduler (no events with 0 players or while a legendary is alive, sequencing, announce timing), the shard shop (prices, refusals, exchange, all-or-nothing) and event payload privacy. `OCS_TEST_ONLY=events` runs just those. `OCS_TEST_HOOKS=1` enables test-only socket events (`test:grant`, `test:orbs`, `test:upgrades`, `test:event`, `test:spawn`) — the test runner sets it for its own servers; never set it in production.
+Screenshots: `screenshot-profile.png`, `screenshot-profile-mobile.png`, `screenshot-inventory.png`, `screenshot-inventory-mobile.png`, `screenshot-trash-confirm.png`, `screenshot-shop.png`, `screenshot-shop-mobile.png`, `screenshot-shop-upgrades.png`, `screenshot-icons-all.png` (every item + upgrade icon), `screenshot-arena-cosmetics.png` (players wearing new cosmetics), `screenshot-event-banner.png`, `screenshot-event-koth.png`, `screenshot-shard-shop.png`, `screenshot-orb-rarities.png` (test:ui also writes `screenshot-event-results.png` and `screenshot-arena-exclusives.png`, not committed), plus the login / chat screenshots.
 
 ## API
 - `GET /api/leaderboard?limit=20&name=<nick>` — all-time ranking by total orbs collected (rank, name, total, color, online)

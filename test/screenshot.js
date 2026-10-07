@@ -17,7 +17,7 @@ async function startOwnServer(port, env = {}, seed = true) {
   try { await fetch(`http://localhost:${port}/api/health`); throw new Error(`port ${port} is already in use`); } catch (e) { if (/in use/.test(e.message)) throw e; }
   const file = path.join(os.tmpdir(), `ocs-demo-${process.pid}-${port}.json`);
   if (seed) execFileSync(process.execPath, [path.join(__dirname, 'seed-demo.js'), file], { stdio: 'inherit' });
-  const proc = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: Object.assign({}, process.env, { PORT: String(port), DATA_FILE: file, DATABASE_URL: '' }, env), stdio: 'ignore' });
+  const proc = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: Object.assign({}, process.env, { PORT: String(port), DATA_FILE: file, DATABASE_URL: '', EVENT_EVERY_MS: '0' }, env), stdio: 'ignore' });
   for (let i = 0; i < 100; i++) { try { if ((await fetch(`http://localhost:${port}/api/health`)).ok) break; } catch (_) { /* wait */ } await sleep(200); }
   process.on('exit', () => { try { proc.kill('SIGTERM'); fs.rmSync(file, { force: true }); } catch (_) { /* already gone */ } }); // also on crash
   return { url: `http://localhost:${port}`, stop: () => { proc.kill('SIGTERM'); fs.rmSync(file, { force: true }); } };
@@ -57,7 +57,7 @@ function bot(url, name) {
   const watch = page => { page.on('pageerror', e => errors.push(e.message)); page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); }); };
 
   // ---------------- item icons: every catalog item, distinct, non-empty, data-driven fallback
-  const galCtx = await browser.newContext({ viewport: { width: 1840, height: 1100 } });
+  const galCtx = await browser.newContext({ viewport: { width: 1840, height: 1240 } });
   const gal = await galCtx.newPage();
   watch(gal);
   await gal.goto(URL); await sleep(500);
@@ -95,7 +95,7 @@ function bot(url, name) {
   await gal.evaluate(require('./icon-gallery.js'));
   await sleep(300);
   const galH = await gal.evaluate(() => document.getElementById('iconGallery').scrollHeight);
-  ok(galH <= 1100, `icon gallery (all items grouped by category + upgrades) fits one screenshot (${galH}px)`);
+  ok(galH <= 1240, `icon gallery (all items grouped by category + upgrades) fits one screenshot (${galH}px)`);
   await shot(gal, 'screenshot-icons-all.png');
   await galCtx.close();
 
@@ -204,7 +204,7 @@ function bot(url, name) {
   const shopIds = () => desk.evaluate(() => Array.from(document.querySelectorAll('#shopGrid .item[data-item]')).map(e => e.dataset.item));
   await desk.click('#shopRarity [data-rarity=legendary]'); await sleep(150);
   const leg = await shopIds();
-  ok(leg.length === SG.ITEMS.filter(i => i.cat === 'color' && i.rarity === 'legendary').length && leg.every(id => SG.ITEM_BY_ID[id].rarity === 'legendary'), 'rarity filter: only legendary colours — ' + leg.join(', '));
+  ok(leg.length === SG.ITEMS.filter(i => i.cat === 'color' && i.rarity === 'legendary' && !i.exclusive).length && leg.every(id => SG.ITEM_BY_ID[id].rarity === 'legendary'), 'rarity filter: only legendary colours — ' + leg.join(', '));
   await desk.click('#shopRarity [data-rarity=all]');
   await desk.selectOption('#shopSort', 'price-desc'); await sleep(150);
   const desc = await shopIds();
@@ -460,10 +460,12 @@ function bot(url, name) {
       for (const id of NEWI.map(i => i.id)) await call(b, 'test:grant', { id, qty: 1, source: 'event' });
     }
     const viewerPos = () => { const id = abots[0].ids.get('Viewer'); return id && abots[0].positions.get(id); };
+    let botMode = 'circle';
     abots.forEach((b, i) => { b.timer = setInterval(() => {
       const t = viewerPos(); if (!b.pos || !t) return;
       const ang = Date.now() / 1500 + i * (Math.PI * 2 / abots.length), rad = 150 + (i % 3) * 55;
-      const tx = t.x + Math.cos(ang) * rad * 1.5, ty = t.y + Math.sin(ang) * rad * 0.85;
+      let tx = t.x + Math.cos(ang) * rad * 1.5, ty = t.y + Math.sin(ang) * rad * 0.85;
+      if (botMode === 'away') { const a2 = i * (Math.PI * 2 / abots.length); tx = t.x + Math.cos(a2) * 1100; ty = t.y + Math.sin(a2) * 900; }
       let dx = tx - b.pos.x, dy = ty - b.pos.y; const l = Math.hypot(dx, dy);
       if (l < 6) { dx = dy = 0; } else { dx /= l; dy /= l; }
       b.s.emit('input', { s: ++b.seq, x: dx, y: dy });
@@ -492,6 +494,93 @@ function bot(url, name) {
     const px = await vp.evaluate(() => { const c = document.getElementById('game'); return c ? c.width * c.height : 0; });
     ok(px > 0, 'arena canvas is drawing');
     await shot(vp, 'screenshot-arena-cosmetics.png');
+    // exclusives from «Лавка осколков» on arena players
+    const exShow = [['c_void', 's_crystal', 't_crystal', 'n_shard', 'h_shard_crown'], ['c_prism', 's_blob', 't_comet', 'n_shard', 'h_satellites'], ['c_prism', 's_crystal', 't_comet', 'n_glitch', 'h_shard_crown'],
+      ['c_void', 's_star', 't_crystal', 'n_rainbow', 'h_satellites']];
+    const exErr = errors.length;
+    for (let i = 0; i < exShow.length; i++) for (const id of exShow[i]) await call(abots[i], 'inv:equip', id);
+    await sleep(2500);
+    ok(errors.length === exErr, 'exclusive cosmetics render in the arena without errors');
+    await shot(vp, 'screenshot-arena-exclusives.png');
+
+    // ---------------- timed arena events: announce banner → king-of-the-hill zone + HUD → results
+    const v0 = viewerPos();
+    let r = await call(abots[0], 'test:event', { kind: 'koth', announceMs: 6000, durationMs: 13000, x: v0.x + 40, y: v0.y + 20 });
+    ok(r && r.ok && r.event.phase === 'announce', 'test hook announces «Царь горы»');
+    await vp.waitForSelector('#evBanner:not(.hidden)', { timeout: 3000 });
+    await sleep(1200);
+    const ban = await vp.evaluate(() => ({ name: document.getElementById('evBName').textContent, count: document.getElementById('evBCount').textContent, desc: document.getElementById('evBDesc').textContent,
+      box: document.getElementById('evBanner').getBoundingClientRect().toJSON() }));
+    ok(/Царь горы/.test(ban.name) && /через [1-6] с/.test(ban.count) && ban.desc.length > 20, `announce banner with countdown: «${ban.name}» ${ban.count}`);
+    ok(ban.box.top < 120 && ban.box.left > 200 && ban.box.right < 1080, 'desktop banner sits top-centre between the HUD panels');
+    await shot(vp, 'screenshot-event-banner.png');
+    await vp.waitForSelector('#evHud:not(.hidden)', { timeout: 8000 });
+    ok(!(await vp.isVisible('#evBanner')), 'banner turns into the event HUD when the event starts');
+    await sleep(3500);
+    const hud = await vp.evaluate(() => ({ time: document.getElementById('evHTime').textContent, info: document.getElementById('evHInfo').textContent, bar: parseFloat(document.getElementById('evHBar').style.width) }));
+    ok(/^0:\d\d$/.test(hud.time) && /Вы в зоне/.test(hud.info) && /очки: [1-9]/.test(hud.info) && hud.bar > 20 && hud.bar < 95, `event HUD: timer ${hud.time}, progress ${Math.round(hud.bar)}%, «${hud.info}»`);
+    await shot(vp, 'screenshot-event-koth.png');
+    await vp.waitForSelector('#evResult:not(.hidden)', { timeout: 15000 });
+    await sleep(400);
+    const res = await vp.textContent('#evResult');
+    ok(/итоги/.test(res) && /Вы: 1-е место/.test(res) && /награда \+\d+ ◉/.test(res) && /Viewer/.test(res), 'results card: place, score and reward — ' + res.replace(/\s+/g, ' ').slice(0, 140));
+    ok(!(await vp.isVisible('#evHud')), 'event HUD hidden after the end');
+    await shot(vp, 'screenshot-event-results.png');
+    await vp.click('#evResult .close');
+    ok(!(await vp.isVisible('#evResult')), 'results card can be closed');
+
+    // ---------------- orb tiers: one of each around the viewer (bots step aside) + the «?» legend
+    botMode = 'away';
+    for (let i = 0; i < 80; i++) { const v = viewerPos(); if (abots.every(b => b.pos && Math.hypot(b.pos.x - v.x, b.pos.y - v.y) > 700)) break; await sleep(100); }
+    const v1 = viewerPos();
+    r = await call(abots[0], 'test:spawn', { types: ['c', 'u', 'r', 'e', 'l', 'm', 't'], ring: 150, x: v1.x, y: v1.y });
+    ok(r && r.ok && r.n === 7, 'test hook spawns one orb of each tier');
+    await vp.click('#helpBtn'); await sleep(3400); // let the «мифическая сфера» toast fade
+    const legend = await vp.evaluate(() => Array.from(document.querySelectorAll('#orbHelpList .oh-row')).map(e => e.dataset.orb + ':' + e.querySelector('b').textContent));
+    ok(legend.join(' ') === 'c:+1 u:+2 r:+5 e:+10 l:+25 m:+50 t:+50', 'orb legend popover lists every tier with its value: ' + legend.join(' '));
+    await shot(vp, 'screenshot-orb-rarities.png');
+    await vp.click('#orbHelpClose');
+    botMode = 'circle';
+
+    // ---------------- «Лавка осколков»: an account with shards (granted via the test hook), two exclusives bought over the socket
+    const fan = bot(arena.url, 'Shard_Fan');
+    r = await new Promise(res => fan.s.emit('auth', { mode: 'register', name: 'Shard_Fan', password: PW, confirm: PW }, res));
+    await call(fan, 'test:grant', { id: SG.SHARD_ID, qty: 200, source: 'event' });
+    const b1 = await call(fan, 'shard:buy', 'c_void'), b2 = await call(fan, 'shard:buy', 'n_shard');
+    ok(b1 && b1.ok && b2 && b2.ok, 'socket purchases in «Лавка осколков» (40 + 50 shards)');
+    fan.close(); await sleep(300);
+    const sctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const sp = await sctx.newPage();
+    watch(sp);
+    await sp.goto(arena.url); await sleep(400);
+    await sp.fill('#nick', 'Shard_Fan'); await sp.fill('#pass', PW); await sp.click('#authSubmit');
+    await sp.waitForSelector('#profile:not(.hidden)', { timeout: 10000 });
+    await sp.click('#pfPlay');
+    await sp.waitForSelector('#hud:not(.hidden)', { timeout: 10000 });
+    await sp.keyboard.press('KeyB'); await sleep(300);
+    ok(await sp.evaluate(() => !Array.from(document.querySelectorAll('#shopGrid .item[data-item]')).some(e => G.ITEM_BY_ID[e.dataset.item].exclusive)), 'exclusives are not listed in the orb shop');
+    await sp.click('#shopTabs .tab[data-tab=shards]'); await sleep(300);
+    const ss = await sp.evaluate(() => ({ have: document.getElementById('shardCount').textContent,
+      cards: Array.from(document.querySelectorAll('#shopGrid .ex-item')).map(e => ({ id: e.dataset.item, badge: !!e.querySelector('.ex-badge'), btn: e.querySelector('button').textContent, dis: e.querySelector('button').disabled })) }));
+    const EXC = SG.ITEMS.filter(i => i.exclusive);
+    ok(/^110\s💎$/.test(ss.have), 'shard count shown: ' + ss.have);
+    ok(ss.cards.length === EXC.length && ss.cards.every(c => c.badge) && ss.cards.every((c, i) => !i || SG.ITEM_BY_ID[c.id].shardPrice >= SG.ITEM_BY_ID[ss.cards[i - 1].id].shardPrice),
+      `${ss.cards.length} exclusive cards with the «Эксклюзив» badge, cheapest first`);
+    const cardOf = id => ss.cards.find(c => c.id === id) || {};
+    ok(/В инвентаре/.test(cardOf('c_void').btn) && /В инвентаре/.test(cardOf('n_shard').btn) && !cardOf('t_comet').dis && cardOf('h_shard_crown').dis && /300 💎/.test(cardOf('h_shard_crown').btn),
+      'owned → «В инвентаре», affordable → enabled, too expensive → disabled with the shard price');
+    await shot(sp, 'screenshot-shard-shop.png');
+    await sp.locator('#shopGrid [data-item=t_comet] button').click(); await sleep(600);
+    ok(/^40\s💎$/.test(await sp.textContent('#shardCount')) && /В инвентаре/.test(await sp.textContent('#shopGrid [data-item=t_comet] button')), 'buying in the UI spends shards (110 → 40)');
+    const balBeforeEx = Number((await sp.textContent('#hudBalance')).replace(/\s/g, ''));
+    await sp.fill('#shardExQty', '2'); await sp.click('#shardExBtn'); await sleep(600);
+    const balAfterEx = Number((await sp.textContent('#hudBalance')).replace(/\s/g, ''));
+    ok(/^38\s💎$/.test(await sp.textContent('#shardCount')) && balAfterEx - balBeforeEx >= 2 * SG.SHARD_EXCHANGE.orbs && balAfterEx - balBeforeEx < 2 * SG.SHARD_EXCHANGE.orbs + 30, `exchange in the UI: 2 💎 → +${balAfterEx - balBeforeEx} ◉`);
+    await sp.keyboard.press('Escape'); await sp.keyboard.press('KeyI'); await sleep(400);
+    ok(await sp.evaluate(() => ['c_void', 'n_shard', 't_comet'].every(id => { const e = document.querySelector(`#invGrid [data-item=${id}]`); return e && e.querySelector('.ex-badge') && /Лавка осколков/.test(e.textContent); })),
+      'inventory: exclusives carry the badge and the source «Лавка осколков»');
+    await sctx.close();
+
     for (const b of abots) b.close();
     await vctx.close();
     arena.stop();

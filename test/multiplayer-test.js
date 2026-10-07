@@ -248,7 +248,7 @@ const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 // catalog of commit f731c5a: these ids and prices must never change
 const OLD_PRICES = { c_cyan: 0, c_coral: 150, c_lime: 150, c_violet: 400, c_pink: 700, c_gold: 2400, c_rainbow: 15000, s_circle: 0, s_square: 400, s_triangle: 800, s_hexagon: 1400, s_star: 4000,
   t_none: 0, t_sparks: 1000, t_neon: 2800, t_fire: 12000, n_white: 0, n_pink: 300, n_gold: 1800, n_rainbow: 9000, h_none: 0, h_cap: 500, h_tophat: 1500, h_halo: 3200, h_crown: 20000, x_legend_shard: null };
-const NEW_ITEMS = () => G.ITEMS.filter(i => !has(OLD_PRICES, i.id));
+const NEW_ITEMS = () => G.ITEMS.filter(i => !has(OLD_PRICES, i.id) && !i.exclusive); // exclusives: «Лавка осколков» only
 
 // ------------------------------------------------------------------ upgrades: pure rules (curves, caps, multiplier fractions, luck, migration)
 function upgradeRules() {
@@ -271,10 +271,8 @@ function upgradeRules() {
   ok(sum(20, 1, { mult: 1 }, () => 1) === 21 && sum(100, 1, { mult: 5 }, () => 1) === 125 && sum(19, 1, { mult: 1 }, () => 1) === 19 && sum(4, 5, { mult: 5 }, () => 1) === 25,
     'multiplier: 20×1 orb at +5 % → 21, 100×1 at +25 % → 125 (fractions carried, never lost)');
   const lucky = G.orbReward(5, { luck: 5 }, {}, () => 0), unlucky = G.orbReward(5, { luck: 5 }, {}, () => 0.5), noLuck = G.orbReward(5, {}, {}, () => 0);
-  ok(lucky.value === 10 && lucky.lucky && unlucky.value === 5 && !unlucky.lucky && noLuck.value === 5, `luck: ${U.luck.values[U.luck.max]} % chance at max to count an orb twice (roll < chance → ×2)`);
+  ok(lucky.value === 10 && lucky.lucky && unlucky.value === 5 && !unlucky.lucky && noLuck.value === 5, `luck: ${U.luck.values[U.luck.max]} % chance at max to count an orb twice (roll < chance → ×2); levels 3–5 add a ${U.luck.jackpot.slice(3).join('/')} % «находка»`);
   ok(sum(4, 1, { mult: 5, luck: 5 }, () => 0) === 10, 'luck and multiplier stack (2 per orb +25 % → 10 for 4 orbs)');
-  const analytic = (1 + G.upValue('mult', 5) / 100) * (1 + G.upValue('luck', 5) / 100);
-  ok(analytic >= 1.3 && analytic <= 1.5, `multiplier × luck at max = ×${analytic.toFixed(3)} (movement upgrades add the rest of the +60–80 % target)`);
   ok(G.skillPrize(16, 3) === 18 && G.skillPrize(16, 0) === 16 && G.skillPrize(0, 3) === 0 && G.skillPrize(40, 99) === 46, 'mini-game skill: +5/10/15 % on prizes > 0, capped at level 3');
   // migration of stored upgrade levels (levels kept 1:1, unknown keys dropped, above-max clamped + refunded)
   const INV = require('../lib/inventory.js');
@@ -285,6 +283,238 @@ function upgradeRules() {
   const acc2 = { key: 'mig2', name: 'Mig2', passHash: 'x', balance: 7, total: 5, owned: [], equipped: {}, upgrades: { magnet: 3, speed: 5 }, stats: {} };
   INV.migrateAccount(acc2);
   ok(acc2.upgrades.magnet === 3 && acc2.upgrades.speed === 5 && acc2.balance === 7, 'existing levels (magnet 3, speed 5) are kept on the new curves, no refund needed');
+}
+
+// ------------------------------------------------------------------ orb tiers, compass, events, exclusives: pure rules
+function tierEventRules() {
+  console.log('--- orb tiers / compass / events / «Лавка осколков» (rules)');
+  const T = G.ORB_TYPES, keys = ['c', 'u', 'r', 'e', 'l', 'm'];
+  ok(keys.map(k => T[k].value).join(',') === '1,2,5,10,25,50' && keys.every((k, i) => !i || T[k].r > T[keys[i - 1]].r) && new Set(keys.map(k => T[k].color)).size === keys.length,
+    'tiers common +1, uncommon +2, rare +5, epic +10, legendary +25, mythic +50 — each bigger than the last, distinct colours');
+  ok(T.l.weight === 0 && T.t.weight === 0 && T.m.weight > 0 && T.m.shards === 3 && T.l.shards === 1 && T.m.maxAlive === 1, 'legendary stays timed, treasure only in events, mythic: random, max 1 alive, 3 shards');
+  const ev = G.expectedOrbValue();
+  ok(ev >= 1.35 && ev <= 1.5, `pool mean orb value ${ev.toFixed(3)} (old 1.4 → income stays ≈100/min)`);
+  ok(G.expectedOrbValue(G.RAIN_WEIGHTS) > ev * 1.4, `«Сферный дождь» orbs are richer (mean ${G.expectedOrbValue(G.RAIN_WEIGHTS).toFixed(2)})`);
+  let seed = 7; const prng = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  const N = 400000, cnt = {}; for (let i = 0; i < N; i++) { const t = G.rollOrbType(G.POOL_WEIGHTS, prng); cnt[t] = (cnt[t] || 0) + 1; }
+  const tot = Object.values(G.POOL_WEIGHTS).reduce((a, b) => a + b, 0);
+  const off = Object.keys(G.POOL_WEIGHTS).filter(k => Math.abs(cnt[k] / N - G.POOL_WEIGHTS[k] / tot) > Math.max(0.002, 0.08 * G.POOL_WEIGHTS[k] / tot) && k !== 'm');
+  ok(!off.length && !cnt.l && !cnt.t && cnt.m > 0, 'roll distribution matches the weights: ' + Object.keys(cnt).map(k => `${k} ${(cnt[k] / N * 100).toFixed(2)}%`).join(', '));
+  // luck: ×2 chance + «находка» (common/uncommon → epic +10) from level 3
+  const seq = arr => { let i = 0; return () => arr[i++ % arr.length]; };
+  ok(G.orbReward(1, { luck: 5 }, {}, seq([0, 0.5]), 'c').value === 10 && G.orbReward(1, { luck: 5 }, {}, seq([0, 0]), 'u').value === 20 && G.orbReward(5, { luck: 5 }, {}, seq([0, 0.5]), 'r').value === 10 &&
+    G.orbReward(1, { luck: 2 }, {}, seq([0, 0.5]), 'c').value === 2 && G.jackpotChance(5) === 1 && G.jackpotChance(2) === 0,
+    '«Удача»: find turns a common/uncommon orb into +10 (then ×2 may apply), never on rare+; only from level 3');
+  const j = G.jackpotChance(5) / 100, pPool = G.POOL_WEIGHTS, ptot = Object.values(pPool).reduce((a, b) => a + b, 0);
+  const cuShare = (pPool.c + pPool.u) / ptot, cuMean = (pPool.c * 1 + pPool.u * 2) / (pPool.c + pPool.u);
+  const luckF = (ev + cuShare * j * (10 - cuMean)) / ev * (1 + G.upValue('luck', 5) / 100), analytic = luckF * (1 + G.upValue('mult', 5) / 100);
+  ok(analytic >= 1.35 && analytic <= 1.55, `multiplier × luck (×2 + find) at max ≈ ×${analytic.toFixed(3)} per orb; movement upgrades add the rest of the +60–80 % target`);
+  // compass
+  const me = { x: 1000, y: 1000 }, list = [{ t: 'c', x: 1100, y: 1000 }, { t: 'l', x: 2500, y: 2500 }, { t: 'm', x: 100, y: 100 }, { t: 'e', x: 1400, y: 1000 }, { t: 'e', x: 1200, y: 1000 }, { t: 'e', x: 2900, y: 2900 }, { t: 't', x: 50, y: 2900 }];
+  const evz = { zone: { x: 2000, y: 500, r: 230 }, runner: null };
+  const kinds = l => G.compassTargets(l, list, me, evz).map(t => t.kind + (t.kind === 'e' ? '@' + t.x : '')).join(',');
+  ok(kinds(0) === '' && kinds(1) === 'l,m' && G.compassTargets(1, list, me, evz).every(t => t.dist === null) && kinds(2) === 'l,m,e@1200' && G.compassTargets(2, list, me, null).every(t => t.dist > 0) && kinds(3) === 'l,m,event,e@1200,event',
+    `«Чутьё легенды»: lvl1 ${kinds(1)} · lvl2 ${kinds(2)} (nearest epic in ${G.SENSE_EPIC_RANGE} px, distances) · lvl3 ${kinds(3)} (treasures, event zone)`);
+  // events: rewards are a bonus of a few minutes of farming, timings, schedule
+  const RATE = 100, E = G.EVENTS, rewards = [].concat(E.koth.rewards, [E.koth.solo, E.koth.participation, E.runner.reward]);
+  ok(G.EVENT_KEYS.join(',') === 'rain,koth,treasure,runner' && E.rain.durationMs === 45000 && rewards.every(r => r.orbs + r.shards * G.SHARD_EXCHANGE.orbs <= 4 * RATE && r.shards <= 2) &&
+    E.treasure.reward.orbs * E.treasure.maxCount <= 4 * RATE * 1.5, `4 events; every reward (orbs + shards at the exchange rate) ≤ 4 min of farming (top: ${E.koth.rewards[0].orbs} ◉ + ${E.koth.rewards[0].shards} 💎)`);
+  const S = G.EVENT_SCHEDULE;
+  ok(S.minMs === 360000 && S.maxMs === 600000 && S.announceMs >= 20000 && S.announceMs <= 30000, 'schedule: an event every 6–10 min of online time, announced 25 s ahead');
+  // exclusives
+  const X = G.ITEMS.filter(i => i.exclusive);
+  ok(X.length >= 6 && X.length <= 10 && new Set(X.map(i => i.cat)).size >= 4 && X.every(i => i.price == null && i.shardPrice > 0 && !i.sources.includes('shop') && i.sources.includes('shard_shop')),
+    `${X.length} exclusives in ${new Set(X.map(i => i.cat)).size} categories, shard prices ${X.map(i => i.shardPrice).join('/')}, no orb price, never sold in the orb shop`);
+  ok(Math.max(...X.map(i => i.shardPrice)) >= 250 && Math.min(...X.map(i => i.shardPrice)) >= 30 && G.SHARD_EXCHANGE.orbs >= 25 && G.SHARD_EXCHANGE.orbs <= 60,
+    `top exclusive ${Math.max(...X.map(i => i.shardPrice))} shards (≈10+ h at 15–35 shards/h); exchange 1 💎 = ${G.SHARD_EXCHANGE.orbs} ◉`);
+}
+
+// tiers in the arena: uncommon / epic / mythic values, mythic shards (needs hooks)
+async function tiersSuite(URL) {
+  console.log('--- orb tiers (arena)');
+  const A = makeClient(URL); await A.register('Tier' + rnd());
+  const items = [], ann = [];
+  A.s.on('item', d => items.push(d)); A.s.on('announce', d => ann.push(d));
+  const before = new Set(A.orbs.keys());
+  const r = await A.emit('test:spawn', { types: ['u', 'e', 'm'], ring: 90 });
+  await sleep(200);
+  const mine = Array.from(A.orbs.values()).filter(o => !before.has(o.id) && ['u', 'e', 'm'].includes(o.t) && Math.hypot(o.x - A.pos.x, o.y - A.pos.y) < 190); // natural spawns keep 200 px away
+  const types = new Map(Array.from(A.orbs.values()).map(o => [o.id, o.t]));
+  let raw = 0; const got = new Set();
+  const onS = st => { for (const [id, , , t] of st.oa) types.set(id, t); for (const [id, by] of st.od) if (by === A.id) { raw += G.ORB_TYPES[types.get(id)].value; got.add(id); } };
+  A.s.on('s', onS);
+  const b0 = A.profile.balance;
+  for (const o of mine) {
+    const t0 = Date.now();
+    while (A.orbs.has(o.id) && Date.now() - t0 < 4000) { const dx = o.x - A.pos.x, dy = o.y - A.pos.y, l = Math.hypot(dx, dy) || 1; A.s.emit('input', { s: ++A.seq, x: dx / l, y: dy / l }); await sleep(50); }
+  }
+  await sleep(400); A.s.off('s', onS);
+  ok(r.ok && mine.length === 3 && mine.every(o => got.has(o.id)) && A.profile.balance - b0 === raw && raw >= 62, `collected uncommon + epic + mythic: +${A.profile.balance - b0} (= ${raw} orb value, no upgrades)`);
+  ok(items.some(d => d.id === G.SHARD_ID && d.qty === 3 && d.source === 'arena') && ann.some(a => /мифическая/.test(a.text)), 'mythic orb: announced, catching it grants 3 shards (source "arena")');
+  A.close();
+}
+
+// arena events forced via the test hook (scheduler off on this server)
+async function eventSuite(URL) {
+  console.log('--- arena events (rules + rewards)');
+  const A = makeClient(URL), B = makeClient(URL), C = makeClient(URL);
+  await A.register('EvA' + rnd()); await B.register('EvB' + rnd()); await C.register('EvC' + rnd());
+  const log = { A: [], B: [], C: [] };
+  for (const [k, c] of [['A', A], ['B', B], ['C', C]]) for (const e of ['ev:announce', 'ev:start', 'ev:end', 'ev:koth', 'ev:treasure']) c.s.on(e, d => log[k].push([e, d, Date.now()]));
+  const evOrbs = new Set(), rn = [];
+  A.s.on('s', st => { for (const a of st.oa) if (a[4]) evOrbs.add(a[0]); if (st.rn) rn.push(st.rn); });
+  const last = (k, e) => { const l = log[k].filter(x => x[0] === e); return l.length ? l[l.length - 1][1] : null; };
+  const waitEv = (k, e, n, ms) => waitFor(() => log[k].filter(x => x[0] === e).length >= n, ms);
+  const shards = c => c.profile.inventory.filter(x => x.id === G.SHARD_ID).reduce((n, x) => n + x.q, 0);
+  // rain
+  let r = await A.emit('test:event', { kind: 'rain', announceMs: 300, durationMs: 4000 });
+  ok(r.ok && r.event.kind === 'rain' && r.event.phase === 'announce' && await waitEv('B', 'ev:announce', 1, 1000), 'event announced to every player (ev:announce)');
+  await waitEv('A', 'ev:start', 1, 2000);
+  const h = await (await fetch(URL + '/api/health')).json();
+  await A.farm(A.profile.balance + 400, 3600);
+  await waitEv('A', 'ev:end', 1, 3000); await sleep(200);
+  const rainOrbs = Array.from(evOrbs);
+  const endA = last('A', 'ev:end');
+  ok(h.event === 'rain:active' && rainOrbs.length >= G.EVENTS.rain.extraBase, `«Сферный дождь»: ${rainOrbs.length} extra orbs fell (health: ${h.event})`);
+  ok(endA && endA.kind === 'rain' && endA.you && endA.you.score > 0 && endA.results[0].reward === null && rainOrbs.every(id => !A.orbs.has(id)), `rain results: A collected ${endA && endA.you && endA.you.score} worth of rain orbs (paid on pickup), leftovers removed at the end`);
+  // king of the hill: A + C walk to a common spot during the announcement, B stays out
+  await A.emit('test:upgrades', { speed: 5 }); await C.emit('test:upgrades', { speed: 5 });
+  const mid = { x: Math.round((A.pos.x + C.pos.x) / 2), y: Math.round((A.pos.y + C.pos.y) / 2) };
+  const bFar = Math.hypot(B.pos.x - mid.x, B.pos.y - mid.y) > G.EVENTS.koth.radius + 60;
+  const a0 = { A: A.profile.balance, C: C.profile.balance, sA: shards(A), sC: shards(C) };
+  r = await A.emit('test:event', { kind: 'koth', announceMs: 9500, durationMs: 13000, x: mid.x, y: mid.y });
+  ok(r.ok && r.event.zone && r.event.zone.x === mid.x && r.event.zone.r === G.EVENTS.koth.radius, 'king of the hill: zone announced with the countdown (public position + radius)');
+  const walk = c => setInterval(() => { const dx = mid.x - c.pos.x, dy = mid.y - c.pos.y, l = Math.hypot(dx, dy); c.s.emit('input', { s: ++c.seq, x: l > 20 ? dx / l : 0, y: l > 20 ? dy / l : 0 }); }, 50);
+  const wa = walk(A), wc = walk(C);
+  await waitEv('A', 'ev:end', 2, 30000);
+  clearInterval(wa); clearInterval(wc); await sleep(400);
+  const kA = log.A.filter(x => x[0] === 'ev:koth').map(x => x[1]), kB = log.B.filter(x => x[0] === 'ev:koth').map(x => x[1]);
+  const ke = last('A', 'ev:end'), kc = last('C', 'ev:end'), kb = last('B', 'ev:end');
+  const rw = G.EVENTS.koth.rewards;
+  ok(kA.some(k => k.inside) && (!bFar || kB.every(k => !k.inside)) && kA.every(k => JSON.stringify(Object.keys(k)) === '["you","inside","top"]'), `ev:koth updates: A inside the zone${bFar ? ', B outside' : ''}; only own score + public top 3`);
+  const placeOk = ke && ke.you && kc && kc.you && [ke.you.place, kc.you.place].sort().join() === '1,2' && ke.you.score >= 10 && kc.you.score >= 10;
+  const first = placeOk ? (ke.you.place === 1 ? A : C) : null, second = first === A ? C : A;
+  ok(placeOk && JSON.stringify((first === A ? ke : kc).you.reward) === JSON.stringify(rw[0]) && JSON.stringify((first === A ? kc : ke).you.reward) === JSON.stringify(rw[1]),
+    `koth rewards by score: 1st ${rw[0].orbs} ◉ + ${rw[0].shards} 💎, 2nd ${rw[1].orbs} ◉ + ${rw[1].shards} 💎 (scores ${ke && ke.you && ke.you.score}/${kc && kc.you && kc.you.score})`);
+  const paidOk = placeOk && first.profile.balance - (first === A ? a0.A : a0.C) >= rw[0].orbs && second.profile.balance - (second === A ? a0.A : a0.C) >= rw[1].orbs && // ≥: stray orbs picked up on the way
+    shards(first) - (first === A ? a0.sA : a0.sC) === rw[0].shards && shards(second) - (second === A ? a0.sA : a0.sC) === rw[1].shards &&
+    first.profile.inventory.some(x => x.id === G.SHARD_ID && x.src === 'event');
+  ok(paidOk, 'koth rewards paid server-side: orbs to the balance, shards via grantItem (source "event")');
+  ok(kb && kb.you === null && kb.results.length >= 2 && kb.results.every(x => JSON.stringify(Object.keys(x)) === '["name","score","reward"]'), 'B (outside) gets the public results (name/score/reward only) and no reward');
+  // treasure: one next to A, one far away; A grabs the near one
+  const sA0 = shards(A), bA0 = A.profile.balance;
+  r = await A.emit('test:event', { kind: 'treasure', announceMs: 200, durationMs: 5000, count: 2, at: [[A.pos.x + 70, A.pos.y], [A.pos.x > 1500 ? 150 : 2850, A.pos.y > 1500 ? 150 : 2850]] });
+  await waitEv('A', 'ev:start', 3, 2000); await sleep(150);
+  const tr = Array.from(A.orbs.values()).filter(o => o.t === 't');
+  const near = tr.find(o => Math.abs(o.x - A.pos.x - 70) < 2);
+  for (let i = 0; i < 40 && near && A.orbs.has(near.id); i++) { A.s.emit('input', { s: ++A.seq, x: 1, y: 0 }); await sleep(50); }
+  await waitEv('B', 'ev:treasure', 1, 2000);
+  const tmsg = last('B', 'ev:treasure');
+  await waitEv('A', 'ev:end', 3, 7000); await sleep(300);
+  const te = last('A', 'ev:end');
+  ok(tr.length === 2 && tmsg && tmsg.name === A.profile.name && tmsg.left === 1 && JSON.stringify(Object.keys(tmsg)) === '["name","left"]', 'treasure grabbed by A: everyone told who found it and how many are left');
+  ok(te && te.you && te.you.score === 1 && te.remaining === 1 && te.total === 2 && shards(A) - sA0 === 1 && A.profile.balance - bA0 >= G.EVENTS.treasure.reward.orbs && !A.orbs.has(tr.find(o => o !== near).id),
+    `treasure reward ${G.EVENTS.treasure.reward.orbs} ◉ + 1 💎 (fixed), unfound treasure removed at the end`);
+  // random treasure spots are far from players
+  r = await A.emit('test:event', { kind: 'treasure', announceMs: 100, durationMs: 8000, count: 3 });
+  await waitEv('A', 'ev:start', 4, 2000); await sleep(200);
+  const spots = Array.from(A.orbs.values()).filter(o => o.t === 't');
+  const pls = [A.pos, B.pos, C.pos], minD = Math.min(...spots.map(o => Math.min(...pls.map(p => Math.hypot(p.x - o.x, p.y - o.y)))));
+  ok(spots.length === 3 && minD >= 600, `treasures spawn far from every player (closest ${Math.round(minD)} px)`);
+  // runner (slowed down by the hook so the bot can catch it)
+  const sA1 = shards(A), bA1 = A.profile.balance; rn.length = 0;
+  r = await A.emit('test:event', { kind: 'runner', announceMs: 200, durationMs: 12000, x: A.pos.x > 1500 ? A.pos.x - 260 : A.pos.x + 260, y: A.pos.y, speed: 50 });
+  const cancelled = await waitFor(() => log.A.some(x => x[0] === 'ev:end' && x[1].cancelled && x[1].kind === 'treasure'), 1000); await sleep(250);
+  ok(cancelled && Array.from(A.orbs.values()).every(o => o.t !== 't'), 'forcing a new event cancels the running one (its treasures vanish)');
+  await waitEv('A', 'ev:start', 5, 2000);
+  const t0 = Date.now();
+  while (!log.A.some(x => x[0] === 'ev:end' && x[1].kind === 'runner') && Date.now() - t0 < 11000) {
+    const p = rn[rn.length - 1]; if (p) { const dx = p[0] - A.pos.x, dy = p[1] - A.pos.y, l = Math.hypot(dx, dy) || 1; A.s.emit('input', { s: ++A.seq, x: dx / l, y: dy / l }); }
+    await sleep(50);
+  }
+  await sleep(300);
+  const re = last('A', 'ev:end'), rb = last('B', 'ev:end');
+  ok(rn.length > 10 && re && re.kind === 'runner' && re.outcome === 'caught' && re.results[0].name === A.profile.name && JSON.stringify(re.you.reward) === JSON.stringify(G.EVENTS.runner.reward) &&
+    shards(A) - sA1 === G.EVENTS.runner.reward.shards && A.profile.balance - bA1 >= G.EVENTS.runner.reward.orbs, `«Сфера-беглец»: A caught it (+${G.EVENTS.runner.reward.orbs} ◉ + ${G.EVENTS.runner.reward.shards} 💎), position streamed while active`);
+  ok(rb && rb.kind === 'runner' && rb.you === null && rb.outcome === 'caught', 'others learn the runner was caught');
+  const st = A.profile.stats;
+  ok(st.eventsPlayed >= 4 && st.eventWins >= 2, `event stats counted (played ${st.eventsPlayed}, won ${st.eventWins})`);
+  const allEv = received.filter(x => /^ev:/.test(x)).join('\n');
+  ok(!/"id"|"pid"|token|hash|"ip"/i.test(allEv), 'event payloads carry nicknames and scores only (no ids, tokens or private data)');
+  A.close(); B.close(); C.close();
+}
+
+// «Лавка осколков»: exclusives for shards only (needs hooks)
+async function shardShopSuite(URL) {
+  console.log('--- «Лавка осколков»');
+  const S = makeClient(URL), W = makeClient(URL);
+  await S.register('Shards' + rnd()); await W.register('Look' + rnd());
+  const shards = () => S.profile.inventory.filter(x => x.id === G.SHARD_ID).reduce((n, x) => n + x.q, 0);
+  let r = await S.emit('shard:buy', 'c_void');
+  ok(!r.ok && r.code === 'shards' && /нужно 40, у вас 0/.test(r.error), 'not enough shards → refused: ' + r.error);
+  await S.emit('test:orbs', 100000);
+  const bal = S.profile.balance;
+  r = await S.emit('buy', 'c_void');
+  ok(!r.ok && r.code === 'exclusive' && S.profile.balance === bal && !S.profile.inventory.some(x => x.id === 'c_void'), 'exclusives cannot be bought with orbs: ' + r.error);
+  await S.emit('test:grant', { id: G.SHARD_ID, qty: 45, source: 'event' });
+  r = await S.emit('shard:buy', 'c_void');
+  const slot = S.profile.inventory.find(x => x.id === 'c_void');
+  ok(r.ok && r.spent === 40 && shards() === 5 && slot && slot.src === 'shard_shop' && S.profile.balance === bal, 'bought «Пустота» for exactly 40 shards (5 left, orbs untouched, source "shard_shop")');
+  const dup = await S.emit('shard:buy', 'c_void'), plain = await S.emit('shard:buy', 'c_coral'), proto = await S.emit('shard:buy', '__proto__');
+  ok(!dup.ok && dup.code === 'owned' && !plain.ok && !proto.ok && shards() === 5, 'owned / non-exclusive / bogus ids refused, no shards taken');
+  await S.emit('inv:equip', 'c_void');
+  ok(!!(await waitFor(() => { const m = W.metas.get(S.id); return m && m.eq.color === 'c_void'; })), 'exclusive can be worn; other players see it');
+  const bad = await Promise.all([0, 100, 2.5, '3', null].map(q => S.emit('shard:exchange', q)));
+  const tooMany = await S.emit('shard:exchange', 6);
+  const tot = S.profile.total, b2 = S.profile.balance;
+  const ex = await S.emit('shard:exchange', 2);
+  ok(bad.every(x => !x.ok) && !tooMany.ok && ex.ok && shards() === 3 && S.profile.balance === b2 + 2 * G.SHARD_EXCHANGE.orbs && S.profile.total === tot,
+    `exchange: invalid amounts refused, 2 💎 → +${2 * G.SHARD_EXCHANGE.orbs} ◉ (balance only, all-time total unchanged)`);
+  await sleep(5100); // shard actions are rate-limited (8 per 5 s)
+  // full inventory: buying fails all-or-nothing, the shards stay
+  const free = G.INV_SLOTS - S.profile.inventory.length, top = S.profile.inventory.filter(x => x.id === G.SHARD_ID).pop();
+  await S.emit('test:grant', { id: G.SHARD_ID, qty: (99 - top.q) + 99 * free, source: 'event' });
+  const have = shards();
+  r = await S.emit('shard:buy', 'n_shard');
+  ok(S.profile.inventory.length === G.INV_SLOTS && !r.ok && r.code === 'full' && shards() === have && !S.profile.inventory.some(x => x.id === 'n_shard'), `inventory full → purchase refused, all ${have} shards kept (all-or-nothing)`);
+  const shop = await (await fetch(URL + '/api/shop')).json();
+  ok(shop.shardExchange.orbs === G.SHARD_EXCHANGE.orbs && shop.items.filter(i => i.exclusive).length === G.ITEMS.filter(i => i.exclusive).length && shop.events.koth.name === 'Царь горы', '/api/shop lists exclusives, events and the exchange rate');
+  S.close(); W.close();
+}
+
+// automatic scheduler (short timers on a dedicated server)
+async function schedulerSuite() {
+  console.log('\n===== event scheduler (short timers) =====');
+  const tmp = path.join(os.tmpdir(), `ocs-sched-${process.pid}.json`);
+  const srv = await startServer(3107, { DATA_FILE: tmp, OCS_TEST_HOOKS: '1', EVENT_EVERY_MS: '2000', EVENT_ANNOUNCE_MS: '1000', EVENT_DURATION_MS: '2500', LEGENDARY_EVERY_MS: '60000' });
+  await sleep(3000);
+  const h0 = await (await fetch(srv.url + '/api/health')).json();
+  ok(h0.event === null, 'no event while nobody is online (the clock only runs with players)');
+  const P = makeClient(srv.url);
+  const evs = [], legends = [];
+  for (const e of ['ev:announce', 'ev:start', 'ev:end']) P.s.on(e, d => evs.push({ e, kind: d.kind, at: Date.now(), d }));
+  P.s.on('s', st => { for (const a of st.oa) if (a[3] === 'l') legends.push(Date.now()); });
+  await P.register('Sched' + rnd());
+  await P.emit('test:spawn', { types: ['l'], ring: 100 }); // a legendary orb is alive → no event may start
+  await sleep(3500);
+  ok(evs.length === 0, 'no event is announced while a legendary orb is on the field');
+  const lo = Array.from(P.orbs.values()).find(o => o.t === 'l');
+  for (let i = 0; i < 60 && lo && P.orbs.has(lo.id); i++) { const dx = lo.x - P.pos.x, dy = lo.y - P.pos.y, l = Math.hypot(dx, dy) || 1; P.s.emit('input', { s: ++P.seq, x: dx / l, y: dy / l }); await sleep(50); }
+  await waitFor(() => evs.filter(x => x.e === 'ev:end').length >= 3, 22000);
+  const seq = evs.map(x => x.e.slice(3)[0]).join('');
+  const kinds = evs.filter(x => x.e === 'ev:announce').map(x => x.kind);
+  const firstAnn = evs[0] && evs[0].d;
+  ok(/^(ase){3}/.test(seq) && kinds.every((k, i) => !i || k !== kinds[i - 1]), `scheduler runs events back to back: ${kinds.join(' → ')} (announce → start → end, never the same kind twice in a row)`);
+  ok(firstAnn && firstAnn.in >= 900 && firstAnn.in <= 1000 && firstAnn.dur === 2500, `announcement comes ${firstAnn && firstAnn.in} ms ahead; durations from EVENT_DURATION_MS`);
+  ok(legends.length === 0 || legends.every(t => !evs.some((x, i) => x.e === 'ev:announce' && t >= x.at && t <= ((evs.slice(i).find(y => y.e === 'ev:end') || {}).at || Infinity))), 'no legendary orb spawns during an event');
+  P.close();
+  await sleep(1500);
+  const h1 = await (await fetch(srv.url + '/api/health')).json();
+  await sleep(2500);
+  const h2 = await (await fetch(srv.url + '/api/health')).json();
+  ok(h1.event === null && h2.event === null && h2.online === 0, 'the running event is cancelled when everyone leaves, and no new one starts');
+  await srv.stop(); fs.rmSync(tmp, { force: true });
+  return srv.logs;
 }
 
 // ------------------------------------------------------------------ shop + inventory (needs OCS_TEST_HOOKS=1)
@@ -310,7 +540,7 @@ function priceSanity() {
   ok(!outOfTier.length, `every shop item priced inside its tier (common 150–500, rare 400–1500, epic 1800–4000, legendary 9000–20000)${outOfTier.length ? ': ' + outOfTier.map(i => i.id).join(',') : ''}`);
   const old = OLD_PRICES, changed = Object.keys(old).filter(id => !G.ITEM_BY_ID[id] || G.ITEM_BY_ID[id].price !== old[id]);
   ok(!changed.length, `existing items (${Object.keys(old).length}) keep their ids and prices${changed.length ? ': ' + changed.join(',') : ''}`);
-  const NEW = G.ITEMS.filter(i => !has(old, i.id));
+  const NEW = G.ITEMS.filter(i => !has(old, i.id) && !i.exclusive);
   const perCat = G.CATEGORIES.map(c => [c.key, NEW.filter(i => i.cat === c.key)]);
   ok(perCat.every(([, l]) => l.length >= 6 && l.length <= 10) && perCat.every(([, l]) => new Set(l.map(i => i.rarity)).size >= 3),
     'new cosmetics: ' + perCat.map(([k, l]) => `${k} +${l.length}`).join(', ') + ' (6–10 per category, ≥3 rarities each)');
@@ -500,14 +730,14 @@ async function upgradeSuite(URL) {
   ok(counted >= 10 && Math.abs(gained - expect) <= 1, `«Множитель сфер» max: ${counted} orbs worth ${raw} → +${gained} (expected ${expect}, fractions carried)`);
   // luck: only ever adds (×2 per lucky orb), reported via bal.l
   await A.emit('test:upgrades', { mult: 0, luck: 5 });
-  let luckyEv = 0, raw2 = 0; const onBal = b => { luckyEv += b.l || 0; };
+  let luckyEv = 0, jackEv = 0, raw2 = 0; const onBal = b => { luckyEv += b.l || 0; jackEv += b.j || 0; };
   const onState2 = st => { for (const [id, , , t] of st.oa) types.set(id, t); for (const [id, by] of st.od) if (by === A.id) raw2 += G.ORB_TYPES[types.get(id)].value; };
   A.s.on('bal', onBal); A.s.on('s', onState2);
   const s2 = A.profile.balance;
   await A.farm(s2 + 40, 40000); await sleep(400);
   A.s.off('bal', onBal); A.s.off('s', onState2);
   const g2 = A.profile.balance - s2;
-  ok(g2 >= raw2 && g2 <= raw2 * 2 && (luckyEv > 0) === (g2 > raw2), `«Удача» max: ${raw2} orb value → +${g2} (${luckyEv} lucky ×2 pickups, never less than the base)`);
+  ok(g2 >= raw2 && g2 <= 2 * (raw2 + 9 * jackEv) && (luckyEv + jackEv > 0) === (g2 > raw2), `«Удача» max: ${raw2} orb value → +${g2} (${luckyEv} lucky ×2, ${jackEv} «находка» pickups; never less than the base)`);
   // speed: exactly 10 inputs move exactly 10 × speed × step; stored levels above the max are clamped
   const capped = await A.emit('test:upgrades', { speed: 99 });
   ok(capped.ok && capped.profile.upgrades.speed === G.UPGRADES.speed.max, 'a level above the max is clamped to the max');
@@ -549,6 +779,7 @@ function incomeReport(r) {
   console.log('--- income: all upgrades maxed vs none');
   const avg = a => a.reduce((x, y) => x + y, 0) / a.length;
   const ratio = avg(r.max) / avg(r.none);
+  ok(avg(r.none) >= 80 && avg(r.none) <= 125, `income without upgrades ≈ ${Math.round(avg(r.none))} orbs/min (target ≈100)`);
   ok(r.none.concat(r.max).every(Number.isFinite) && ratio >= 1.35 && ratio <= 2.1,
     `income ×${ratio.toFixed(2)} with everything maxed (none ${r.none.join('/')} → max ${r.max.join('/')} orbs/min; target +60–80 %, band 1.35–2.1 for run-to-run noise)`);
 }
@@ -654,8 +885,9 @@ async function spawnSuite(URL) {
   ok(minD >= 69, `no clumps: min distance between orbs ${minD.toFixed(0)} px (≥ 70)`);
   ok(adds.length > 50 && tooClose === 0, `no orb spawned within 200 px of a player (${adds.length} spawns checked)`);
   const types = adds.filter(t => t !== 'l').concat(list.map(o => o.t));
-  const rare = types.filter(t => t === 'r').length / types.length;
-  ok(rare > 0.03 && rare < 0.2, `rare orb share ${(rare * 100).toFixed(1)}% of ${types.length} orbs (configured 10%)`);
+  const share = k => types.filter(t => t === k).length / types.length;
+  ok(share('c') > 0.7 && share('c') < 0.92 && share('u') > 0.05 && share('u') < 0.2 && share('r') > 0.01 && share('r') < 0.1 && types.every(t => has(G.POOL_WEIGHTS, t)),
+    `tier shares of ${types.length} spawned orbs: ${['c', 'u', 'r', 'e', 'm'].map(k => k + ' ' + (share(k) * 100).toFixed(1) + '%').join(', ')} (weights ${Object.entries(G.POOL_WEIGHTS).map(([k, w]) => k + ' ' + w).join(', ')})`);
   // collected orbs come back after a delay, not instantly
   const A = cl[0];
   const before = A.profile.total;
@@ -746,7 +978,7 @@ async function migrationSuite(URL, L, label) {
   ok(pr.balance === 4321 && pr.total === 987654 && pr.upgrades.magnet === 3 && pr.upgrades.speed === 2, `balance ${pr.balance}, total ${pr.total}, upgrades magnet ${pr.upgrades && pr.upgrades.magnet}/speed ${pr.upgrades && pr.upgrades.speed} kept`);
   ok(JSON.stringify(inv) === JSON.stringify(expectInv) && pr.inventory.every(x => x.src === 'legacy' && x.q === 1), `owned cosmetics moved to inventory (${inv.join(', ')}; unknown ids dropped, free items implicit)`);
   ok(JSON.stringify(pr.equipped) === JSON.stringify(L.acc.equipped), 'equipped look unchanged');
-  ok(pr.stats.minigames === 7 && pr.stats.bestReaction === 212 && pr.stats.bestRush === 31 && pr.stats.sessions === 1 && pr.createdAt === L.acc.createdAt, 'stats + creation date kept, new counters added');
+  ok(pr.stats.minigames === 7 && pr.stats.bestReaction === 212 && pr.stats.bestRush === 31 && pr.stats.sessions === 1 && pr.stats.eventsPlayed === 0 && pr.stats.eventWins === 0 && pr.createdAt === L.acc.createdAt, 'stats + creation date kept, new counters added (sessions, eventsPlayed, eventWins)');
   const e = await P.emit('inv:equip', 'c_coral');
   ok(e.ok && e.profile.equipped.color === 'c_coral', 'migrated item can be equipped from the inventory');
   await P.emit('inv:equip', 'c_gold');
@@ -844,7 +1076,7 @@ async function startServer(port, env) {
   try { await fetch(`http://localhost:${port}/api/health`); throw new Error(`port ${port} is already in use by another server`); }
   catch (e) { if (/already in use/.test(e.message)) throw e; } // connection refused = port free
   return new Promise((resolve, reject) => {
-    const proc = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: Object.assign({}, process.env, { PORT: String(port), DATABASE_URL: '', DATA_FILE: '' }, env), stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: Object.assign({}, process.env, { PORT: String(port), DATABASE_URL: '', DATA_FILE: '', EVENT_EVERY_MS: '0' }, env), stdio: ['ignore', 'pipe', 'pipe'] });
     const srv = { proc, logs: '', url: `http://localhost:${port}` };
     proc.stdout.on('data', d => { srv.logs += d; });
     proc.stderr.on('data', d => { srv.logs += d; });
@@ -871,7 +1103,8 @@ async function runMode(label, env, opts) {
   if (opts.legacy) await migrationSuite(srv.url, opts.legacy, label);
   await authSuite(srv.url);
   await profileSuite(srv.url);
-  if (opts.full) { await chatSuite(srv.url); await gameplaySuite(srv.url); await minigameSuite(srv.url); await upgradeSuite(srv.url); await newItemsSuite(srv.url); }
+  if (opts.full) { await chatSuite(srv.url); await gameplaySuite(srv.url); await minigameSuite(srv.url); await upgradeSuite(srv.url); await newItemsSuite(srv.url); await tiersSuite(srv.url); await eventSuite(srv.url); }
+  await shardShopSuite(srv.url);
   await shopInventorySuite(srv.url);
   await trashSuite(srv.url);
   await leaderboardAudit(srv.url);
@@ -911,6 +1144,13 @@ async function runCycleMode() {
     privacyAudit(null);
   } else if (process.env.OCS_TEST_ONLY === 'cycle') {
     privacyAudit(await runCycleMode());
+  } else if (process.env.OCS_TEST_ONLY === 'events') {
+    tierEventRules();
+    const tmp = path.join(os.tmpdir(), `ocs-ev-${process.pid}.json`);
+    const srv = await startServer(3101, { DATA_FILE: tmp, OCS_TEST_HOOKS: '1' });
+    await tiersSuite(srv.url); await eventSuite(srv.url); await shardShopSuite(srv.url);
+    await srv.stop(); fs.rmSync(tmp, { force: true });
+    privacyAudit(await schedulerSuite());
   } else if (process.env.OCS_TEST_ONLY === 'upgrades') {
     upgradeRules();
     const tmp = path.join(os.tmpdir(), `ocs-up-${process.pid}.json`);
@@ -920,6 +1160,7 @@ async function runCycleMode() {
   } else {
     priceSanity();
     upgradeRules();
+    tierEventRules();
     const income = process.env.OCS_TEST_INCOME === '0' ? null : incomeSuite();
     let logs = '';
     const tmp = path.join(os.tmpdir(), `ocs-test-${process.pid}.json`);
@@ -928,6 +1169,7 @@ async function runCycleMode() {
     logs += await runMode('JSON file mode', { DATA_FILE: tmp }, { full: true, legacy: L1 });
     fs.rmSync(tmp, { force: true });
     logs += await runCycleMode();
+    logs += await schedulerSuite();
     if (process.env.TEST_DATABASE_URL) {
       const L2 = legacyAccount();
       await seedLegacyPg(process.env.TEST_DATABASE_URL, L2); // old (7c2dacd) schema + data, the new server must migrate it

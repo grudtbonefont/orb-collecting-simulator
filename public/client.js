@@ -167,11 +167,12 @@
     $('chat').classList.remove('hidden'); $('chatBtn').classList.remove('hidden');
     $('hudName').textContent = '👤 ' + myName;
     resetChat(res.chat || []);
+    evResultHide(); setEvent(res.event || null); runner = null;
     updateHud();
     if (!reconnect) toast(`Добро пожаловать, ${myName}! Собирайте сферы.`, 'ok');
   }
   function hideGameUi() {
-    joined = false;
+    joined = false; evState = null; runner = null;
     $('hud').classList.add('hidden'); $('chat').classList.add('hidden'); $('chatBtn').classList.add('hidden'); closeChat();
     closeModals();
   }
@@ -241,15 +242,19 @@
     }
     snapshots.push({ time: now, map });
     while (snapshots.length > 40) snapshots.shift();
-    for (const [id, x, y, t] of st.oa) orbs.set(id, { x, y, t, born: now });
+    for (const [id, x, y, t, e] of st.oa) orbs.set(id, { x, y, t, born: now, fall: e && t !== 't' ? 1 : 0 }); // e: event orb (rain falls in)
+    if (st.rn) {
+      if (!runner) runner = { x: st.rn[0], y: st.rn[1], px: st.rn[0], py: st.rn[1], at: now };
+      else { runner.px = runnerX(now); runner.py = runnerY(now); runner.x = st.rn[0]; runner.y = st.rn[1]; runner.at = now; }
+    } else runner = null;
     for (const [id, pid] of st.od) {
       const o = orbs.get(id);
       if (!o) continue;
       orbs.delete(id);
       fx.push({ o, pid, start: now });
       if (pid === myId) {
-        const ot = G.ORB_TYPES[o.t];
-        floaters.push({ x: o.x, y: o.y - 10, text: '+' + ot.value, color: ot.color, start: now, big: o.t !== 'c' });
+        const ot = orbDef(o.t);
+        floaters.push({ x: o.x, y: o.y - 10, text: o.t === 't' ? '💰 Сокровище!' : '+' + ot.value, color: ot.color, start: now, big: o.t !== 'c' && o.t !== 'u' });
       }
     }
   });
@@ -269,6 +274,7 @@
   socket.on('bal', b => {
     if (!profile) return;
     if (b.l > 0 && joined) floaters.push({ x: dispMe.x + 18, y: dispMe.y - 30, text: '×2!', color: '#4fd36b', start: performance.now(), big: true }); // «Удача»
+    if (b.j > 0 && joined) floaters.push({ x: dispMe.x - 10, y: dispMe.y - 52, text: `★ Находка! +${G.ORB_TYPES.e.value}`, color: '#ff9a2e', start: performance.now(), big: true }); // «Удача»: jackpot
     profile.balance = b.b; profile.total = b.t; sessionScore = b.s;
     updateHud(true);
   });
@@ -333,6 +339,7 @@
     if (e.code === 'KeyB') toggleModal('shop');
     if (e.code === 'KeyM') toggleModal('games');
     if (e.code === 'KeyL') toggleModal('lb');
+    if (e.code === 'KeyH') toggleOrbHelp();
     if (e.code === 'Space' && reactionState === 'go' || e.code === 'Space' && reactionState === 'wait') { e.preventDefault(); reactionClick(); }
     if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
   });
@@ -373,7 +380,7 @@
 
   // ------------------------------------------------------------ rendering helpers
   const orbSprites = {};
-  for (const t of Object.values(G.ORB_TYPES)) {
+  function makeOrbSprite(t) {
     const size = Math.ceil(t.r * 8), c = document.createElement('canvas');
     c.width = c.height = size * 2;
     const g = c.getContext('2d'), mid = size;
@@ -383,24 +390,51 @@
     const core = g.createRadialGradient(mid - t.r * 0.35, mid - t.r * 0.35, 0, mid, mid, t.r * 2);
     core.addColorStop(0, '#ffffff'); core.addColorStop(0.35, t.color); core.addColorStop(1, t.glow + '0.9)');
     g.fillStyle = core; g.beginPath(); g.arc(mid, mid, t.r * 2, 0, Math.PI * 2); g.fill();
-    orbSprites[t.key] = { c, half: size / 2 };
+    return { c, half: size / 2 };
   }
+  for (const t of Object.values(G.ORB_TYPES)) orbSprites[t.key] = makeOrbSprite(t);
+  orbSprites.runner = makeOrbSprite({ r: 14, color: '#c6fdff', glow: 'rgba(125,252,255,' });
+  const orbDef = type => (Object.prototype.hasOwnProperty.call(G.ORB_TYPES, type) ? G.ORB_TYPES[type] : G.ORB_TYPES.c); // unknown tier → common look
   function drawOrb(g, x, y, type, t, id, scale = 1) {
-    const s = orbSprites[type], ot = G.ORB_TYPES[type];
+    const s = orbSprites[type] || orbSprites.c, ot = orbDef(type);
     const pulse = (1 + 0.09 * Math.sin(t * 3.2 + id * 1.7)) * scale;
     const half = s.half * pulse;
+    if (type === 't') { // treasure: a light pillar so it can be spotted from afar
+      const gr = g.createLinearGradient(0, y - ot.r * 9, 0, y);
+      gr.addColorStop(0, 'rgba(255,230,128,0)'); gr.addColorStop(1, `rgba(255,230,128,${0.32 * scale})`);
+      g.fillStyle = gr; g.fillRect(x - ot.r * 0.7, y - ot.r * 9, ot.r * 1.4, ot.r * 9);
+    }
     g.drawImage(s.c, x - half, y - half, half * 2, half * 2);
-    if (type === 'l') {
+    if (type === 'e') { // epic: two orbiting sparks
+      g.save(); g.fillStyle = '#ffe0b8';
+      for (let i = 0; i < 2; i++) { const a = t * 2.4 + i * Math.PI + id; g.beginPath(); g.arc(x + Math.cos(a) * ot.r * 1.9 * pulse, y + Math.sin(a) * ot.r * 1.9 * pulse, 2.2 * scale, 0, Math.PI * 2); g.fill(); }
+      g.restore();
+    } else if (type === 'l') {
       g.save(); g.translate(x, y); g.rotate(t * 1.4);
       g.strokeStyle = 'rgba(255,240,180,0.85)'; g.lineWidth = 1.5;
       g.beginPath();
       for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2; g.moveTo(Math.cos(a) * ot.r * 1.2, Math.sin(a) * ot.r * 1.2); g.lineTo(Math.cos(a) * ot.r * 2.4 * pulse, Math.sin(a) * ot.r * 2.4 * pulse); }
       g.stroke(); g.restore();
+    } else if (type === 'm') { // mythic: six rays + a counter-rotating dashed halo
+      g.save(); g.translate(x, y); g.rotate(t * 1.8);
+      g.strokeStyle = 'rgba(255,170,200,0.9)'; g.lineWidth = 1.8; g.beginPath();
+      for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3; g.moveTo(Math.cos(a) * ot.r * 1.2, Math.sin(a) * ot.r * 1.2); g.lineTo(Math.cos(a) * ot.r * 2.7 * pulse, Math.sin(a) * ot.r * 2.7 * pulse); }
+      g.stroke(); g.rotate(-t * 3.2);
+      g.setLineDash([4, 5]); g.strokeStyle = 'rgba(255,255,255,0.75)'; g.lineWidth = 1.5;
+      g.beginPath(); g.arc(0, 0, ot.r * 1.85 * pulse, 0, Math.PI * 2); g.stroke();
+      g.restore();
+    } else if (type === 't') { // treasure: a little golden gem on top
+      g.save(); g.translate(x, y); g.rotate(Math.sin(t * 2 + id) * 0.25);
+      const k = ot.r * 0.75 * scale;
+      g.fillStyle = '#fff6c8'; g.strokeStyle = '#b8860b'; g.lineWidth = 1.5;
+      g.beginPath(); g.moveTo(0, -k); g.lineTo(k * 0.8, -k * 0.25); g.lineTo(0, k); g.lineTo(-k * 0.8, -k * 0.25); g.closePath(); g.fill(); g.stroke();
+      g.restore();
     }
   }
 
   const SHAPE_TOP = { circle: 1, square: 0.9, triangle: 1.15, hexagon: 1.05, star: 1.3,
-    diamond: 1.3, pentagon: 1.12, octagon: 1.0, drop: 1.5, cross: 1.15, heart: 0.95, gear: 1.15, flower: 1.15, blob: 1.08 };
+    diamond: 1.3, pentagon: 1.12, octagon: 1.0, drop: 1.5, cross: 1.15, heart: 0.95, gear: 1.15, flower: 1.15, blob: 1.08, crystal: 1.4 };
+  const CRYSTAL_PTS = [[0, -1.4], [0.78, -0.55], [0.78, 0.55], [0, 1.4], [-0.78, 0.55], [-0.78, -0.55]];
   function polarPath(g, n, rf) { for (let i = 0; i <= n; i++) { const a = i / n * Math.PI * 2, rr = rf(a); const x = Math.cos(a) * rr, y = Math.sin(a) * rr; i ? g.lineTo(x, y) : g.moveTo(x, y); } }
   function polyPath(g, n, rr, rot) { for (let i = 0; i < n; i++) { const a = rot + i * 2 * Math.PI / n; const x = Math.cos(a) * rr, y = Math.sin(a) * rr; i ? g.lineTo(x, y) : g.moveTo(x, y); } }
   function shapePath(g, shape, r, t) {
@@ -441,6 +475,8 @@
       }
     } else if (shape === 'flower') {
       const rot = t * 0.3; polarPath(g, 48, a => r * (0.97 + 0.2 * Math.cos(6 * (a - rot))));
+    } else if (shape === 'crystal') { // exclusive: tall hexagonal crystal
+      CRYSTAL_PTS.forEach(([x, y], i) => (i ? g.lineTo(x * r, y * r) : g.moveTo(x * r, y * r)));
     } else if (shape === 'blob') { // wobbling jelly (legendary)
       polarPath(g, 32, a => r * (1.02 + 0.08 * Math.sin(3 * a + t * 3) + 0.05 * Math.sin(5 * a - t * 2.3)));
     } else {
@@ -538,12 +574,36 @@
         g.moveTo(sx, sy - sr); g.quadraticCurveTo(sx, sy, sx + sr, sy); g.quadraticCurveTo(sx, sy, sx, sy + sr); g.quadraticCurveTo(sx, sy, sx - sr, sy); g.quadraticCurveTo(sx, sy, sx, sy - sr); g.fill();
       });
       g.globalAlpha = 1;
+    } else if (hat === 'shardcrown') { // exclusive: a crown of floating legendary shards
+      const by = y + 4, bob = Math.sin(t * 2.2) * 1.5;
+      g.fillStyle = '#c99a1e'; g.beginPath(); g.roundRect(-r * 0.8, by - 4, r * 1.6, 6, 3); g.fill();
+      const spikes = [[-0.62, 0.55, -0.32], [-0.3, 0.8, -0.14], [0, 1.08, 0], [0.3, 0.8, 0.14], [0.62, 0.55, 0.32]];
+      g.shadowColor = '#ffcc33'; g.shadowBlur = 14;
+      spikes.forEach(([sx, h, rot], i) => {
+        g.save(); g.translate(sx * r, by - 4 + (i % 2 ? bob : -bob) * 0.6); g.rotate(rot);
+        const w = r * 0.17, hh = r * h;
+        const gr = g.createLinearGradient(0, 0, 0, -hh); gr.addColorStop(0, '#c78b00'); gr.addColorStop(0.5, i === 2 ? '#9de8ff' : '#ffcc33'); gr.addColorStop(1, '#fff7c4');
+        g.fillStyle = gr; g.beginPath(); g.moveTo(-w, 0); g.lineTo(-w * 0.8, -hh * 0.7); g.lineTo(0, -hh); g.lineTo(w * 0.8, -hh * 0.7); g.lineTo(w, 0); g.closePath(); g.fill();
+        g.restore();
+      });
+      g.shadowBlur = 0; g.fillStyle = '#fff';
+      for (let i = 0; i < 3; i++) { const a = t * 1.6 + i * 2.1; g.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(t * 3 + i)); g.beginPath(); g.arc(Math.cos(a) * r * 0.95, by - r * 0.6 + Math.sin(a) * r * 0.25, 1.6, 0, Math.PI * 2); g.fill(); }
+      g.globalAlpha = 1;
+    } else if (hat === 'satellites') { // exclusive: three little moons orbiting the head
+      const cy = y - r * 0.15, ox = r * 1.15, oy = r * 0.32, cols = ['#9de8ff', '#ffcc33', '#ff9de2'];
+      g.strokeStyle = 'rgba(200,220,255,0.35)'; g.lineWidth = 1; g.beginPath(); g.ellipse(0, cy, ox, oy, 0, 0, Math.PI * 2); g.stroke();
+      for (let i = 0; i < 3; i++) {
+        const a = t * 1.9 + i * Math.PI * 2 / 3, sx = Math.cos(a) * ox, sy = cy + Math.sin(a) * oy, depth = 0.65 + 0.35 * Math.sin(a);
+        g.fillStyle = cols[i]; g.shadowColor = cols[i]; g.shadowBlur = 10 * depth; g.globalAlpha = 0.55 + 0.45 * depth;
+        g.beginPath(); g.arc(sx, sy, (3 + 1.6 * depth), 0, Math.PI * 2); g.fill();
+      }
+      g.globalAlpha = 1;
     }
     g.restore();
   }
   // vertical room the hat takes above the body (nickname is drawn above it)
   const HAT_ROOM = { none: () => 10, tophat: r => r * 1.05 + 8, party: r => r * 1.25 + 4, bunny: r => r * 1.2 + 4, wizard: r => r * 1.62 + 6,
-    propeller: r => r * 0.95 + 6, viking: r => r * 0.85 + 6, cowboy: r => r * 0.62 + 8, headphones: () => 14, cat: r => r * 0.5 + 8 };
+    propeller: r => r * 0.95 + 6, viking: r => r * 0.85 + 6, cowboy: r => r * 0.62 + 8, headphones: () => 14, cat: r => r * 0.5 + 8, shardcrown: r => r * 1.08 + 8, satellites: r => r * 0.5 + 8 };
   const hatRoom = (hat, r) => (HAT_ROOM[hat] ? HAT_ROOM[hat](r) : 22);
 
   function drawAvatar(g, x, y, r, eq, t, opts = {}) {
@@ -553,7 +613,7 @@
     const shape = itemVal(eq.shape) || 'circle';
     const top = SHAPE_TOP[shape] || 1;
     g.save(); g.translate(x, y);
-    g.shadowColor = color; g.shadowBlur = (opts.isMe ? 26 : 18) + (paint && paint.fx === 'embers' ? 6 + 6 * Math.sin(t * 4) : 0);
+    g.shadowColor = paint && paint.glow ? paint.glow : color; g.shadowBlur = (opts.isMe ? 26 : 18) + (paint && paint.fx === 'embers' ? 6 + 6 * Math.sin(t * 4) : 0) + (paint && paint.fx === 'void' ? 8 + 6 * Math.sin(t * 2.5) : 0);
     shapePath(g, shape, r, t);
     const grd = g.createRadialGradient(-r * 0.4, -r * 0.45, r * 0.1, 0, 0, r * 1.4);
     grd.addColorStop(0, 'rgba(255,255,255,0.9)'); grd.addColorStop(0.25, color); grd.addColorStop(1, color2);
@@ -568,7 +628,27 @@
       g.fillStyle = hl; g.fill();
     }
     g.shadowBlur = 0;
-    g.lineWidth = 2; g.strokeStyle = 'rgba(255,255,255,0.45)'; g.stroke();
+    if (paint && paint.fx === 'prism') { // prism: a bright sheen sweeping across the body
+      g.save(); g.clip();
+      const p = ((t * 0.45) % 1.6) - 0.3, sx = -r * 1.6 + p * r * 3.2;
+      const sh = g.createLinearGradient(sx - r * 0.5, -r, sx + r * 0.5, r);
+      sh.addColorStop(0, 'rgba(255,255,255,0)'); sh.addColorStop(0.5, 'rgba(255,255,255,0.75)'); sh.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = sh; g.fillRect(-r * 2, -r * 2, r * 4, r * 4); g.restore();
+    }
+    if (shape === 'crystal') { // facets
+      g.save(); g.strokeStyle = 'rgba(255,255,255,0.35)'; g.lineWidth = 1.2; g.beginPath();
+      g.moveTo(0, -1.4 * r); g.lineTo(0, 1.4 * r); g.moveTo(-0.78 * r, -0.55 * r); g.lineTo(0, -0.2 * r); g.lineTo(0.78 * r, -0.55 * r);
+      g.moveTo(-0.78 * r, 0.55 * r); g.lineTo(0, 0.2 * r); g.lineTo(0.78 * r, 0.55 * r); g.stroke(); g.restore();
+    }
+    g.lineWidth = 2; g.strokeStyle = paint && paint.fx === 'void' ? `rgba(190,140,255,${0.65 + 0.3 * Math.sin(t * 3)})` : 'rgba(255,255,255,0.45)'; g.stroke();
+    if (paint && paint.fx === 'void') { // void: violet motes swirling inside the dark body
+      g.fillStyle = '#c9a6ff';
+      for (let i = 0; i < 5; i++) {
+        const a = t * (0.9 + i * 0.13) + i * 1.3, rr = r * (0.25 + 0.12 * i);
+        g.globalAlpha = 0.35 + 0.5 * Math.abs(Math.sin(t * 2 + i)); g.beginPath(); g.arc(Math.cos(a) * rr, Math.sin(a) * rr * 0.9, r * 0.06, 0, Math.PI * 2); g.fill();
+      }
+      g.globalAlpha = 1;
+    }
     if (paint && paint.fx === 'stars') { // galaxy: a few twinkling stars on the body
       g.fillStyle = '#fff';
       [[-0.45, 0.35, 0], [0.42, -0.05, 2.1], [0.1, 0.55, 4.2], [-0.15, -0.5, 1.3]].forEach(([sx, sy, ph]) => {
@@ -608,6 +688,11 @@
       const w = g.measureText(text).width, n = paint.stops.length;
       fill = g.createLinearGradient(x - w / 2, 0, x + w / 2, 0);
       for (let i = 0; i <= 3; i++) fill.addColorStop(i / 3, paintAt(nc, t * 0.8 + i * n / 4));
+    } else if (paint && paint.fx === 'shard') {
+      const w = g.measureText(text).width, gp = ((t * 0.5) % 1.5) - 0.25;
+      fill = g.createLinearGradient(x - w / 2, 0, x + w / 2, 0);
+      fill.addColorStop(0, '#ffcc33'); fill.addColorStop(1, '#ffb000');
+      for (const [o, c] of [[-0.12, '#ffd966'], [0, '#ffffff'], [0.12, '#9de8ff']]) { const q = gp + o; if (q > 0 && q < 1) fill.addColorStop(q, c); }
     } else if (paint) fill = paint.base;
     g.lineWidth = Math.max(4, px * 0.22); g.lineJoin = 'round'; g.strokeStyle = 'rgba(0,0,0,0.65)'; g.strokeText(text, x, y);
     if (paint && paint.fx === 'glitch') { // RGB-split flicker in short bursts
@@ -624,6 +709,11 @@
       return;
     }
     g.fillStyle = fill; g.fillText(text, x, y);
+    if (paint && paint.fx === 'shard') { // a tiny sparkle hopping along the nickname
+      const w = g.measureText(text).width, k = Math.abs(Math.sin(t * 2.6));
+      g.save(); g.globalAlpha = k; g.fillStyle = '#fff'; g.shadowColor = '#ffcc33'; g.shadowBlur = 8; g.beginPath();
+      starPath(g, x + w / 2 + 3, y - px * 0.85, 2 + 2.5 * k, t); g.fill(); g.restore();
+    }
   }
 
   function drawTrail(g, pl, t, now) {
@@ -679,6 +769,32 @@
     g.closePath();
   }
   const TRAILS = {
+    comet(g, pts, n, t, now) { // exclusive: a thick tapered tail, white-hot at the head
+      g.lineCap = 'round';
+      for (let i = 1; i < n; i++) {
+        const k = i / n;
+        g.globalAlpha = 0.25 + k * 0.7; g.lineWidth = 2 + k * 14;
+        g.strokeStyle = k > 0.8 ? '#fff7d6' : k > 0.5 ? '#ffcf5a' : k > 0.25 ? '#ff8a2e' : '#ff4d3a';
+        g.beginPath(); g.moveTo(pts[i - 1].x, pts[i - 1].y); g.lineTo(pts[i].x, pts[i].y); g.stroke();
+      }
+      g.globalCompositeOperation = 'lighter'; g.fillStyle = '#ffe9a0';
+      for (let i = 0; i < n; i += 3) {
+        const p = pts[i], k = ageK(p, now); if (k <= 0) continue;
+        g.globalAlpha = k * 0.8; g.beginPath(); g.arc(p.x + (p.seed - 0.5) * 18, p.y + (hash(p.seed, 2) - 0.5) * 18, 1 + k * 1.6, 0, Math.PI * 2); g.fill();
+      }
+    },
+    crystal(g, pts, n, t, now) { // exclusive: spinning crystal shards
+      const pal = ['#9de8ff', '#ffffff', '#c7a6ff', '#7cc8ff'];
+      for (let i = 0; i < n; i += 2) {
+        const p = pts[i], k = ageK(p, now, 750); if (k <= 0) continue;
+        const s = 2.5 + k * 4.5;
+        g.save(); g.translate(p.x + (p.seed - 0.5) * 12, p.y + (hash(p.seed, 3) - 0.5) * 12 + (1 - k) * 6); g.rotate(p.seed * 6.28 + t * 3);
+        g.globalAlpha = k; g.fillStyle = pal[Math.floor(p.seed * 4) % 4];
+        g.beginPath(); g.moveTo(0, -s * 1.5); g.lineTo(s * 0.6, 0); g.lineTo(0, s * 1.5); g.lineTo(-s * 0.6, 0); g.closePath(); g.fill();
+        g.globalAlpha = k * 0.7; g.strokeStyle = '#fff'; g.lineWidth = 0.8; g.stroke();
+        g.restore();
+      }
+    },
     smoke(g, pts, n, t, now) {
       g.fillStyle = 'rgb(176,186,210)';
       for (let i = 0; i < n; i++) {
@@ -831,13 +947,25 @@
     ctx.strokeStyle = 'rgba(120,90,255,0.8)'; ctx.lineWidth = 4; ctx.shadowColor = '#7a5cff'; ctx.shadowBlur = 20;
     ctx.strokeRect(0, 0, G.WORLD.w, G.WORLD.h); ctx.shadowBlur = 0;
 
+    drawEventZone(t, now);
     // orbs
     const pad = 60;
     for (const [id, o] of orbs) {
-      if (o.x < cam.x - pad || o.x > cam.x + W + pad || o.y < cam.y - pad || o.y > cam.y + H + pad) continue;
-      const k = Math.min(1, (now - o.born) / 350);
-      drawOrb(ctx, o.x, o.y, o.t, t, id, k);
+      if (o.x < cam.x - pad || o.x > cam.x + W + pad || o.y < cam.y - pad - (o.fall ? 320 : 0) || o.y > cam.y + H + pad) continue;
+      let k = Math.min(1, (now - o.born) / 350), oy = o.y;
+      if (o.fall) { // «Сферный дождь»: event orbs drop in from above
+        const f = Math.min(1, (now - o.born) / 600);
+        if (f >= 1) o.fall = 0;
+        else {
+          k = 1; oy = o.y - (1 - f) * (1 - f) * 320;
+          const ot = orbDef(o.t); ctx.strokeStyle = ot.glow + '0.45)'; ctx.lineWidth = ot.r * 0.9; ctx.lineCap = 'round';
+          ctx.beginPath(); ctx.moveTo(o.x, oy - 50); ctx.lineTo(o.x, oy); ctx.stroke();
+          ctx.fillStyle = ot.glow + (0.25 * f) + ')'; ctx.beginPath(); ctx.ellipse(o.x, o.y, ot.r * 1.4 * f, ot.r * 0.5 * f, 0, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+      drawOrb(ctx, o.x, oy, o.t, t, id, k);
     }
+    drawRunner(t, now);
     // collect fx
     for (let i = fx.length - 1; i >= 0; i--) {
       const f = fx[i], k = (now - f.start) / 220;
@@ -869,34 +997,38 @@
       ctx.fillText(f.text, f.x, f.y - k * 40); ctx.shadowBlur = 0; ctx.globalAlpha = 1;
     }
     ctx.restore();
-    drawLegendArrow(t);
-    if (frameNo % 4 === 0) drawMinimap();
+    drawCompass(t, now);
+    if (frameNo % 4 === 0) drawMinimap(now);
     drawPreviews(t, now);
     if (rushActive) drawRush(now);
   }
 
-  // «Чутьё легенды»: arrow at the screen edge towards the legendary orb (lvl 2+: with distance). Positions are public anyway (minimap).
-  function drawLegendArrow(t) {
-    const lvl = profile ? G.upLevel('sense', profile.upgrades.sense) : 0;
-    if (lvl < 1) return;
-    let lo = null;
-    for (const o of orbs.values()) if (o.t === 'l') { lo = o; break; }
-    if (!lo) return;
-    const sx = lo.x - cam.x, sy = lo.y - cam.y;
+  // «Чутьё легенды» compass: arrows at the screen edge to the rarest orbs (and, at level 3, to event targets).
+  // Client-side only: every position it uses is already public (orb list, minimap, event broadcast).
+  const COMPASS_COLORS = { l: '#ffcc33', m: '#ff3d6e', e: '#ff9a2e', event: '#7dffb0' };
+  function drawCompass(t, now) {
+    if (!profile || !profile.upgrades.sense) return;
+    const evc = evState ? { zone: evState.zone, runner: runner ? { x: runnerX(now), y: runnerY(now) } : null } : null;
+    const list = G.compassTargets(profile.upgrades.sense, Array.from(orbs.values()), dispMe, evc);
+    for (const tg of list) drawArrow(tg, t);
+  }
+  function drawArrow(tg, t) {
+    const sx = tg.x - cam.x, sy = tg.y - cam.y;
     if (sx > 30 && sx < W - 30 && sy > 30 && sy < H - 30) return; // already on screen
+    const color = COMPASS_COLORS[tg.kind] || '#ffcc33';
     const cx = W / 2, cy = H / 2, dx = sx - cx, dy = sy - cy, a = Math.atan2(dy, dx);
     const m = 46, k = Math.min((W / 2 - m) / Math.abs(dx || 1e-6), (H / 2 - m) / Math.abs(dy || 1e-6));
-    const ax = cx + dx * k, ay = cy + dy * k, pulse = 1 + 0.12 * Math.sin(t * 5);
+    const ax = cx + dx * k, ay = cy + dy * k, pulse = 1 + 0.12 * Math.sin(t * 5), big = tg.kind === 'l' || tg.kind === 'm' || tg.kind === 'event';
     ctx.save(); ctx.translate(ax, ay);
-    ctx.save(); ctx.rotate(a); ctx.scale(pulse, pulse);
-    ctx.fillStyle = '#ffcc33'; ctx.shadowColor = '#ffcc33'; ctx.shadowBlur = 14;
+    ctx.save(); ctx.rotate(a); ctx.scale(pulse * (big ? 1 : 0.8), pulse * (big ? 1 : 0.8));
+    ctx.fillStyle = color; ctx.shadowColor = color; ctx.shadowBlur = 14;
     ctx.beginPath(); ctx.moveTo(16, 0); ctx.lineTo(-8, -11); ctx.lineTo(-3, 0); ctx.lineTo(-8, 11); ctx.closePath(); ctx.fill();
     ctx.restore();
-    if (lvl >= 2) {
-      const d = Math.hypot(lo.x - dispMe.x, lo.y - dispMe.y);
+    if (tg.dist != null) {
+      const label = (tg.kind === 'event' ? '★ ' : '') + Math.round(tg.dist / 10) + ' м';
       ctx.font = '700 12px Segoe UI, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,0.7)'; const tx = -Math.cos(a) * 26, ty = -Math.sin(a) * 22;
-      ctx.strokeText(Math.round(d / 10) + ' м', tx, ty); ctx.fillStyle = '#ffe9a3'; ctx.fillText(Math.round(d / 10) + ' м', tx, ty);
+      ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,0.7)'; const tx = -Math.cos(a) * 28, ty = -Math.sin(a) * 22;
+      ctx.strokeText(label, tx, ty); ctx.fillStyle = color; ctx.fillText(label, tx, ty);
     }
     ctx.restore();
   }
@@ -919,7 +1051,7 @@
     for (let y = Math.max(0, Math.floor(cam.y / 512) * 512); y <= y1; y += 512) { ctx.moveTo(Math.max(0, -cam.x), y - cam.y + 0.5); ctx.lineTo(Math.min(W, G.WORLD.w - cam.x), y - cam.y + 0.5); }
     ctx.stroke();
   }
-  const idleOrbs = Array.from({ length: 60 }, (_, i) => ({ x: Math.random(), y: Math.random(), t: i % 25 === 0 ? 'l' : i % 6 === 0 ? 'r' : 'c', v: 0.2 + Math.random() * 0.6, id: i }));
+  const idleOrbs = Array.from({ length: 60 }, (_, i) => ({ x: Math.random(), y: Math.random(), t: i % 29 === 0 ? 'm' : i % 25 === 0 ? 'l' : i % 13 === 0 ? 'e' : i % 6 === 0 ? 'r' : i % 4 === 0 ? 'u' : 'c', v: 0.2 + Math.random() * 0.6, id: i }));
   function drawIdleBackground(t) {
     cam.x = t * 25; cam.y = t * 12;
     drawBackground(t);
@@ -930,17 +1062,192 @@
   }
 
   const mm = $('minimap'), mctx = mm.getContext('2d');
-  function drawMinimap() {
+  const MM_DOT = { r: 2, e: 3, l: 4, m: 4.5, t: 4.5 };
+  function drawMinimap(now) {
     const s = mm.width / G.WORLD.w;
     mctx.clearRect(0, 0, mm.width, mm.height);
+    if (evState && evState.zone) { // event zone (everyone sees it)
+      const z = evState.zone;
+      mctx.fillStyle = evState.phase === 'active' ? 'rgba(255,204,51,0.28)' : 'rgba(255,204,51,0.12)'; mctx.strokeStyle = '#ffcc33';
+      mctx.beginPath(); mctx.arc(z.x * s, z.y * s, Math.max(4, z.r * s), 0, Math.PI * 2); mctx.fill(); mctx.stroke();
+    }
     mctx.strokeStyle = 'rgba(120,150,255,0.35)'; mctx.strokeRect(cam.x * s, cam.y * s, W * s, H * s);
-    for (const o of orbs.values()) { if (o.t === 'c') continue; mctx.fillStyle = G.ORB_TYPES[o.t].color; mctx.fillRect(o.x * s - 1, o.y * s - 1, o.t === 'l' ? 4 : 2, o.t === 'l' ? 4 : 2); }
+    for (const o of orbs.values()) {
+      const d = MM_DOT[o.t]; if (!d) continue; // common / uncommon: too many to show
+      mctx.fillStyle = orbDef(o.t).color; mctx.fillRect(o.x * s - d / 2, o.y * s - d / 2, d, d);
+    }
+    if (runner) { mctx.fillStyle = '#c6fdff'; mctx.beginPath(); mctx.arc(runnerX(now) * s, runnerY(now) * s, 3 + Math.sin(now / 120), 0, Math.PI * 2); mctx.fill(); }
     for (const pl of players.values()) {
       if (!pl.pos) continue;
       mctx.fillStyle = pl.id === myId ? '#ffffff' : colorOf(pl.eq, 0);
       mctx.beginPath(); mctx.arc(pl.pos.x * s, pl.pos.y * s, pl.id === myId ? 3.5 : 2.5, 0, Math.PI * 2); mctx.fill();
     }
   }
+
+  // ------------------------------------------------------------ timed arena events (server-run; the client only shows them)
+  let evState = null, kothInfo = null, runner = null, evResultTimer = null;
+  const EV_UNITS = { rain: 'сфер', koth: 'очк.', treasure: 'сокр.', runner: '' };
+  function setEvent(d) {
+    if (!d) { evState = null; kothInfo = null; updateEventUi(); return; }
+    const now = performance.now();
+    evState = { kind: d.kind, phase: d.phase, startAt: now + (d.in || 0), endAt: now + (d.left || 0), dur: d.dur, zone: d.zone || null, remaining: d.remaining, total: d.total, annTotal: Math.max(1000, d.in || 0) };
+    if (d.runner && !runner) runner = { x: d.runner.x, y: d.runner.y, px: d.runner.x, py: d.runner.y, at: now };
+    if (d.phase === 'announce') kothInfo = null;
+    updateEventUi();
+  }
+  const runnerK = now => (runner ? Math.min(1, (now - runner.at) / G.TICK_MS) : 1);
+  const runnerX = now => (runner ? runner.px + (runner.x - runner.px) * runnerK(now) : 0);
+  const runnerY = now => (runner ? runner.py + (runner.y - runner.py) * runnerK(now) : 0);
+  function rewardText(r) {
+    if (!r) return '';
+    const parts = []; if (r.orbs) parts.push(`+${fmt(r.orbs)} ◉`); if (r.shards) parts.push(`+${r.shards} 💎`);
+    return parts.join(' ');
+  }
+  function updateEventUi() {
+    const ban = $('evBanner'), hud = $('evHud');
+    const now = performance.now(), e = evState, def = e && G.EVENTS[e.kind];
+    document.body.classList.toggle('ev-on', !!e);
+    if (e && mobileUI()) { const b = Math.max($('hud').querySelector('.stats').getBoundingClientRect().bottom, $('hud').querySelector('.top').getBoundingClientRect().bottom); $('hud').style.setProperty('--ev-top', Math.round(b + 8) + 'px'); }
+    if (!e || !def) { ban.classList.add('hidden'); hud.classList.add('hidden'); return; }
+    if (e.phase === 'announce') {
+      hud.classList.add('hidden'); ban.classList.remove('hidden'); ban.dataset.kind = e.kind;
+      $('evBIcon').textContent = def.icon; $('evBName').textContent = `Событие «${def.name}»`;
+      const sec = Math.max(0, Math.ceil((e.startAt - now) / 1000));
+      $('evBCount').textContent = sec > 0 ? `через ${sec} с` : 'начинается!';
+      $('evBDesc').textContent = def.desc + (e.kind === 'koth' ? ' Зона отмечена на карте.' : '');
+      $('evBBar').style.width = Math.max(0, Math.min(100, (e.startAt - now) / e.annTotal * 100)) + '%';
+      return;
+    }
+    ban.classList.add('hidden'); hud.classList.remove('hidden'); hud.dataset.kind = e.kind;
+    const left = Math.max(0, e.endAt - now);
+    $('evHIcon').textContent = def.icon; $('evHName').textContent = def.name;
+    const sec = Math.ceil(left / 1000);
+    $('evHTime').textContent = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+    $('evHBar').style.width = Math.max(0, Math.min(100, left / Math.max(1, e.dur) * 100)) + '%';
+    let info = '';
+    if (e.kind === 'rain') info = 'Дополнительные сферы падают по всей арене — эпические и редкие намного чаще!';
+    else if (e.kind === 'koth') {
+      const k = kothInfo;
+      info = (k && k.inside ? '✅ Вы в зоне' : '⚠️ Вы вне зоны — идите к золотому кругу') + ` · ваши очки: ${k ? k.you : 0}`;
+      if (k && k.top && k.top.length) info += ' · лидер: ' + k.top[0][0] + ' (' + k.top[0][1] + ')';
+    } else if (e.kind === 'treasure') info = `Осталось сокровищ: ${e.remaining != null ? e.remaining : '?'} из ${e.total != null ? e.total : '?'} — ищите световые столбы и золотые точки на карте`;
+    else if (e.kind === 'runner') info = runner ? `Догоните сферу-беглеца! До неё ${Math.round(Math.hypot(runnerX(now) - dispMe.x, runnerY(now) - dispMe.y) / 10)} м` : 'Сфера-беглец где-то на арене…';
+    $('evHInfo').textContent = info;
+  }
+  setInterval(() => { if (joined && evState) updateEventUi(); }, 200);
+  function evResultHide() { $('evResult').classList.add('hidden'); clearTimeout(evResultTimer); }
+  function showEventResult(d) {
+    const def = G.EVENTS[d.kind]; if (!def) return;
+    const box = $('evResult'); box.textContent = ''; box.dataset.kind = d.kind;
+    const head = document.createElement('div'); head.className = 'evr-head';
+    const h = document.createElement('b'); h.textContent = `${def.icon} «${def.name}» — итоги`;
+    const x = document.createElement('button'); x.type = 'button'; x.className = 'close'; x.setAttribute('aria-label', 'Закрыть'); x.textContent = '✕'; x.onclick = evResultHide;
+    head.append(h, x); box.appendChild(head);
+    const you = document.createElement('div'); you.className = 'evr-you';
+    let sub = '';
+    if (d.kind === 'runner') sub = d.outcome === 'caught' ? `Сферу поймал(а) ${d.results[0] ? d.results[0].name : 'кто-то'}!` : 'Сфера-беглец ускользнула…';
+    if (d.kind === 'treasure') sub = `Найдено сокровищ: ${(d.total || 0) - (d.remaining || 0)} из ${d.total || 0}`;
+    if (d.you) {
+      const unit = EV_UNITS[d.kind];
+      you.textContent = `Вы: ${d.you.place}-е место${unit ? ` · ${fmt(d.you.score)} ${unit}` : ''}` + (d.you.reward ? ` · награда ${rewardText(d.you.reward)}` : d.kind === 'koth' ? ` · для награды нужно ≥ ${def.minScore} очков` : '');
+      you.classList.add('ok');
+    } else you.textContent = 'Вы не участвовали — в следующий раз!';
+    if (sub) { const s2 = document.createElement('div'); s2.className = 'evr-sub'; s2.textContent = sub; box.appendChild(s2); }
+    box.appendChild(you);
+    if (d.results && d.results.length) {
+      const ol = document.createElement('ol'); ol.className = 'evr-list';
+      for (const r of d.results) {
+        const li = document.createElement('li'); const n = document.createElement('span'); n.textContent = r.name;
+        const v = document.createElement('b'); v.textContent = (EV_UNITS[d.kind] ? fmt(r.score) + ' ' + EV_UNITS[d.kind] : '') + (r.reward ? '  ' + rewardText(r.reward) : '');
+        li.append(n, v); if (r.name === myName) li.className = 'me'; ol.appendChild(li);
+      }
+      box.appendChild(ol);
+    }
+    if (d.kind === 'rain' && d.you) { const s3 = document.createElement('div'); s3.className = 'evr-sub'; s3.textContent = 'Все сферы дождя уже зачислены на баланс.'; box.appendChild(s3); }
+    box.classList.remove('hidden');
+    clearTimeout(evResultTimer); evResultTimer = setTimeout(evResultHide, 12000);
+  }
+  socket.on('ev:announce', d => { if (!joined || !d) return; evResultHide(); setEvent(d); });
+  socket.on('ev:start', d => { if (!joined || !d) return; setEvent(d); const def = G.EVENTS[d.kind]; if (def) toast(`${def.icon} Событие «${def.name}» началось!`, 'ok'); });
+  socket.on('ev:koth', d => { kothInfo = d; });
+  socket.on('ev:treasure', d => {
+    if (!evState || !d) return;
+    evState.remaining = d.left;
+    toast(`💰 ${d.name} нашёл(ла) сокровище!${d.left ? ' Осталось: ' + d.left : ''}`);
+    updateEventUi();
+  });
+  socket.on('ev:end', d => {
+    if (!d) return;
+    evState = null; kothInfo = null; runner = null; updateEventUi();
+    if (!joined) return;
+    if (d.cancelled) { toast('Событие отменено'); return; }
+    showEventResult(d);
+    if (mobileUI()) { const b = Math.max($('hud').querySelector('.stats').getBoundingClientRect().bottom, $('hud').querySelector('.top').getBoundingClientRect().bottom); $('hud').style.setProperty('--ev-top', Math.round(b + 8) + 'px'); }
+  });
+  // world layer: king-of-the-hill zone (dim + dashed while announced)
+  function drawEventZone(t) {
+    if (!evState || !evState.zone) return;
+    const z = evState.zone, active = evState.phase === 'active', inside = Math.hypot(dispMe.x - z.x, dispMe.y - z.y) <= z.r;
+    if (z.x + z.r < cam.x || z.x - z.r > cam.x + W || z.y + z.r < cam.y || z.y - z.r > cam.y + H) return;
+    ctx.save();
+    const gr = ctx.createRadialGradient(z.x, z.y, z.r * 0.2, z.x, z.y, z.r);
+    const a = active ? 0.16 + 0.06 * Math.sin(t * 3) : 0.06;
+    gr.addColorStop(0, `rgba(255,214,90,${a * 0.4})`); gr.addColorStop(1, `rgba(255,204,51,${a + (inside && active ? 0.08 : 0)})`);
+    ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(z.x, z.y, z.r, 0, Math.PI * 2); ctx.fill();
+    ctx.lineWidth = active ? 4 : 2.5; ctx.strokeStyle = active ? '#ffcc33' : 'rgba(255,204,51,0.6)';
+    if (active) { ctx.shadowColor = '#ffcc33'; ctx.shadowBlur = 18; } else { ctx.setLineDash([12, 10]); ctx.lineDashOffset = -t * 30; }
+    ctx.beginPath(); ctx.arc(z.x, z.y, z.r, 0, Math.PI * 2); ctx.stroke();
+    ctx.shadowBlur = 0; ctx.setLineDash([]);
+    if (active) { // rotating ticks around the rim
+      ctx.strokeStyle = 'rgba(255,240,180,0.7)'; ctx.lineWidth = 3; ctx.beginPath();
+      for (let i = 0; i < 24; i++) { const an = t * 0.4 + i * Math.PI / 12; ctx.moveTo(z.x + Math.cos(an) * (z.r - 10), z.y + Math.sin(an) * (z.r - 10)); ctx.lineTo(z.x + Math.cos(an) * (z.r - 2), z.y + Math.sin(an) * (z.r - 2)); }
+      ctx.stroke();
+    }
+    ctx.font = '800 40px Segoe UI, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.globalAlpha = active ? 0.85 : 0.5;
+    ctx.fillText('👑', z.x, z.y - 14);
+    ctx.font = '800 16px Segoe UI, system-ui, sans-serif'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.fillStyle = '#ffe08a';
+    const label = active ? 'Царь горы' : 'Царь горы — скоро';
+    ctx.strokeText(label, z.x, z.y + 22); ctx.fillText(label, z.x, z.y + 22);
+    ctx.restore();
+  }
+  function drawRunner(t, now) {
+    if (!runner) return;
+    const x = runnerX(now), y = runnerY(now);
+    if (x < cam.x - 80 || x > cam.x + W + 80 || y < cam.y - 80 || y > cam.y + H + 80) return;
+    const dx = runner.x - runner.px, dy = runner.y - runner.py, l = Math.hypot(dx, dy);
+    if (l > 0.5) { // speed lines
+      ctx.save(); ctx.strokeStyle = 'rgba(198,253,255,0.5)'; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.beginPath();
+      for (const o of [-8, 0, 8]) { const nx = -dy / l * o, ny = dx / l * o; ctx.moveTo(x - dx / l * 18 + nx, y - dy / l * 18 + ny); ctx.lineTo(x - dx / l * (38 + Math.abs(o) * 1.5) + nx, y - dy / l * (38 + Math.abs(o) * 1.5) + ny); }
+      ctx.stroke(); ctx.restore();
+    }
+    drawOrb(ctx, x, y, 'runner', t * 2, 0, 1.1);
+    const d = l > 0.5 ? { x: dx / l, y: dy / l } : { x: 1, y: 0 }; // tiny eyes looking where it runs
+    for (const sgn of [-1, 1]) { const ex = x + d.x * 5 - d.y * sgn * 5, ey = y + d.y * 5 + d.x * sgn * 5; ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(ex, ey, 3.4, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#10142a'; ctx.beginPath(); ctx.arc(ex + d.x * 1.4, ey + d.y * 1.4, 1.7, 0, Math.PI * 2); ctx.fill(); }
+  }
+
+  // ------------------------------------------------------------ orb legend (help «?» popover)
+  function renderOrbHelp() {
+    const box = $('orbHelpList'); if (box.childElementCount) return;
+    for (const k of G.ORB_LEGEND) {
+      const ot = G.ORB_TYPES[k]; if (!ot) continue;
+      const row = document.createElement('div'); row.className = 'oh-row'; row.dataset.orb = k;
+      const cv = document.createElement('canvas'); cv.width = cv.height = 56; cv.className = 'oh-orb';
+      drawOrb(cv.getContext('2d'), 28, 28, k, 0.4, 0, 0.62);
+      const nm = document.createElement('span'); nm.className = 'oh-name'; nm.style.color = ot.color; nm.textContent = ot.name;
+      const v = document.createElement('b'); v.textContent = '+' + ot.value;
+      const note = document.createElement('small');
+      const share = ot.weight > 0 ? (ot.weight / Object.values(G.POOL_WEIGHTS).reduce((a, b) => a + b, 0) * 100) : 0;
+      note.textContent = [share ? (share >= 1 ? Math.round(share) + '%' : share.toFixed(2).replace('.', ',') + '%') + ' сфер' : '', ot.note || '', ot.shards ? `+${ot.shards} 💎` : ''].filter(Boolean).join(' · ');
+      row.append(cv, nm, v, note); box.appendChild(row);
+    }
+  }
+  function toggleOrbHelp(force) {
+    const el = $('orbHelp'), show = force != null ? force : el.classList.contains('hidden');
+    if (show) renderOrbHelp();
+    el.classList.toggle('hidden', !show);
+  }
+  $('helpBtn').addEventListener('click', () => toggleOrbHelp());
+  $('orbHelpClose').addEventListener('click', () => toggleOrbHelp(false));
   requestAnimationFrame(frame);
 
   // ------------------------------------------------------------ modals
@@ -1109,6 +1416,7 @@
     const img = document.createElement('img');
     img.src = iconUrl(id); img.alt = def ? def.name : 'Предмет'; img.draggable = false; img.dataset.icon = String(id);
     box.appendChild(img);
+    if (def && def.exclusive && cls !== 'sm') { const b = document.createElement('span'); b.className = 'ex-badge'; b.textContent = 'Эксклюзив'; box.appendChild(b); }
     return box;
   }
   window.OCSIcons = Object.freeze({ url: iconUrl }); // read-only hook for the UI tests / debugging
@@ -1135,7 +1443,7 @@
   }
   const owns = id => !!(profile && profile.inventory.some(s => s.id === id));
   const rarityOf = def => G.RARITIES[def.rarity] || G.RARITIES.common;
-  const SOURCE_NAMES = { shop: 'Магазин', minigame: 'Мини-игры', arena: 'Арена', event: 'Событие', admin: 'Подарок', legacy: 'Куплено раньше' };
+  const SOURCE_NAMES = { shop: 'Магазин', minigame: 'Мини-игры', arena: 'Арена', event: 'Событие', admin: 'Подарок', legacy: 'Куплено раньше', shard_shop: 'Лавка осколков' };
   function rarityTag(def) { const r = rarityOf(def); const el = document.createElement('div'); el.className = 'rar'; el.style.color = r.color; el.textContent = r.name; return el; }
 
   // ------------------------------------------------------------ shop (only sells; purchases go to the inventory)
@@ -1170,13 +1478,14 @@
   function renderShop() {
     if (!profile) return;
     pruneHidden('shop');
-    const tabs = G.CATEGORIES.concat([{ key: 'upgrades', name: '⚡ Улучшения' }]);
+    const tabs = G.CATEGORIES.concat([{ key: 'upgrades', name: '⚡ Улучшения' }, { key: 'shards', name: '💎 Лавка осколков' }]);
     $('shopTabs').innerHTML = tabs.map(c => `<button class="tab ${c.key === shopTab ? 'active' : ''}" data-tab="${c.key}">${c.name}</button>`).join('');
     $('shopTabs').querySelectorAll('.tab').forEach(b => b.onclick = () => { shopTab = b.dataset.tab; renderShop(); });
     const grid = $('shopGrid');
     grid.innerHTML = '';
-    $('shopTools').classList.toggle('hidden', shopTab === 'upgrades');
+    $('shopTools').classList.toggle('hidden', shopTab === 'upgrades' || shopTab === 'shards');
     $('shopEmpty').classList.add('hidden');
+    if (shopTab === 'shards') { renderShardShop(grid); return; }
     if (shopTab === 'upgrades') {
       for (const up of Object.values(G.UPGRADES)) grid.appendChild(upgradeCard(up));
       return;
@@ -1212,6 +1521,46 @@
         btn.onclick = () => socket.emit('buy', it.id, res => afterAction(res, `Куплено: ${it.name} — предмет в инвентаре (I)`));
       }
       el.appendChild(btn); grid.appendChild(el);
+    }
+  }
+  // «Лавка осколков»: exclusives for legendary shards only (+ optional shard → orb exchange)
+  const shardCount = () => (profile ? profile.inventory.reduce((n, s) => n + (s.id === G.SHARD_ID ? s.q : 0), 0) : 0);
+  function renderShardShop(grid) {
+    const have = shardCount(), X = G.SHARD_EXCHANGE;
+    const head = document.createElement('div'); head.className = 'shard-head'; head.id = 'shardHead';
+    const ico = iconEl(G.SHARD_ID, 'sm');
+    const txt = document.createElement('div'); txt.className = 'shard-txt';
+    const b = document.createElement('div'); b.className = 'shard-have'; b.innerHTML = 'У вас осколков: <b id="shardCount"></b>'; b.querySelector('b').textContent = fmt(have) + ' 💎';
+    const how = document.createElement('div'); how.className = 'muted'; how.textContent = 'Осколки дают легендарные (+1) и мифические (+3) сферы и награды арена-событий. Эксклюзивы нельзя купить за сферы.';
+    txt.append(b, how);
+    const ex = document.createElement('div'); ex.className = 'shard-ex';
+    const lab = document.createElement('label'); lab.htmlFor = 'shardExQty'; lab.textContent = `Обмен: 1 💎 = ${X.orbs} ◉`;
+    const inp = document.createElement('input'); inp.type = 'number'; inp.id = 'shardExQty'; inp.min = 1; inp.max = Math.max(1, Math.min(X.maxPerTrade, have)); inp.value = 1; inp.inputMode = 'numeric';
+    const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn'; btn.id = 'shardExBtn';
+    const qty = () => Math.max(1, Math.min(X.maxPerTrade, parseInt(inp.value, 10) || 1));
+    const upd = () => { btn.textContent = `Обменять → ${fmt(qty() * X.orbs)} ◉`; btn.disabled = have < qty(); };
+    inp.oninput = upd; upd();
+    btn.onclick = () => { const q = qty(); btn.disabled = true; socket.emit('shard:exchange', q, res => afterAction(res, `Обмен: −${q} 💎, +${fmt(q * X.orbs)} ◉`)); };
+    inp.addEventListener('keydown', e => e.stopPropagation());
+    ex.append(lab, inp, btn);
+    head.append(ico, txt, ex); grid.appendChild(head);
+    const list = G.ITEMS.filter(i => i.exclusive).sort((a, b2) => a.shardPrice - b2.shardPrice);
+    for (const it of list) {
+      const owned = owns(it.id);
+      const el = document.createElement('div'); el.className = 'item ex-item rar-' + it.rarity; el.dataset.item = it.id;
+      el.appendChild(iconEl(it.id));
+      const nm = document.createElement('div'); nm.className = 'name'; nm.textContent = it.name;
+      const cat = document.createElement('div'); cat.className = 'desc'; cat.textContent = (G.CATEGORIES.find(c => c.key === it.cat) || {}).name || '';
+      el.append(nm, rarityTag(it), cat);
+      const bt = document.createElement('button');
+      if (owned) { bt.className = 'btn equipped'; bt.textContent = '✓ В инвентаре'; bt.disabled = true; }
+      else {
+        bt.className = 'btn primary shard-buy'; bt.textContent = `Купить · ${fmt(it.shardPrice)} 💎`;
+        bt.disabled = have < it.shardPrice;
+        if (have < it.shardPrice) bt.title = `Не хватает ${it.shardPrice - have} 💎`;
+        bt.onclick = () => { bt.disabled = true; socket.emit('shard:buy', it.id, res => afterAction(res, `Куплено: ${it.name} — эксклюзив в инвентаре (I)`)); };
+      }
+      el.appendChild(bt); grid.appendChild(el);
     }
   }
   function afterAction(res, okMsg) {

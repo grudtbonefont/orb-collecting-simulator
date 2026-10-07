@@ -6,11 +6,29 @@
   const TICK_MS = 50;     // 20 ticks per second
   const STEP_DT = TICK_MS / 1000;
 
+  // Orb tiers. `weight` = share (per 10 000) of normal pool spawns; 0 = never in the pool (timed / event orbs).
+  // The pool mean (≈1.43 per orb) is tuned so a player without upgrades still earns ≈100 orbs/min (README «Orb rarities»).
   const ORB_TYPES = {
-    c: { key: 'c', name: 'Обычная', value: 1, r: 7, color: '#3ee0ff', glow: 'rgba(62,224,255,', weight: 90 },
-    r: { key: 'r', name: 'Редкая', value: 5, r: 10, color: '#b46bff', glow: 'rgba(180,107,255,', weight: 10 },
-    l: { key: 'l', name: 'Легендарная', value: 25, r: 14, color: '#ffcc33', glow: 'rgba(255,204,51,', weight: 0 },
+    c: { key: 'c', name: 'Обычная', value: 1, r: 7, color: '#3ee0ff', glow: 'rgba(62,224,255,', weight: 8224 },
+    u: { key: 'u', name: 'Необычная', value: 2, r: 8, color: '#5dff8f', glow: 'rgba(93,255,143,', weight: 1200 },
+    r: { key: 'r', name: 'Редкая', value: 5, r: 10, color: '#b46bff', glow: 'rgba(180,107,255,', weight: 460 },
+    e: { key: 'e', name: 'Эпическая', value: 10, r: 12, color: '#ff9a2e', glow: 'rgba(255,154,46,', weight: 110 },
+    l: { key: 'l', name: 'Легендарная', value: 25, r: 14, color: '#ffcc33', glow: 'rgba(255,204,51,', weight: 0, shards: 1, note: 'по расписанию, раз в 1,5–2,5 мин' },
+    m: { key: 'm', name: 'Мифическая', value: 50, r: 15, color: '#ff3d6e', glow: 'rgba(255,61,110,', weight: 6, shards: 3, maxAlive: 1, lifeMs: 60000, note: 'очень редкая, живёт 60 с' },
+    t: { key: 't', name: 'Сокровище', value: 50, r: 15, color: '#ffe680', glow: 'rgba(255,230,128,', weight: 0, shards: 1, event: true, note: 'только во время события' },
   };
+  const ORB_RANK = { c: 0, u: 1, r: 2, e: 3, l: 4, t: 4, m: 5 };
+  const ORB_LEGEND = ['c', 'u', 'r', 'e', 'l', 'm', 't'];
+  const POOL_WEIGHTS = {};
+  for (const t of Object.values(ORB_TYPES)) if (t.weight > 0) POOL_WEIGHTS[t.key] = t.weight;
+  const RAIN_WEIGHTS = { c: 5400, u: 2600, r: 1400, e: 600 }; // «Сферный дождь»: rarer orbs much more often
+  function rollOrbType(weights = POOL_WEIGHTS, rnd = Math.random) {
+    let sum = 0; for (const k in weights) sum += weights[k];
+    let x = rnd() * sum;
+    for (const k in weights) { x -= weights[k]; if (x < 0) return k; }
+    return 'c';
+  }
+  const expectedOrbValue = (weights = POOL_WEIGHTS) => { let s = 0, v = 0; for (const k in weights) { s += weights[k]; v += weights[k] * ORB_TYPES[k].value; } return v / s; };
 
   const CATEGORIES = [
     { key: 'color', name: 'Цвета' },
@@ -44,9 +62,15 @@
     ocean: { stops: ['#7af0ff', '#2f8cff', '#4a5cff'], base: '#2f8cff' },
     neon: { stops: ['#39ff88', '#b6ffd6'], base: '#39ff88', fx: 'pulse' },
     glitch: { stops: ['#ff2fd6', '#ffffff', '#2ff3ff'], base: '#e8e8ff', fx: 'glitch' },
+    // exclusives (shard shop)
+    void: { stops: ['#05030c', '#1c0b3d', '#3a1478'], base: '#9b5cff', glow: '#9b5cff', fx: 'void' },
+    prism: { stops: ['#ff9de2', '#9de8ff', '#c9ff9d', '#fff59d', '#c7a6ff'], base: '#c9e8ff', fx: 'prism' },
+    shard: { stops: ['#fff3b0', '#ffcc33', '#ffffff', '#9de8ff'], base: '#ffd966', fx: 'shard' },
   };
   const C = (id, cat, name, price, rarity, value) => ({ id, type: 'cosmetic', cat, name, price, rarity, value,
     stackable: false, maxStack: 1, base: price === 0, sources: price === 0 ? ['base'] : ['shop', 'event', 'admin'] });
+  const X = (id, cat, name, shardPrice, rarity, value) => ({ id, type: 'cosmetic', cat, name, price: null, shardPrice, exclusive: true, rarity, value,
+    stackable: false, maxStack: 1, base: false, sources: ['shard_shop', 'admin'] });
   const ITEMS = [
     // colors
     C('c_cyan', 'color', 'Бирюзовый', 0, 'common', '#3ee0ff'),
@@ -129,9 +153,20 @@
     C('h_wizard', 'hat', 'Шляпа волшебника', 9500, 'legendary', 'wizard'),
     // collectibles (not sold; example of a non-shop, stackable item)
     { id: 'x_legend_shard', type: 'collectible', cat: 'misc', name: 'Легендарный осколок', rarity: 'legendary', icon: '✦', art: 'shard',
-      desc: 'Выпадает из легендарных сфер. Пока коллекционный.', stackable: true, maxStack: 99, base: false, price: null,
+      desc: 'Выпадает из легендарных (1) и мифических (3) сфер и за события. Тратится в «Лавке осколков».', stackable: true, maxStack: 99, base: false, price: null,
       sources: ['arena', 'event', 'admin'] },
+    // exclusives: only for legendary shards in «Лавка осколков» (never for orbs)
+    X('c_void', 'color', 'Пустота', 40, 'epic', 'void'),
+    X('n_shard', 'nameColor', 'Осколочный ник', 50, 'epic', 'shard'),
+    X('t_comet', 'trail', 'Хвост кометы', 70, 'epic', 'comet'),
+    X('s_crystal', 'shape', 'Кристалл', 90, 'epic', 'crystal'),
+    X('h_satellites', 'hat', 'Спутники', 120, 'legendary', 'satellites'),
+    X('t_crystal', 'trail', 'Кристальный след', 150, 'legendary', 'crystal'),
+    X('c_prism', 'color', 'Призма', 200, 'legendary', 'prism'),
+    X('h_shard_crown', 'hat', 'Осколочная корона', 300, 'legendary', 'shardcrown'),
   ];
+  const SHARD_ID = 'x_legend_shard';
+  const SHARD_EXCHANGE = { orbs: 40, maxPerTrade: 99 }; // «Лавка осколков»: 1 shard → 40 orbs (balance only, not the all-time total)
   const ITEM_BY_ID = {};
   for (const it of ITEMS) ITEM_BY_ID[it.id] = it;
   const INV_SLOTS = 100;
@@ -147,20 +182,23 @@
     magnet: { key: 'magnet', name: 'Магнит', desc: 'Больше радиус сбора сфер', max: 5, prices: [300, 900, 2400, 5500, 11000], values: [0, 10, 19, 26, 32, 36], unit: 'px' },
     speed: { key: 'speed', name: 'Ускорение', desc: 'Быстрее движение по арене', max: 5, prices: [400, 1100, 2800, 6000, 12000], values: [0, 6, 10, 13, 16, 18], unit: '%' },
     mult: { key: 'mult', name: 'Множитель сфер', desc: 'Каждая сфера приносит больше (дробные части копятся)', max: 5, prices: [600, 1600, 3800, 8000, 15000], values: [0, 5, 10, 15, 20, 25], unit: '%' },
-    luck: { key: 'luck', name: 'Удача', desc: 'Шанс, что собранная сфера засчитается дважды', max: 5, prices: [500, 1400, 3400, 7000, 13000], values: [0, 3, 6, 8, 10, 12], unit: '%' },
-    sense: { key: 'sense', name: 'Чутьё легенды', desc: 'Помогает найти легендарную сферу', max: 3, prices: [500, 1500, 4000], values: [0, 1, 2, 3], unit: '' },
+    luck: { key: 'luck', name: 'Удача', desc: 'Шанс ×2 за сферу; с 3-го уровня ещё и «находка»: обычная или необычная сфера становится эпической (+10)', max: 5, prices: [500, 1400, 3400, 7000, 13000],
+      values: [0, 2, 4, 6, 7, 8], jackpot: [0, 0, 0, 0.5, 0.75, 1], unit: '%' },
+    sense: { key: 'sense', name: 'Чутьё легенды', desc: 'Компас: стрелки к самым редким сферам и к событиям', max: 3, prices: [500, 1500, 4000], values: [0, 1, 2, 3], unit: '' },
     skill: { key: 'skill', name: 'Мастер мини-игр', desc: 'Бонус к выигрышам в мини-играх', max: 3, prices: [300, 900, 2000], values: [0, 5, 10, 15], unit: '%' },
   };
   const UPGRADE_KEYS = Object.keys(UPGRADES);
-  const SENSE_TEXT = ['нет', 'стрелка к легендарной сфере', 'стрелка + расстояние', 'стрелка, расстояние и сигнал за 15 с до появления'];
+  const SENSE_TEXT = ['нет', 'стрелки к легендарной и мифической сферам', '+ стрелка к ближайшей эпической, расстояния', '+ сигнал за 15 с до легендарной и стрелки к целям событий'];
+  const SENSE_EPIC_RANGE = 1500; // «Чутьё легенды» 2+: nearest epic orb within this distance
   const upLevel = (key, level) => Math.max(0, Math.min(UPGRADES[key].max, Math.floor(Number(level) || 0))); // caps any stored value
   const upValue = (key, level) => UPGRADES[key].values[upLevel(key, level)];
+  const jackpotChance = level => UPGRADES.luck.jackpot[upLevel('luck', level)]; // % per common/uncommon pickup
   function upgradeText(key, level) {
     const u = UPGRADES[key], v = upValue(key, level);
     if (key === 'magnet') return `радиус ${PLAYER_R + v} px` + (v ? ` (+${v})` : '');
     if (key === 'speed') return `скорость ${Math.round(BASE_SPEED * (1 + v / 100))}` + (v ? ` (+${v}%)` : '');
     if (key === 'mult') return `×${(1 + v / 100).toFixed(2)} за сферу`;
-    if (key === 'luck') return `${String(v).replace('.', ',')}% шанс ×2`;
+    if (key === 'luck') { const j = jackpotChance(level); return `${v}% шанс ×2` + (j ? ` · ${String(j).replace('.', ',')}% находка +10` : ''); }
     if (key === 'sense') return SENSE_TEXT[upLevel(key, level)];
     if (key === 'skill') return `+${v}% к выигрышу`;
     return String(v) + u.unit;
@@ -176,11 +214,13 @@
 
   function speedFor(level) { return BASE_SPEED * (1 + upValue('speed', level) / 100); }
   function pickupFor(level) { return PLAYER_R + upValue('magnet', level); }
-  // Orb reward with the multiplier (fractions are carried in state.frac so +1 orbs are never rounded away)
-  // and luck (chance to count the orb twice). rnd is injectable for tests.
-  function orbReward(base, ups, state, rnd = Math.random) {
+  // Orb reward: «Удача» find (a common/uncommon pickup counts as an epic +10), luck ×2, then the multiplier
+  // (fractions are carried in state.frac so +1 orbs are never rounded away). rnd is injectable for tests.
+  function orbReward(base, ups, state, rnd = Math.random, type) {
     ups = ups || {};
-    let v = base, lucky = false;
+    let v = base, lucky = false, jackpot = false;
+    const j = jackpotChance(ups.luck) / 100;
+    if (j > 0 && (type === 'c' || type === 'u') && rnd() < j) { v = ORB_TYPES.e.value; jackpot = true; }
     const luck = upValue('luck', ups.luck) / 100;
     if (luck > 0 && rnd() < luck) { v *= 2; lucky = true; }
     const m = upValue('mult', ups.mult) / 100;
@@ -188,8 +228,43 @@
       const f = (state.frac || 0) + v * m, whole = Math.floor(f + 1e-9);
       state.frac = f - whole; v += whole;
     }
-    return { value: v, lucky };
+    return { value: v, lucky, jackpot };
   }
+  // «Чутьё легенды» compass targets (client display; every position here is public anyway).
+  // lvl 1: legendary + mythic orbs · lvl 2: + nearest epic within SENSE_EPIC_RANGE, distances · lvl 3: + event targets.
+  function compassTargets(level, orbList, me, ev) {
+    const lvl = upLevel('sense', level), out = [];
+    if (lvl < 1 || !me) return out;
+    let epic = null, ed = SENSE_EPIC_RANGE;
+    for (const o of orbList) {
+      if (o.t === 'l' || o.t === 'm') out.push({ x: o.x, y: o.y, kind: o.t });
+      else if (lvl >= 3 && o.t === 't') out.push({ x: o.x, y: o.y, kind: 'event' });
+      else if (lvl >= 2 && o.t === 'e') { const d = Math.hypot(o.x - me.x, o.y - me.y); if (d < ed) { ed = d; epic = o; } }
+    }
+    if (epic) out.push({ x: epic.x, y: epic.y, kind: 'e' });
+    if (lvl >= 3 && ev && ev.zone) out.push({ x: ev.zone.x, y: ev.zone.y, kind: 'event' });
+    if (lvl >= 3 && ev && ev.runner) out.push({ x: ev.runner.x, y: ev.runner.y, kind: 'event' });
+    for (const t of out) t.dist = lvl >= 2 ? Math.hypot(t.x - me.x, t.y - me.y) : null;
+    return out;
+  }
+
+  // ---------------------------------------------------------------- timed arena events (server-run, see README «Arena events»)
+  // Rewards are a bonus worth a few minutes of farming (≈100 orbs/min without upgrades), never more.
+  const EVENTS = {
+    rain: { key: 'rain', name: 'Сферный дождь', icon: '🌧️', durationMs: 45000,
+      desc: '45 секунд с неба падают дополнительные сферы — редкие и эпические намного чаще. Собирайте!',
+      extraBase: 40, extraPerPlayer: 25, extraMax: 220, perTick: 3 },
+    koth: { key: 'koth', name: 'Царь горы', icon: '👑', durationMs: 60000, radius: 230, pointsPerSec: 1, minScore: 10,
+      desc: 'Стойте в светящейся зоне: каждая секунда в ней — очко. Топ-3 получают сферы и осколки.',
+      rewards: [{ orbs: 200, shards: 2 }, { orbs: 120, shards: 1 }, { orbs: 80, shards: 0 }], solo: { orbs: 100, shards: 1 }, participation: { orbs: 20, shards: 0 } },
+    treasure: { key: 'treasure', name: 'Охота за сокровищем', icon: '💰', durationMs: 90000, count: 3, perPlayers: 4, maxCount: 6, minDist: 900,
+      desc: 'В дальних углах арены появились сферы-сокровища. Кто первым схватит — получит награду!', reward: { orbs: 50, shards: 1 } },
+    runner: { key: 'runner', name: 'Сфера-беглец', icon: '💨', durationMs: 60000, speed: 175, wander: 90, r: 14, fleeRange: 700,
+      desc: 'По арене носится сфера, которая убегает от игроков. Поймайте её первым!', reward: { orbs: 120, shards: 2 } },
+  };
+  const EVENT_KEYS = Object.keys(EVENTS);
+  const EVENT_SCHEDULE = { minMs: 6 * 60000, maxMs: 10 * 60000, announceMs: 25000 }; // counted only while ≥ 1 player is online
+
   const skillPrize = (prize, level) => prize > 0 ? Math.round(prize * (1 + upValue('skill', level) / 100)) : prize;
 
   // Apply one movement input step (STEP_DT seconds). dx,dy is a direction vector with length <= 1.
@@ -206,8 +281,9 @@
   }
 
   const api = {
-    WORLD, PLAYER_R, BASE_SPEED, TICK_MS, STEP_DT, ORB_TYPES, CATEGORIES, INV_CATEGORIES, RARITIES, ITEMS, ITEM_BY_ID, INV_SLOTS, PAINTS,
-    DEFAULT_EQUIPPED, DEFAULT_OWNED, UPGRADES, UPGRADE_KEYS, upLevel, upValue, upgradeText, orbReward, skillPrize,
+    WORLD, PLAYER_R, BASE_SPEED, TICK_MS, STEP_DT, ORB_TYPES, ORB_RANK, ORB_LEGEND, POOL_WEIGHTS, RAIN_WEIGHTS, rollOrbType, expectedOrbValue, CATEGORIES, INV_CATEGORIES, RARITIES, ITEMS, ITEM_BY_ID, INV_SLOTS, PAINTS,
+    DEFAULT_EQUIPPED, DEFAULT_OWNED, UPGRADES, UPGRADE_KEYS, upLevel, upValue, jackpotChance, upgradeText, orbReward, skillPrize, compassTargets, SENSE_EPIC_RANGE,
+    EVENTS, EVENT_KEYS, EVENT_SCHEDULE, SHARD_ID, SHARD_EXCHANGE,
     MINIGAMES, REACTION_PRIZES, rushPrize, speedFor, pickupFor, applyInput,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
