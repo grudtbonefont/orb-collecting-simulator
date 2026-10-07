@@ -540,6 +540,13 @@ function bot(url, name) {
     ok(legend.join(' ') === 'c:+1 u:+2 r:+5 e:+10 l:+25 m:+50 t:+50', 'orb legend popover lists every tier with its value: ' + legend.join(' '));
     await shot(vp, 'screenshot-orb-rarities.png');
     await vp.click('#orbHelpClose');
+    // ---------------- trails by rarity: the arena renderer on a test canvas (common → legendary → exclusives)
+    const nTrails = await vp.evaluate(() => { const cv = document.createElement('canvas'); cv.id = 'trailDemo'; cv.width = innerWidth; cv.height = innerHeight;
+      cv.style.cssText = 'position:fixed;inset:0;z-index:999'; document.body.appendChild(cv); return window.OCSTrailShowcase(cv); });
+    await sleep(1200);
+    ok(nTrails >= 14, `trail showcase renders all ${nTrails} trails (rarity FX layer: glow / sparkles / particles / bursts / exclusive effects)`);
+    await shot(vp, 'screenshot-trails-epic.png');
+    await vp.evaluate(() => document.getElementById('trailDemo').remove());
     // ---------------- «Радар»: the same ring of every tier is next to the viewer; only c/u/r may show up
     await sleep(3100); await vp.waitForFunction(() => window.OCSRadar && window.OCSRadar().tiers.length > 0, null, { timeout: 5000 });
     await sleep(900); // mid-pulse: wave out, blips lit

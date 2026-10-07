@@ -719,11 +719,110 @@
     }
   }
 
+  // ---- trail rarity FX: every trail keeps its own renderer (identity); a tier layer on top adds glow / sparkles /
+  // particles / bursts by rarity. Plain strokes + arcs only (no shadows, no per-frame gradients or arrays).
+  // tier: 0 common · 1 rare · 2 epic · 3 legendary · 4 shard-shop exclusive
+  const TRAIL_THEME = { sparks: ['player', '#ffffff'], neon: ['player', '#ffffff'], fire: ['#ff8a2e', '#ffe08a'], smoke: ['#c4cce0', '#8a93b8'],
+    bubbles: ['#9fe9ff', '#ffffff'], pixel: ['#3ee0ff', '#ff4d6d'], leaves: ['#7ed957', '#ffb347'], snow: ['#e8f6ff', '#9fd8ff'], hearts: ['#ff5fa2', '#ffd1e6'],
+    stars: ['#ffe066', '#fff6c2'], lightning: ['#7cc8ff', '#eaffff'], rainbow: ['rainbow', '#ffffff'], galaxy: ['#b46bff', '#7cc8ff'], comet: ['#ffcf5a', '#7cd8ff'], crystal: ['#9de8ff', '#ffb8f0'] };
+  const TIER_OF = { common: 0, rare: 1, epic: 2, legendary: 3 };
+  const TRAIL_LIFE = [650, 700, 800, 1000, 1150], TRAIL_PTS = [26, 28, 32, 40, 46]; // higher tiers keep a longer luminous tail
+  const trailTier = id => { const d = G.ITEM_BY_ID[id]; return !d ? 0 : d.exclusive ? 4 : (TIER_OF[d.rarity] || 0); };
+  const FX_CAP = [0, 6, 20, 36, 50]; // max particles per player per frame (halved at reduced quality)
+  let fxLod = 2, fpsEma = 60, lastFrameAt = 0; // 2 full · 1 reduced · 0 glow only — set every frame from FPS, trails on screen, mobile
+  function glowPath(g, pts, n, color, width, alpha) { // tapered soft stroke in 4 alpha bands (4 draw calls)
+    g.strokeStyle = color;
+    for (let c = 0; c < 4; c++) {
+      const a = Math.floor(c * (n - 1) / 4), b = Math.floor((c + 1) * (n - 1) / 4); if (b <= a) continue;
+      g.globalAlpha = alpha * (c + 1) / 4; g.lineWidth = width * (0.45 + 0.55 * (c + 1) / 4);
+      g.beginPath(); g.moveTo(pts[a].x, pts[a].y); for (let i = a + 1; i <= b; i++) g.lineTo(pts[i].x, pts[i].y); g.stroke();
+    }
+  }
+  function sparkle(g, x, y, s) { g.beginPath(); g.moveTo(x, y - s); g.lineTo(x + s * 0.25, y - s * 0.25); g.lineTo(x + s, y); g.lineTo(x + s * 0.25, y + s * 0.25); g.lineTo(x, y + s); g.lineTo(x - s * 0.25, y + s * 0.25); g.lineTo(x - s, y); g.lineTo(x - s * 0.25, y - s * 0.25); g.closePath(); g.fill(); }
+  function trailFx(g, pl, pts, n, t, now, kind, tier, lod, under) {
+    const th = TRAIL_THEME[kind] || ['#ffffff', '#ffffff'];
+    const c1 = th[0] === 'player' ? colorOf(pl.eq, t) : th[0] === 'rainbow' ? `hsl(${Math.floor(t * 140) % 360},100%,62%)` : th[0], c2 = th[1];
+    const life = TRAIL_LIFE[tier];
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    if (under) { // glow below the base trail
+      if (tier === 0) { glowPath(g, pts, n, c1, 6, 0.12); return; }
+      g.globalCompositeOperation = 'lighter';
+      const pulse = tier >= 3 ? 0.78 + 0.22 * Math.sin(t * 6 + (pl.id ? pl.id.length : 0)) : 1;
+      if (tier === 1) glowPath(g, pts, n, c1, 12, 0.22);
+      else if (tier === 2) { glowPath(g, pts, n, c1, 22, 0.13); glowPath(g, pts, n, c2, 9, 0.12 + 0.14 * (0.5 + 0.5 * Math.sin(t * 3))); } // shimmer: colour shifts c1 ↔ c2
+      else { glowPath(g, pts, n, c1, 34 * pulse, 0.12); glowPath(g, pts, n, c2, 15 * pulse, 0.2); glowPath(g, pts, n, '#ffffff', 4, 0.32); }
+      return;
+    }
+    if (tier === 0 || lod === 0) return;
+    g.globalCompositeOperation = 'lighter';
+    let budget = lod === 2 ? FX_CAP[tier] : FX_CAP[tier] >> 1;
+    // sparkles (rare+): twinkling 4-point stars near the path
+    const sStep = tier === 1 ? 4 : 3;
+    g.fillStyle = tier === 1 ? c2 : '#ffffff';
+    for (let i = n - 1; i >= 0 && budget > 0; i -= sStep) {
+      const p = pts[i], k = 1 - (now - p.time) / life; if (k <= 0) break;
+      const tw = 0.5 + 0.5 * Math.sin(t * 9 + p.seed * 20);
+      g.globalAlpha = k * tw; sparkle(g, p.x + (p.seed - 0.5) * 22, p.y + (hash(p.seed, 5) - 0.5) * 22, 1.5 + tw * (tier >= 3 ? 4 : 2.6)); budget--;
+    }
+    if (tier >= 2) { // drifting particles that fly off the path
+      for (let i = n - 1; i >= 0 && budget > 0; i -= 2) {
+        const p = pts[i], k = 1 - (now - p.time) / life; if (k <= 0) break;
+        const a = p.seed * 6.283 + t * 1.5, d = (1 - k) * (tier >= 3 ? 30 : 20) + 3;
+        g.globalAlpha = k * 0.85; g.fillStyle = i & 2 ? c1 : c2;
+        g.beginPath(); g.arc(p.x + Math.cos(a) * d, p.y + Math.sin(a) * d, 1 + k * 2, 0, 6.283); g.fill(); budget--;
+      }
+    }
+    if (tier >= 3) {
+      // swirl: two strands spiralling around the tail
+      for (let i = 1; i < n && budget > 1; i += 2) {
+        const p = pts[i], q = pts[i - 1], dx = p.x - q.x, dy = p.y - q.y, l = Math.hypot(dx, dy) || 1, f = i / n;
+        const off = Math.sin(i * 0.6 - t * 9) * (6 + 8 * f);
+        g.globalAlpha = 0.25 + 0.7 * f; g.fillStyle = c2;
+        g.beginPath(); g.arc(p.x - dy / l * off, p.y + dx / l * off, 1.2 + 1.6 * f, 0, 6.283); g.fill();
+        g.fillStyle = c1; g.beginPath(); g.arc(p.x + dy / l * off, p.y - dx / l * off, 1.2 + 1.6 * f, 0, 6.283); g.fill();
+        budget -= 2;
+      }
+      // bursts from the head every 0.9 s
+      const h = pts[n - 1], u = (now % 900) / 900, rot = Math.floor(now / 900) * 0.7, m = lod === 2 ? 8 : 4;
+      g.fillStyle = c1;
+      for (let j = 0; j < m; j++) { const a = rot + j * 6.283 / m, r = 8 + u * 34; g.globalAlpha = (1 - u) * 0.9; g.beginPath(); g.arc(h.x + Math.cos(a) * r, h.y + Math.sin(a) * r, 0.8 + 2.4 * (1 - u), 0, 6.283); g.fill(); }
+    }
+    if (tier === 4) { // shard-shop exclusives: unique signature effects
+      const h = pts[n - 1], pu = 0.8 + 0.2 * Math.sin(t * 8);
+      if (kind === 'comet') { // blazing coma at the head + blue ion tail
+        g.fillStyle = '#ffcf5a'; g.globalAlpha = 0.14; g.beginPath(); g.arc(h.x, h.y, 30 * pu, 0, 6.283); g.fill();
+        g.fillStyle = '#fff1b8'; g.globalAlpha = 0.24; g.beginPath(); g.arc(h.x, h.y, 18 * pu, 0, 6.283); g.fill();
+        g.fillStyle = '#ffffff'; g.globalAlpha = 0.55; g.beginPath(); g.arc(h.x, h.y, 8 * pu, 0, 6.283); g.fill();
+        g.strokeStyle = '#7cd8ff'; g.lineWidth = 2.5;
+        for (let s2 = -1; s2 <= 1; s2 += 2) {
+          g.globalAlpha = 0.5; g.beginPath();
+          for (let i = 0; i < n; i++) { const p = pts[i], f = 1 - i / n, w = s2 * (4 + f * 16) + Math.sin(t * 5 + i * 0.4) * 3 * f; i ? g.lineTo(p.x + w * 0.7, p.y + w) : g.moveTo(p.x + w * 0.7, p.y + w); }
+          g.stroke();
+        }
+      } else if (kind === 'crystal') { // spinning prism halo + refracted rainbow glints along the tail
+        g.lineWidth = 2;
+        for (let r = 0; r < 2; r++) {
+          const rad = (r ? 24 : 15) * pu, rotH = t * (r ? -1.6 : 2.4);
+          g.strokeStyle = r ? '#ffb8f0' : '#9de8ff'; g.globalAlpha = r ? 0.45 : 0.7; g.beginPath();
+          for (let j = 0; j <= 6; j++) { const a = rotH + j * 1.0472; j ? g.lineTo(h.x + Math.cos(a) * rad, h.y + Math.sin(a) * rad) : g.moveTo(h.x + Math.cos(a) * rad, h.y + Math.sin(a) * rad); }
+          g.stroke();
+        }
+        for (let i = n - 2; i >= 0 && budget > 0; i -= 3) {
+          const p = pts[i], k = 1 - (now - p.time) / life; if (k <= 0) break;
+          const a = p.seed * 6.283 + t * 2;
+          g.strokeStyle = `hsl(${(i * 37 + Math.floor(t * 160)) % 360},100%,72%)`; g.globalAlpha = k; g.lineWidth = 1.6;
+          g.beginPath(); g.moveTo(p.x - Math.cos(a) * 7 * k, p.y - Math.sin(a) * 7 * k); g.lineTo(p.x + Math.cos(a) * 7 * k, p.y + Math.sin(a) * 7 * k); g.stroke(); budget--;
+        }
+      } else { g.fillStyle = '#ffffff'; for (let j = 0; j < 6; j++) { const a = t * 3 + j * 1.047; g.globalAlpha = 0.6; sparkle(g, h.x + Math.cos(a) * 20, h.y + Math.sin(a) * 20, 3); } }
+    }
+  }
   function drawTrail(g, pl, t, now) {
     const kind = itemVal(pl.eq.trail) || 'none';
     if (kind === 'none' || pl.trail.length < 2) return;
-    const pts = pl.trail, n = pts.length;
+    const pts = pl.trail, n = pts.length, tier = trailTier(pl.eq.trail), lod = g === ctx ? fxLod : 2;
     g.save();
+    trailFx(g, pl, pts, n, t, now, kind, tier, lod, true);
+    g.restore(); g.save();
     if (kind === 'neon') {
       const color = colorOf(pl.eq, t);
       g.lineCap = 'round'; g.shadowColor = color; g.shadowBlur = 14; g.strokeStyle = color;
@@ -757,6 +856,8 @@
     } else if (TRAILS[kind]) {
       TRAILS[kind](g, pts, n, t, now, pl);
     }
+    g.restore(); g.save();
+    trailFx(g, pl, pts, n, t, now, kind, tier, lod, false);
     g.restore();
   }
   // New trails: plain fills/strokes only (no per-point gradients or shadows) so dozens of players stay cheap, also on mobile.
@@ -940,7 +1041,8 @@
       if (pl.id === myId) pl.dir = myDir;
       else if (dd > 0.5) pl.dir = { x: dx / dd, y: dy / dd };
       if (dd > 5) { pl.trail.push({ x: p.x, y: p.y, time: now, seed: Math.random() }); pl.last = { x: p.x, y: p.y }; }
-      while (pl.trail.length && (now - pl.trail[0].time > 650 || pl.trail.length > 26)) pl.trail.shift();
+      const tr = trailTier(pl.eq.trail), tLife = TRAIL_LIFE[tr], tMax = TRAIL_PTS[tr];
+      while (pl.trail.length && (now - pl.trail[0].time > tLife || pl.trail.length > tMax)) pl.trail.shift();
       pl.pos = p;
     }
 
@@ -984,7 +1086,17 @@
       ctx.beginPath(); ctx.arc(dispMe.x, dispMe.y, myPickup(), 0, Math.PI * 2); ctx.stroke(); ctx.restore();
     }
     // trails then players (me last)
-    for (const pl of players.values()) drawTrail(ctx, pl, t, now);
+    // trail quality: FPS (EMA), how many trails are on screen, phone → fxLod 2 / 1 / 0; off-screen trails are skipped
+    const fdt = lastFrameAt ? now - lastFrameAt : 16.7; lastFrameAt = now;
+    if (fdt > 0 && fdt < 500) fpsEma = fpsEma * 0.95 + (1000 / fdt) * 0.05;
+    let onScreen = 0;
+    for (const pl of players.values()) {
+      const h = pl.trail.length ? pl.trail[pl.trail.length - 1] : null;
+      pl.trailVis = !!h && h.x > cam.x - 260 && h.x < cam.x + W + 260 && h.y > cam.y - 260 && h.y < cam.y + H + 260;
+      if (pl.trailVis && (itemVal(pl.eq.trail) || 'none') !== 'none') onScreen++;
+    }
+    fxLod = onScreen > 22 || fpsEma < 30 ? 0 : onScreen > 10 || fpsEma < 45 || mobileUI() ? 1 : 2;
+    for (const pl of players.values()) if (pl.trailVis) drawTrail(ctx, pl, t, now);
     const order = Array.from(players.values()).sort((p, q) => (p.id === myId) - (q.id === myId));
     for (const pl of order) {
       if (!pl.pos) continue;
@@ -1450,6 +1562,30 @@
     return box;
   }
   window.OCSIcons = Object.freeze({ url: iconUrl }); // read-only hook for the UI tests / debugging
+  // Trail showcase (UI tests / screenshots): every trail, by rarity, drawn live with the arena renderer on a given canvas.
+  window.OCSTrailShowcase = cv => {
+    const g = cv.getContext('2d'), list = G.ITEMS.filter(i => i.cat === 'trail' && i.value !== 'none').sort((a, b) => trailTier(a.id) - trailTier(b.id) || (a.price || 0) - (b.price || 0));
+    const cols = 3, cw = cv.width / cols, ch = cv.height / Math.ceil(list.length / cols), fakes = list.map(d => ({ id: 'demo' + d.id, eq: eqWith('trail', d.id), trail: [] }));
+    const tick = () => {
+      if (!cv.isConnected) return;
+      requestAnimationFrame(tick);
+      const now = performance.now(), t = now / 1000;
+      g.setTransform(1, 0, 0, 1, 0, 0); g.fillStyle = '#060912'; g.fillRect(0, 0, cv.width, cv.height);
+      list.forEach((d, idx) => {
+        const x0 = (idx % cols) * cw, y0 = Math.floor(idx / cols) * ch, tier = trailTier(d.id), N = TRAIL_PTS[tier], life = TRAIL_LIFE[tier], f = fakes[idx];
+        const hx = x0 + cw - 70, hy = y0 + ch * 0.55;
+        f.trail.length = 0;
+        for (let i = 0; i < N; i++) { const tm = now - (N - 1 - i) * (life / N), back = (N - 1 - i) * (cw * 0.62 / N); f.trail.push({ x: hx - back, y: hy + Math.sin(tm / 160) * 14 * (back / cw + 0.15), time: tm, seed: (i * 0.618 + idx * 0.13) % 1 }); }
+        drawTrail(g, f, t, now);
+        drawAvatar(g, hx, hy, G.PLAYER_R, f.eq, t, { dir: { x: 1, y: 0 }, phase: idx });
+        const r = rarityOf(d);
+        g.globalAlpha = 1; g.textAlign = 'left'; g.font = '700 15px Segoe UI, sans-serif'; g.fillStyle = '#fff'; g.fillText(d.name, x0 + 14, y0 + 22);
+        g.font = '600 12px Segoe UI, sans-serif'; g.fillStyle = r.color; g.fillText(d.exclusive ? 'Эксклюзив · ' + r.name : r.name, x0 + 14, y0 + 38);
+      });
+    };
+    tick();
+    return list.length;
+  };
 
   // ------------------------------------------------------------ live avatar previews (profile)
   const previews = []; // {cv, eq, cat, size, r, name}
