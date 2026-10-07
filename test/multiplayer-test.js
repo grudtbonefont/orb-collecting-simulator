@@ -44,7 +44,7 @@ function makeBot(name, token = crypto.randomUUID()) {
   const health = await (await fetch(URL + '/api/health')).json();
   ok(health.ok && health.orbs > 0, `server health ok (${JSON.stringify(health)})`);
   const page = await (await fetch(URL + '/')).text();
-  ok(page.includes('Item Collecting Simulator') && page.includes('Магазин'), 'index page served with Russian UI');
+  ok(page.includes('Orb Collecting Simulator') && page.includes('Магазин'), 'index page served with Russian UI');
 
   const A = makeBot('Тест_А_' + suffix), B = makeBot('TestB_' + suffix);
   const ra = await A.join(), rb = await B.join();

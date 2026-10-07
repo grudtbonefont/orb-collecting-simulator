@@ -1,4 +1,4 @@
-# Item Collecting Simulator
+# Orb Collecting Simulator
 
 Multiplayer browser game: collect glowing orbs in a shared arena, spend them on cosmetics, upgrades and mini-games, climb the all-time leaderboard.
 Stack: Node.js + Express + Socket.IO (server-authoritative, 20 ticks/s), HTML5 canvas + vanilla JS client (no build step). Player data: `data/players.json`.

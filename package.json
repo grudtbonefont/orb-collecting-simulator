@@ -1,5 +1,5 @@
 {
-  "name": "item-collecting-simulator",
+  "name": "orb-collecting-simulator",
   "version": "1.0.0",
   "description": "Multiplayer orb collecting browser game",
   "main": "server.js",

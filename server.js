@@ -374,4 +374,4 @@ setInterval(() => {
   for (const pl of players.values()) pl.socket.emit('sping', now);
 }, 1000);
 
-server.listen(PORT, () => console.log(`Item Collecting Simulator on http://localhost:${PORT}`));
+server.listen(PORT, () => console.log(`Orb Collecting Simulator on http://localhost:${PORT}`));

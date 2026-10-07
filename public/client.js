@@ -1,4 +1,4 @@
-/* Item Collecting Simulator — browser client (vanilla JS, no build step) */
+/* Orb Collecting Simulator — browser client (vanilla JS, no build step) */
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
