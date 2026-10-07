@@ -65,7 +65,7 @@
     C('h_halo', 'hat', 'Нимб', 3200, 'epic', 'halo'),
     C('h_crown', 'hat', 'Корона', 20000, 'legendary', 'crown'),
     // collectibles (not sold; example of a non-shop, stackable item)
-    { id: 'x_legend_shard', type: 'collectible', cat: 'misc', name: 'Легендарный осколок', rarity: 'legendary', icon: '✦',
+    { id: 'x_legend_shard', type: 'collectible', cat: 'misc', name: 'Легендарный осколок', rarity: 'legendary', icon: '✦', art: 'shard',
       desc: 'Выпадает из легендарных сфер. Пока коллекционный.', stackable: true, maxStack: 99, base: false, price: null,
       sources: ['arena', 'event', 'admin'] },
   ];

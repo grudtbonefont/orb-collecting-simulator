@@ -160,6 +160,7 @@ async function chatSuite(URL, ctx) {
 
   const C = makeClient(URL), E = makeClient(URL);
   await C.register(nameC); await E.register(nameE);
+  let wallClear = 0; C.s.on('chat:clear', () => wallClear++); // the 15-min wall-clock clear may land mid-suite
   await sleep(200);
   const r1 = await C.call('chat', 'Привет всем! <b>жирный</b>');
   const got = await waitFor(() => E.chat.find(m => m.n === nameC && /Привет/.test(m.t)));
@@ -192,7 +193,8 @@ async function chatSuite(URL, ctx) {
   ok(!!sysMsg, 'system join message shown: ' + (sysMsg && sysMsg.t));
   const F = makeClient(URL);
   const rf = await F.register('Late' + rnd());
-  ok(rf.ok && rf.chat.some(m => m.n === nameC && /Привет/.test(m.t)), `chat history sent on join (${rf.chat.length} messages)`);
+  ok(rf.ok && (rf.chat.some(m => m.n === nameC && /Привет/.test(m.t)) || wallClear > 0),
+    `chat history sent on join (${rf.chat.length} messages${wallClear ? ', a scheduled clear happened mid-suite' : ''})`);
   F.close(); C.close(); E.close();
 }
 
@@ -513,10 +515,10 @@ async function legendarySuite(URL) {
     A.s.emit('input', { s: ++A.seq, x: dx, y: dy });
     await sleep(50);
   }
-  await sleep(1000);
+  await sleep(300); // well inside the 2.5 s test cycle, so the next spawn cannot be mistaken for a leftover
   const sh = A.profile.inventory.find(x => x.id === 'x_legend_shard');
   const after = Array.from(A.orbs.values()).filter(o => o.t === 'l').length;
-  ok((announces.length >= 1 || atJoin === 1) && maxAlive <= 1 && after === 0, `legendary orb is a timed event (on field at join: ${atJoin}, announced ${announces.length}×, max ${maxAlive} alive, none 1 s after pickup — cooldown)`);
+  ok((announces.length >= 1 || atJoin === 1) && maxAlive <= 1 && after === 0, `legendary orb is a timed event (on field at join: ${atJoin}, announced ${announces.length}×, max ${maxAlive} alive, none 0.3 s after pickup — cooldown)`);
   ok(items.length === 1 && items[0].id === 'x_legend_shard' && sh && sh.src === 'arena', 'collecting it grants a «Легендарный осколок» via grantItem (source "arena")');
   A.close();
 }
@@ -612,13 +614,15 @@ async function persistencePhase1(URL, hooks) {
   const u1 = await P.emit('upgrade', 'magnet');
   if (hooks) await P.emit('test:grant', { id: 'x_legend_shard', qty: 120, source: 'event' });
   await P.emit('buy', 's_square'); await P.emit('inv:equip', 's_square');
+  const shardSum = p => (p.inventory || []).filter(x => x.id === 'x_legend_shard').reduce((n, x) => n + x.q, 0);
+  const shardsLeft = shardSum(P.profile) - (hooks ? 30 : 0); // farming may have picked up a legendary orb too
   const tr1 = await P.emit('inv:trash', { id: 's_square', qty: 1 });
   const tr2 = hooks ? await P.emit('inv:trash', { id: 'x_legend_shard', qty: 30 }) : { ok: true };
   ok(tr1.ok && tr2.ok && P.profile.equipped.shape === 's_circle', 'persistence: trashed an equipped unique item and 30 of 120 shards');
   ok(b1.ok && q1.ok && u1.ok, `persistence: ${name} has ${P.profile.total} total, bought + equipped c_coral, magnet 1, ${P.profile.inventory.length} inventory slots`);
   await sleep(100);
   const snap = JSON.parse(JSON.stringify(P.profile));
-  return { name, snap, token: P.token, P };
+  return { name, snap, token: P.token, P, shardsLeft };
 }
 async function persistencePhase2(URL, st) {
   const P = makeClient(URL);
@@ -627,8 +631,8 @@ async function persistencePhase2(URL, st) {
   const invSig = p => JSON.stringify((p.inventory || []).map(x => [x.id, x.q, x.src]));
   const same = r.ok && pr.balance === st.snap.balance && pr.total === st.snap.total && invSig(pr) === invSig(st.snap)
     && pr.equipped.color === 'c_coral' && pr.upgrades.magnet === 1;
-  ok(r.ok && !pr.inventory.some(x => x.id === 's_square') && pr.equipped.shape === 's_circle' && pr.inventory.filter(x => x.id === 'x_legend_shard').reduce((n, x) => n + x.q, 0) === 90,
-    'trash survived restart (deleted item not resurrected from the legacy owned list, 90 shards left)');
+  ok(r.ok && !pr.inventory.some(x => x.id === 's_square') && pr.equipped.shape === 's_circle' && pr.inventory.filter(x => x.id === 'x_legend_shard').reduce((n, x) => n + x.q, 0) === st.shardsLeft,
+    `trash survived restart (deleted item not resurrected from the legacy owned list, ${st.shardsLeft} shards left)`);
   ok(same, `data survived restart: balance ${pr.balance}/${st.snap.balance}, total ${pr.total}/${st.snap.total}, inventory ${invSig(pr) === invSig(st.snap) ? 'same' : 'DIFFERENT'}, color ${pr.equipped && pr.equipped.color}`);
   P.close();
   const Q = makeClient(URL);

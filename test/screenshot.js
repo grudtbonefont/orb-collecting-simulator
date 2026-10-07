@@ -54,6 +54,43 @@ function bot(url, name) {
   const errors = [];
   const watch = page => { page.on('pageerror', e => errors.push(e.message)); page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); }); };
 
+  // ---------------- item icons: every catalog item, distinct, non-empty, data-driven fallback
+  const galCtx = await browser.newContext({ viewport: { width: 1280, height: 1000 } });
+  const gal = await galCtx.newPage();
+  watch(gal);
+  await gal.goto(URL); await sleep(500);
+  const icons = await gal.evaluate(async () => {
+    const load = src => new Promise(res => { const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = src; });
+    const opaque = async src => {
+      const im = await load(src); if (!im) return -1;
+      const c = document.createElement('canvas'); c.width = im.width; c.height = im.height;
+      const g = c.getContext('2d'); g.drawImage(im, 0, 0);
+      const d = g.getImageData(0, 0, c.width, c.height).data; let n = 0;
+      for (let i = 3; i < d.length; i += 4) if (d[i] > 40) n++;
+      return n / (c.width * c.height);
+    };
+    const out = [];
+    for (const it of G.ITEMS) { const url = window.OCSIcons.url(it.id); out.push({ id: it.id, url, cover: await opaque(url), again: window.OCSIcons.url(it.id) === url }); }
+    // future items: picked up by type/params; unknown art or ids → fallback gem
+    G.ITEM_BY_ID.h_future = { id: 'h_future', type: 'cosmetic', cat: 'hat', value: 'crown', rarity: 'legendary', name: 'Будущая корона' };
+    G.ITEM_BY_ID.x_future = { id: 'x_future', type: 'collectible', cat: 'misc', art: 'shard', rarity: 'epic', name: 'Будущий осколок' };
+    G.ITEM_BY_ID.x_odd = { id: 'x_odd', type: 'collectible', cat: 'misc', art: 'no-such-art', rarity: 'rare', icon: '★', name: 'Странный' };
+    const fut = { hat: window.OCSIcons.url('h_future') === window.OCSIcons.url('h_crown'), shard: window.OCSIcons.url('x_future') === window.OCSIcons.url('x_legend_shard'),
+      odd: await opaque(window.OCSIcons.url('x_odd')), unknown: await opaque(window.OCSIcons.url('zz_unknown')) };
+    delete G.ITEM_BY_ID.h_future; delete G.ITEM_BY_ID.x_future; delete G.ITEM_BY_ID.x_odd;
+    return { out, fut, unknownUrl: window.OCSIcons.url('zz_unknown') };
+  });
+  const ITEMS = require('../public/shared.js').ITEMS;
+  ok(icons.out.length === ITEMS.length && icons.out.every(x => /^data:image\/png;base64,/.test(x.url) && x.cover > 0.04),
+    `every catalog item (${icons.out.length}) renders a non-empty PNG icon (min coverage ${Math.min(...icons.out.map(x => x.cover)).toFixed(2)})`);
+  ok(new Set(icons.out.map(x => x.url)).size === ITEMS.length && !icons.out.some(x => x.url === icons.unknownUrl), 'all icons are distinct (data URLs differ per item)');
+  ok(icons.out.every(x => x.again), 'icons are cached (same data URL on the second request)');
+  ok(icons.fut.hat && icons.fut.shard && icons.fut.odd > 0.04 && icons.fut.unknown > 0.04, 'future items get icons from their type/params; unknown art / ids get a fallback icon');
+  await gal.evaluate(require('./icon-gallery.js'));
+  await sleep(300);
+  await shot(gal, 'screenshot-icons-all.png');
+  await galCtx.close();
+
   // ---------------- desktop: login screen
   const deskCtx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
   const desk = await deskCtx.newPage();
@@ -86,6 +123,8 @@ function bot(url, name) {
   const avatarPixels = await desk.evaluate(() => { const c = document.getElementById('pfAvatar'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 0) n++; return n; });
   ok(avatarPixels > 2000, `equipped look preview is drawn (${avatarPixels} px)`);
   for (const id of ['pfPlay', 'pfInv', 'pfLogout']) ok(await desk.isVisible('#' + id), `profile button #${id} visible`);
+  const pfEq = await desk.evaluate(() => Array.from(document.querySelectorAll('#pfEq img')).map(i => i.dataset.icon + ':' + (i.complete && i.naturalWidth > 0)));
+  ok(pfEq.join(',') === 'c_rainbow:true,s_star:true,t_fire:true,n_gold:true,h_crown:true', 'profile shows icons of the 5 equipped items: ' + pfEq.join(','));
   await shot(desk, 'screenshot-profile.png');
   await desk.click('#pfInv');
   await sleep(300);
@@ -148,6 +187,8 @@ function bot(url, name) {
   const shopState = await desk.evaluate(() => Array.from(document.querySelectorAll('#shopGrid .item')).map(e => [e.querySelector('.name').textContent, e.querySelector('button').textContent, e.querySelector('button').disabled]));
   ok(shopState.length === 6 && !shopState.some(([n]) => n === 'Бирюзовый') && shopState.filter(x => /В инвентаре/.test(x[1])).length === 4 && shopState.some(x => /Купить · 2\s?400/.test(x[1]) && !x[2]),
     'shop lists only paid items with prices; owned ones say «В инвентаре»: ' + shopState.map(x => x[0] + '=' + x[1]).join(', '));
+  const shopIcons = await desk.evaluate(() => Array.from(document.querySelectorAll('#shopGrid .item[data-item]')).map(e => { const i = e.querySelector('.ico img'); return !!i && i.dataset.icon === e.dataset.item && i.complete && i.naturalWidth > 0; }));
+  ok(shopIcons.length === 6 && shopIcons.every(Boolean), 'every shop card shows its own item icon');
   await shot(desk, 'screenshot-shop.png');
   const hudBal = () => desk.evaluate(() => Number(document.querySelector('#hudBalance').textContent.replace(/\s/g, '')));
   const violetBtn = desk.locator('#shopGrid .item', { hasText: 'Фиолетовый' }).locator('button');
@@ -163,6 +204,10 @@ function bot(url, name) {
   ok(await desk.isVisible('#inv') && /Занято 16\/100/.test(await desk.textContent('#invCount')), 'hotkey I opens the inventory with the new item: ' + await desk.textContent('#invCount'));
   const shardQty = await desk.evaluate(() => { const e = document.querySelector('#invGrid [data-item=x_legend_shard] .qty'); return e && e.textContent; });
   ok(shardQty === '×3', 'stackable item shows its quantity: ' + shardQty);
+  const invIcons = await desk.evaluate(() => Array.from(document.querySelectorAll('#invGrid .inv-item')).map(e => { const i = e.querySelector('.ico img'); return [e.dataset.item, !!i && i.dataset.icon === e.dataset.item && i.complete && i.naturalWidth > 0, i && i.src]; }));
+  ok(invIcons.length === 16 && invIcons.every(x => x[1]) && new Set(invIcons.map(x => x[2])).size === 16, 'every inventory card shows its own, distinct icon');
+  const frame = await desk.evaluate(() => { const e = document.querySelector('#invGrid [data-item=c_rainbow] .ico'); const cs = getComputedStyle(e); return [cs.getPropertyValue('--rc').trim(), cs.borderTopColor, cs.backgroundImage.slice(0, 15)]; });
+  ok(frame[0] === '#ffcc33' && /radial-gradient/.test(frame[2]), 'icon has a rarity-coloured frame/glow (legendary = gold): ' + frame.join(' | '));
   const violet = desk.locator('#invGrid [data-item=c_violet] button.btn');
   ok(/Надеть/.test(await violet.textContent()), 'new item can be equipped from the inventory');
   await violet.click(); await sleep(500);
@@ -199,6 +244,7 @@ function bot(url, name) {
   ok(await desk.inputValue('#trashQty') === '3' && /Удалить 3 шт/.test(await desk.textContent('#trashOk')), 'quantity is capped at the stack size (3)');
   await desk.click('#trashMinus');
   ok(await desk.inputValue('#trashQty') === '2', '− lowers the quantity');
+  ok(await desk.evaluate(() => { const i = document.querySelector('#trashIco img'); return !!i && i.dataset.icon === 'x_legend_shard' && i.naturalWidth > 0; }), 'confirm dialog shows the item icon');
   await shot(desk, 'screenshot-trash-confirm.png');
   await desk.click('#trashOk'); await sleep(500);
   ok(!(await desk.isVisible('#trashDlg')) && await desk.textContent('#invGrid [data-item=x_legend_shard] .qty') === '×1', 'partial stack deleted (×3 → ×1)');
@@ -298,6 +344,11 @@ function bot(url, name) {
   const cols = await mob.evaluate(() => getComputedStyle(document.getElementById('invGrid')).gridTemplateColumns.split(' ').length);
   ok(await mob.isVisible('#inv') && ig && ig.width <= 390 && cols >= 3, `mobile inventory: bottom sheet ${ig && Math.round(ig.width)}px wide, ${cols}-column grid`);
   ok(!(await mob.isVisible('#invTrash')) && await mob.locator('#invGrid .trash-btn').count() === 5, 'mobile: 🗑 button on every card (no drag zone)');
+  const mfit = await mob.evaluate(() => Array.from(document.querySelectorAll('#invGrid .inv-item')).map(card => {
+    const c = card.getBoundingClientRect(), i = card.querySelector('.ico').getBoundingClientRect(), t = card.querySelector('.trash-btn').getBoundingClientRect(), n = card.querySelector('.name').getBoundingClientRect();
+    return i.left >= c.left && i.right <= c.right && i.width >= 64 && i.bottom <= n.top + 1 && card.scrollWidth <= card.clientWidth + 1 && t.right <= i.left + 24;
+  }));
+  ok(mfit.length === 5 && mfit.every(Boolean), 'mobile: icons fit inside the cards, above the name, no overflow');
   await shot(mob, 'screenshot-inventory-mobile.png');
   await mob.tap('#invGrid [data-item=s_square] .trash-btn'); await sleep(300);
   const dlg = await mob.locator('#trashDlg .confirm-card').boundingBox();

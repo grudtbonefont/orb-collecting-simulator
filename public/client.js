@@ -435,7 +435,7 @@
   }
 
   function drawAvatar(g, x, y, r, eq, t, opts = {}) {
-    const color = colorOf(eq, t + (opts.phase || 0));
+    const color = opts.color || colorOf(eq, t + (opts.phase || 0));
     const shape = itemVal(eq.shape) || 'circle';
     const top = SHAPE_TOP[shape] || 1;
     g.save(); g.translate(x, y);
@@ -444,6 +444,14 @@
     const grd = g.createRadialGradient(-r * 0.4, -r * 0.45, r * 0.1, 0, 0, r * 1.4);
     grd.addColorStop(0, 'rgba(255,255,255,0.9)'); grd.addColorStop(0.25, color); grd.addColorStop(1, color);
     g.fillStyle = grd; g.fill();
+    if (opts.staticRainbow && itemVal(eq.color) === 'rainbow') { // icons: whole rainbow at once instead of the animated hue
+      const rb = g.createLinearGradient(-r, -r, r, r);
+      for (let i = 0; i <= 5; i++) rb.addColorStop(i / 5, `hsl(${i * 60},100%,62%)`);
+      g.fillStyle = rb; g.fill();
+      const hl = g.createRadialGradient(-r * 0.4, -r * 0.45, r * 0.05, -r * 0.2, -r * 0.2, r * 1.1);
+      hl.addColorStop(0, 'rgba(255,255,255,0.85)'); hl.addColorStop(0.35, 'rgba(255,255,255,0.12)'); hl.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = hl; g.fill();
+    }
     g.shadowBlur = 0;
     g.lineWidth = 2; g.strokeStyle = 'rgba(255,255,255,0.45)'; g.stroke();
     // eyes
@@ -457,19 +465,22 @@
     if (hat !== 'none') drawHat(g, hat, r, top, t);
     if (opts.name) {
       const ny = -top * r - (hat === 'none' ? 10 : hat === 'tophat' ? r * 1.05 + 8 : 22);
-      g.font = `700 ${opts.isMe ? 14 : 13}px Segoe UI, system-ui, sans-serif`;
-      g.textAlign = 'center'; g.textBaseline = 'bottom';
-      const nc = itemVal(eq.nameColor) || '#fff';
-      let fill = nc;
-      if (nc === 'rainbow') {
-        const w = g.measureText(opts.name).width;
-        fill = g.createLinearGradient(-w / 2, 0, w / 2, 0);
-        for (let i = 0; i <= 4; i++) fill.addColorStop(i / 4, rainbow(t, i * 70));
-      }
-      g.lineWidth = 4; g.strokeStyle = 'rgba(0,0,0,0.65)'; g.strokeText(opts.name, 0, ny);
-      g.fillStyle = fill; g.fillText(opts.name, 0, ny);
+      drawNameTag(g, opts.name, 0, ny, itemVal(eq.nameColor) || '#fff', t, opts.isMe ? 14 : 13);
     }
     g.restore();
+  }
+  // nickname text exactly as in the arena (also used for the nickname-color icons)
+  function drawNameTag(g, text, x, y, nc, t, px, weight = 700) {
+    g.font = `${weight} ${px}px Segoe UI, system-ui, sans-serif`;
+    g.textAlign = 'center'; g.textBaseline = 'bottom';
+    let fill = nc;
+    if (nc === 'rainbow') {
+      const w = g.measureText(text).width;
+      fill = g.createLinearGradient(x - w / 2, 0, x + w / 2, 0);
+      for (let i = 0; i <= 4; i++) fill.addColorStop(i / 4, rainbow(t, i * 70));
+    }
+    g.lineWidth = Math.max(4, px * 0.22); g.lineJoin = 'round'; g.strokeStyle = 'rgba(0,0,0,0.65)'; g.strokeText(text, x, y);
+    g.fillStyle = fill; g.fillText(text, x, y);
   }
 
   function drawTrail(g, pl, t, now) {
@@ -671,7 +682,98 @@
   $('profile').addEventListener('pointerdown', e => { if (e.target === $('profile') && stage === 'game') closeProfile(); });
   document.querySelectorAll('.modal').forEach(m => m.addEventListener('pointerdown', e => { if (e.target === m) closeModals(); }));
 
-  // ------------------------------------------------------------ live avatar previews (shop, inventory, profile)
+  // ------------------------------------------------------------ item icons
+  // Data-driven: cosmetics are drawn by category with the game's own renderer (drawAvatar / drawTrail / hats / name tags),
+  // collectibles by their `art` key, anything else gets a fallback gem. Drawn lazily once per item at devicePixelRatio
+  // and cached as PNG data URLs (allowed by the CSP's img-src data:).
+  const ICON_PX = 96, ICON_T = 0.35, ICON_NOW = 10000; // fixed animation time → deterministic icons
+  const NEUTRAL_BODY = '#d4dcf7';                       // shapes in neutral silver so the outline is what you notice
+  const iconCache = new Map();
+  const eqWith = (cat, id) => Object.assign({}, G.DEFAULT_EQUIPPED, { [cat]: id });
+  function avatarAt(g, x, y, k, eq, opts = {}) {
+    g.save(); g.translate(x, y); g.scale(k, k);
+    drawAvatar(g, 0, 0, G.PLAYER_R, eq, ICON_T, Object.assign({ dir: { x: 0.6, y: 0.8 } }, opts));
+    g.restore();
+  }
+  function dashedHint(g, draw) { g.save(); g.setLineDash([4, 4]); g.lineWidth = 2; g.strokeStyle = 'rgba(170,180,215,0.55)'; g.beginPath(); draw(); g.stroke(); g.restore(); }
+  function sparkle(g, x, y, r, color) {
+    g.save(); g.fillStyle = color; g.shadowColor = color; g.shadowBlur = 8; g.beginPath();
+    g.moveTo(x, y - r); g.quadraticCurveTo(x, y, x + r, y); g.quadraticCurveTo(x, y, x, y + r); g.quadraticCurveTo(x, y, x - r, y); g.quadraticCurveTo(x, y, x, y - r);
+    g.fill(); g.restore();
+  }
+  const ICON_ART = {
+    color(g, def) { avatarAt(g, 48, 50, 1.3, eqWith('color', def.id), { staticRainbow: true }); },
+    shape(g, def) { avatarAt(g, 48, 52, 1.25, eqWith('shape', def.id), { color: NEUTRAL_BODY }); },
+    trail(g, def) {
+      const eq = eqWith('trail', def.id);
+      if (def.value === 'none') {
+        dashedHint(g, () => { g.moveTo(8, 52); g.lineTo(44, 52); });
+        g.save(); g.strokeStyle = 'rgba(255,120,140,0.8)'; g.lineWidth = 2.5; g.beginPath(); g.arc(22, 52, 8, 0, Math.PI * 2); g.moveTo(16, 58); g.lineTo(28, 46); g.stroke(); g.restore();
+      } else {
+        const fake = { eq, trail: [] };
+        for (let i = 0; i < 16; i++) fake.trail.push({ x: 6 + i * 3.6, y: 52 + Math.sin(i * 0.55) * 5, time: ICON_NOW - (16 - i) * 38, seed: (i * 0.37) % 1 });
+        drawTrail(g, fake, ICON_T, ICON_NOW);
+      }
+      avatarAt(g, 66, 52, 0.95, eq);
+    },
+    nameColor(g, def) {
+      g.save(); g.fillStyle = 'rgba(8,12,28,0.55)'; g.beginPath(); g.roundRect(12, 30, 72, 40, 12); g.fill(); g.restore();
+      drawNameTag(g, 'Aa', 48, 68, def.value, ICON_T, 36, 800);
+    },
+    hat(g, def) {
+      avatarAt(g, 48, 68, 1.3, eqWith('hat', def.id)); // bigger body so the hat is the focus
+      if (def.value === 'none') dashedHint(g, () => g.arc(48, 68 - 26 - 5, 16, Math.PI, 0));
+    },
+    shard(g) {
+      const pts = [[50, 8], [68, 32], [62, 82], [44, 90], [30, 42]];
+      g.save();
+      g.shadowColor = '#ffcc33'; g.shadowBlur = 18;
+      const gr = g.createLinearGradient(30, 10, 68, 90);
+      gr.addColorStop(0, '#fff7c4'); gr.addColorStop(0.45, '#ffcc33'); gr.addColorStop(1, '#b07a00');
+      g.fillStyle = gr; g.beginPath(); pts.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.closePath(); g.fill();
+      g.shadowBlur = 0;
+      g.strokeStyle = 'rgba(255,250,220,0.9)'; g.lineWidth = 1.5; g.stroke();
+      g.strokeStyle = 'rgba(120,80,0,0.55)'; g.lineWidth = 1.2; g.beginPath(); g.moveTo(50, 8); g.lineTo(50, 48); g.lineTo(44, 90); g.moveTo(50, 48); g.lineTo(68, 32); g.moveTo(50, 48); g.lineTo(30, 42); g.moveTo(50, 48); g.lineTo(62, 82); g.stroke();
+      g.fillStyle = 'rgba(255,255,255,0.55)'; g.beginPath(); g.moveTo(50, 12); g.lineTo(58, 26); g.lineTo(50, 44); g.lineTo(36, 40); g.closePath(); g.fill();
+      g.restore();
+      sparkle(g, 76, 20, 7, '#fff3b0'); sparkle(g, 22, 72, 5, '#ffe27a'); sparkle(g, 78, 70, 4, '#ffffff');
+    },
+  };
+  function drawFallbackIcon(g, def) {
+    const rc = (G.RARITIES[def && def.rarity] || G.RARITIES.common).color;
+    g.save(); g.shadowColor = rc; g.shadowBlur = 16; g.fillStyle = rc; g.globalAlpha = 0.9;
+    g.beginPath(); g.moveTo(48, 12); g.lineTo(80, 48); g.lineTo(48, 84); g.lineTo(16, 48); g.closePath(); g.fill();
+    g.globalAlpha = 1; g.shadowBlur = 0; g.fillStyle = '#0b1024'; g.font = '800 30px Segoe UI, system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText((def && def.icon) || '?', 48, 50); g.restore();
+  }
+  function iconUrl(id) {
+    const key = String(id);
+    if (iconCache.has(key)) return iconCache.get(key);
+    const def = Object.prototype.hasOwnProperty.call(G.ITEM_BY_ID, key) ? G.ITEM_BY_ID[key] : null;
+    const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+    const cv = document.createElement('canvas'); cv.width = cv.height = Math.round(ICON_PX * dpr);
+    const g = cv.getContext('2d');
+    const art = def && (def.type === 'cosmetic' ? ICON_ART[def.cat] : ICON_ART[def.art]);
+    try { g.setTransform(dpr, 0, 0, dpr, 0, 0); (art || drawFallbackIcon)(g, def || { rarity: 'common' }); }
+    catch (_) { g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, ICON_PX, ICON_PX); drawFallbackIcon(g, def); }
+    const url = cv.toDataURL('image/png');
+    iconCache.set(key, url);
+    return url;
+  }
+  // <div class="ico"> with a rarity-coloured frame/glow and the cached icon
+  function iconEl(id, cls) {
+    const def = G.ITEM_BY_ID[id];
+    const box = document.createElement('div');
+    box.className = 'ico' + (cls ? ' ' + cls : '');
+    box.style.setProperty('--rc', (G.RARITIES[def && def.rarity] || G.RARITIES.common).color);
+    const img = document.createElement('img');
+    img.src = iconUrl(id); img.alt = def ? def.name : 'Предмет'; img.draggable = false; img.dataset.icon = String(id);
+    box.appendChild(img);
+    return box;
+  }
+  window.OCSIcons = Object.freeze({ url: iconUrl }); // read-only hook for the UI tests / debugging
+
+  // ------------------------------------------------------------ live avatar previews (profile)
   const previews = []; // {cv, eq, cat, size, r, name}
   function addPreview(cv, eq, cat, opts = {}) { previews.push(Object.assign({ cv, eq, cat, size: 96, r: 18 }, opts)); return cv; }
   function pruneHidden(owner) { for (let i = previews.length - 1; i >= 0; i--) if (previews[i].owner === owner) previews.splice(i, 1); }
@@ -724,8 +826,8 @@
     for (const it of G.ITEMS.filter(i => i.cat === shopTab && i.price > 0 && i.sources.includes('shop'))) {
       const owned = owns(it.id);
       const el = document.createElement('div'); el.className = 'item rar-' + it.rarity;
-      const cv = document.createElement('canvas'); cv.width = 192; cv.height = 192;
-      el.appendChild(addPreview(cv, Object.assign({}, profile.equipped, { [it.cat]: it.id }), it.cat, { owner: 'shop' }));
+      el.dataset.item = it.id;
+      el.appendChild(iconEl(it.id));
       const nm = document.createElement('div'); nm.className = 'name'; nm.textContent = it.name; el.append(nm, rarityTag(it));
       const btn = document.createElement('button');
       if (owned) { btn.className = 'btn equipped'; btn.textContent = '✓ В инвентаре'; btn.disabled = true; }
@@ -767,10 +869,7 @@
       if (!def || (invTab !== 'all' && def.cat !== invTab)) return;
       shown++;
       const el = document.createElement('div'); el.className = 'item inv-item rar-' + def.rarity; el.dataset.item = def.id; el.dataset.slot = i;
-      if (def.type === 'cosmetic') {
-        const cv = document.createElement('canvas'); cv.width = 192; cv.height = 192;
-        el.appendChild(addPreview(cv, Object.assign({}, profile.equipped, { [def.cat]: def.id }), def.cat, { owner: 'inv' }));
-      } else { const ic = document.createElement('div'); ic.className = 'big-icon'; ic.style.color = rarityOf(def).color; ic.textContent = def.icon || '🎁'; el.appendChild(ic); }
+      el.appendChild(iconEl(def.id));
       if (def.stackable) { const q = document.createElement('span'); q.className = 'qty'; q.textContent = '×' + slot.q; el.appendChild(q); }
       const tb = document.createElement('button'); tb.type = 'button'; tb.className = 'trash-btn'; tb.title = 'Удалить'; tb.setAttribute('aria-label', 'Удалить ' + def.name); tb.textContent = '🗑';
       tb.onclick = e => { e.stopPropagation(); openTrash(i); };
@@ -822,12 +921,7 @@
     if (!def) return;
     trashSlot = { index: i, id: slot.id, q: slot.q };
     $('trashName').textContent = def.name + (def.stackable ? ` (в ячейке ${slot.q} шт.)` : '');
-    $('trashIcon').textContent = def.icon || '';
-    $('trashIcon').style.color = rarityOf(def).color;
-    pruneHidden('trash');
-    $('trashIcon').classList.toggle('hidden', def.type === 'cosmetic');
-    $('trashPreview').classList.toggle('hidden', def.type !== 'cosmetic');
-    if (def.type === 'cosmetic') addPreview($('trashPreview'), Object.assign({}, profile.equipped, { [def.cat]: def.id }), def.cat, { owner: 'trash' });
+    $('trashIco').replaceChildren(iconEl(def.id, 'lg'));
     const equipped = def.type === 'cosmetic' && profile.equipped[def.cat] === def.id;
     $('trashEquipped').classList.toggle('hidden', !equipped);
     $('trashQtyBox').classList.toggle('hidden', !def.stackable || slot.q < 2);
@@ -868,6 +962,11 @@
     pruneHidden('profile');
     addPreview($('pfAvatar'), Object.assign({}, p.equipped), 'all', { owner: 'profile', size: 120, r: 28, name: p.name });
     $('pfName').textContent = p.name;
+    $('pfEq').replaceChildren(...G.CATEGORIES.map(c => {
+      const id = p.equipped[c.key], def = G.ITEM_BY_ID[id];
+      const chip = iconEl(id, 'sm'); chip.title = `${c.name}: ${def ? def.name : '—'}`; chip.dataset.cat = c.key;
+      return chip;
+    }));
     $('pfRankLine').textContent = p.rank ? `🏆 Место в рейтинге: #${p.rank}` : '🏆 Пока без места в рейтинге — соберите первую сферу';
     $('pfSince').textContent = 'Аккаунт создан: ' + fmtDate(p.createdAt);
     $('pfBalance').textContent = fmt(p.balance) + ' ◉';
