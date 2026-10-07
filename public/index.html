@@ -122,7 +122,20 @@
     <div class="modal-head"><h2>🛒 Магазин</h2><div class="pill"><i class="dot c"></i><span class="bal">0</span></div><button class="close">✕</button></div>
     <p class="muted note">Купленные предметы попадают в <b>инвентарь</b> — надеть их можно там (кнопка «Инвентарь» или клавиша I).</p>
     <div class="tabs" id="shopTabs"></div>
+    <div class="shop-tools" id="shopTools">
+      <div class="rar-chips" id="shopRarity" role="group" aria-label="Редкость"></div>
+      <label class="shop-sort">Сортировка
+        <select id="shopSort">
+          <option value="price-asc">Сначала дешёвые</option>
+          <option value="price-desc">Сначала дорогие</option>
+          <option value="rarity">По редкости</option>
+          <option value="name">По названию</option>
+        </select>
+      </label>
+      <label class="shop-hide"><input type="checkbox" id="shopHideOwned"> Скрыть купленные</label>
+    </div>
     <div class="grid" id="shopGrid"></div>
+    <p class="muted shop-empty hidden" id="shopEmpty">Ничего не найдено — измените фильтр.</p>
   </div>
 </div>
 

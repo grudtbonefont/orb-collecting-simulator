@@ -40,6 +40,7 @@ const SPAWN = {
   candidates: 6,                   // cells sampled per spawn; the emptiest one wins
   legendFirst: legendEvery || 60000, legendMin: legendEvery || 90000, legendMax: legendEvery || 150000, // timed event
   legendLife: 75000, legendMaxAlive: 1,
+  legendWarnMs: 15000,             // «Чутьё легенды» lvl 3: heads-up (no position) this long before a legendary appears
 };
 
 const store = createStore();
@@ -56,7 +57,7 @@ function newAccount(name, passHash) {
   const a = {
     key: name.toLowerCase(), name, passHash, balance: 0, total: 0, inventory: INV.emptyInventory(),
     owned: G.DEFAULT_OWNED.slice(), equipped: Object.assign({}, G.DEFAULT_EQUIPPED),
-    upgrades: { magnet: 0, speed: 0 }, stats: { minigames: 0, bestReaction: null, bestRush: 0, sessions: 0, playMs: 0 },
+    upgrades: Object.fromEntries(G.UPGRADE_KEYS.map(k => [k, 0])), stats: { minigames: 0, bestReaction: null, bestRush: 0, sessions: 0, playMs: 0 },
     createdAt: now, lastSeen: now,
   };
   INV.migrateAccount(a);
@@ -112,7 +113,7 @@ const NX = Math.ceil(G.WORLD.w / SPAWN.cell), NY = Math.ceil(G.WORLD.h / SPAWN.c
 const cells = Array.from({ length: NX * NY }, () => new Set()); // orb ids per cell
 const cellOf = (x, y) => Math.min(NY - 1, Math.floor(y / SPAWN.cell)) * NX + Math.min(NX - 1, Math.floor(x / SPAWN.cell));
 let respawnQueue = [];      // due timestamps for normal orbs
-let legendaryAlive = 0, nextLegendAt = Date.now() + SPAWN.legendFirst;
+let legendaryAlive = 0, nextLegendAt = Date.now() + SPAWN.legendFirst, legendWarnedFor = 0;
 const targetOrbs = () => Math.max(SPAWN.min, Math.min(SPAWN.max, SPAWN.base + SPAWN.perPlayer * players.size));
 
 function spotIsFree(x, y) {
@@ -173,6 +174,11 @@ function spawnTick(now) {
   respawnQueue = keep;
   // legendary: a timed event with cooldown, only while someone is playing
   for (const o of orbs.values()) if (o.t === 'l' && o.expires <= now) removeOrb(o, 0);
+  if (now >= nextLegendAt - SPAWN.legendWarnMs && legendWarnedFor !== nextLegendAt && legendaryAlive < SPAWN.legendMaxAlive && players.size > 0) {
+    legendWarnedFor = nextLegendAt;
+    const inMs = Math.max(0, Math.round(nextLegendAt - now));
+    for (const pl of players.values()) if (G.upLevel('sense', pl.acc.upgrades.sense) >= 3) pl.socket.emit('legend:soon', { in: inMs });
+  }
   if (now >= nextLegendAt) {
     if (players.size > 0 && legendaryAlive < SPAWN.legendMaxAlive) {
       const pos = pickSpot();
@@ -352,6 +358,9 @@ function finishMinigame(pl, info) {
     if (mg.score > (s.bestRush || 0)) s.bestRush = mg.score;
   }
   if (info.aborted && mg.kind === 'reaction') prize = 0;
+  const basePrize = prize;
+  prize = G.skillPrize(prize, pl.acc.upgrades.skill); // «Мастер мини-игр»: +5/10/15 %, perfect play stays below half of farming
+  if (prize !== basePrize) result.bonus = prize - basePrize;
   result.prize = prize;
   pl.acc.balance += prize;
   pl.acc.total += prize;
@@ -442,7 +451,7 @@ io.on('connection', socket => {
     const spawn = { x: 200 + Math.random() * (G.WORLD.w - 400), y: 200 + Math.random() * (G.WORLD.h - 400) };
     pl = {
       id: newPublicId(), acc, socket, sessionHash, x: spawn.x, y: spawn.y,
-      inputs: [], budget: 2, lastSeq: 0, session: 0, gained: 0, rtt: 100, mg: null, joinedAt: Date.now(), chatTimes: [], lastChat: '',
+      inputs: [], budget: 2, lastSeq: 0, session: 0, gained: 0, lucky: 0, frac: 0, rtt: 100, mg: null, joinedAt: Date.now(), chatTimes: [], lastChat: '',
     };
     acc.lastSeen = Date.now();
     acc.stats.sessions = (acc.stats.sessions || 0) + 1;
@@ -692,7 +701,7 @@ io.on('connection', socket => {
     ack = safeAck(ack);
     if (!acct) return ack({ ok: false, error: 'Сначала войдите в аккаунт' });
     if (!has(G.UPGRADES, key)) return ack({ ok: false, error: 'Нет такого улучшения' });
-    const up = G.UPGRADES[key], a = acct.acc, lvl = a.upgrades[key] || 0;
+    const up = G.UPGRADES[key], a = acct.acc, lvl = G.upLevel(key, a.upgrades[key]);
     if (lvl >= up.max) return ack({ ok: false, error: 'Максимальный уровень' });
     const price = up.prices[lvl];
     if (a.balance < price) return ack({ ok: false, error: `Не хватает сфер: нужно ${price}` });
@@ -709,6 +718,13 @@ io.on('connection', socket => {
       const r = INV.grantItem(acct.acc, d.id, d.qty, d.source || 'admin');
       if (r.ok) accountChanged(acct.acc);
       ack(Object.assign(r, { profile: ownProfile(acct.acc) }));
+    });
+    socket.on('test:upgrades', (d, ack) => {
+      ack = safeAck(ack);
+      if (!acct || !isObj(d)) return ack({ ok: false });
+      for (const k of G.UPGRADE_KEYS) if (has(d, k)) acct.acc.upgrades[k] = G.upLevel(k, d[k]);
+      accountChanged(acct.acc);
+      ack({ ok: true, profile: ownProfile(acct.acc) });
     });
     socket.on('test:orbs', (n, ack) => {
       ack = safeAck(ack);
@@ -758,10 +774,12 @@ function collectAround(pl, radius, now) {
     const ot = G.ORB_TYPES[o.t];
     if (d2 > (radius + ot.r) ** 2) continue;
     removeOrb(o, pl.id);
-    pl.gained += ot.value;
-    pl.session += ot.value;
-    pl.acc.balance += ot.value;
-    pl.acc.total += ot.value;
+    const rw = G.orbReward(ot.value, pl.acc.upgrades, pl); // multiplier (fraction kept in pl.frac) + luck, server-side only
+    if (rw.lucky) pl.lucky++;
+    pl.gained += rw.value;
+    pl.session += rw.value;
+    pl.acc.balance += rw.value;
+    pl.acc.total += rw.value;
     if (o.t === 'l') {
       const g = INV.grantItem(pl.acc, 'x_legend_shard', 1, 'arena'); // example of a non-shop item source
       pl.socket.emit('item', g.ok ? { id: 'x_legend_shard', qty: 1, source: 'arena' } : { error: g.error });
@@ -784,7 +802,12 @@ function tick() {
       pl.lastSeq = inp.s;
       collectAround(pl, radius, now);
     }
-    if (pl.gained > 0) { markDirty(pl.acc); pl.socket.emit('bal', { b: pl.acc.balance, t: pl.acc.total, s: pl.session }); pl.gained = 0; }
+    if (pl.gained > 0) {
+      markDirty(pl.acc);
+      const msg = { b: pl.acc.balance, t: pl.acc.total, s: pl.session };
+      if (pl.lucky) msg.l = pl.lucky; // «Удача» triggered this tick (client shows ×2)
+      pl.socket.emit('bal', msg); pl.gained = 0; pl.lucky = 0;
+    }
   }
   spawnTick(now);
   const p = [];

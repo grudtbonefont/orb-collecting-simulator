@@ -163,6 +163,7 @@ canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: blo
 .chat-msg .n { font-weight: 700; color: #fff; }
 .chat-msg.sys { color: #8a93b8; font-style: italic; font-size: 12px; }
 .chat-msg.notice { color: #ff9aa6; }
+.paint-text { -webkit-background-clip: text; background-clip: text; color: transparent !important; text-shadow: none; }
 .rainbow-text { background: linear-gradient(90deg, #ff5f6d, #ffc371, #9dff4f, #3ee0ff, #b46bff); -webkit-background-clip: text; background-clip: text; color: transparent !important; text-shadow: none; }
 .chat-form { display: flex; gap: 6px; padding: 6px; }
 #chatInput { flex: 1; min-width: 0; font-size: 14px; padding: 7px 10px; border-radius: 10px; border: 1px solid rgba(120, 150, 255, .28);
@@ -271,3 +272,29 @@ canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: blo
 .ico.sm { width: 36px; height: 36px; border-radius: 10px; }
 .pf-eq { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
 @media (max-width: 640px) { .item .ico { width: 72px; height: 72px; border-radius: 14px; } .ico.sm { width: 32px; height: 32px; } }
+
+/* ---------------------------------------------------------------- shop filters / sorting + upgrade cards */
+.shop-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: -4px 0 12px; font-size: 13px; color: #aab3d9; }
+.shop-tools.hidden { display: none; }
+.rar-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.rar-chip { --rc: #9fb3d9; background: transparent; border: 1px solid color-mix(in srgb, var(--rc) 45%, transparent); color: var(--rc); padding: 4px 10px; border-radius: 16px; font-size: 12.5px; cursor: pointer; font-weight: 600; }
+.rar-chip.active { background: color-mix(in srgb, var(--rc) 20%, transparent); color: #fff; border-color: var(--rc); }
+.shop-sort { display: flex; align-items: center; gap: 6px; }
+.shop-sort select { background: #0f1530; color: #e8ecff; border: 1px solid rgba(120, 150, 255, .3); border-radius: 10px; padding: 5px 8px; font-size: 13px; }
+.shop-hide { display: flex; align-items: center; gap: 5px; cursor: pointer; user-select: none; }
+.shop-empty { text-align: center; padding: 20px 0; }
+.shop-empty.hidden { display: none; }
+.item .price { font-size: 12px; color: #8a93b8; }
+.up-card .up-level { display: flex; gap: 4px; justify-content: center; }
+.up-card .up-level i { width: 14px; height: 6px; border-radius: 3px; background: rgba(120, 150, 255, .22); }
+.up-card .up-level i.on { background: linear-gradient(90deg, #3ee0ff, #b46bff); box-shadow: 0 0 6px rgba(62, 224, 255, .6); }
+.up-card .up-eff { font-size: 12px; color: #cfd6f5; line-height: 1.35; }
+.up-card .up-eff .now { color: #8a93b8; }
+.up-card .up-eff .next { color: #9dff4f; font-weight: 600; }
+@media (max-width: 640px) {
+  .shop-tools { gap: 6px 10px; margin-top: -6px; }
+  .rar-chips { flex-wrap: nowrap; overflow-x: auto; width: 100%; scrollbar-width: none; padding-bottom: 2px; }
+  .rar-chip { flex: none; }
+  .shop-sort select { font-size: 12.5px; }
+  .up-card .up-eff { font-size: 11px; }
+}

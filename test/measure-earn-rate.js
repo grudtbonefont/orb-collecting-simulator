@@ -1,6 +1,7 @@
 // Earn-rate measurement used for pricing: node test/measure-earn-rate.js <bots> <seconds> [url]
 // Registers <bots> throw-away accounts on the given server (default http://localhost:3110 — use a scratch server, not production!)
 // and prints orbs/min per bot. HUMAN=1 makes the bots re-target only every 600 ms.
+// UPGRADES=max (or a JSON object like '{"magnet":5,"speed":5}') sets the bots' upgrade levels first — needs a server with OCS_TEST_HOOKS=1.
 const { io } = require('socket.io-client');
 const G = require('../public/shared.js');
 const URL = process.argv[4] || 'http://localhost:3110', N = +process.argv[2] || 1, SEC = +process.argv[3] || 60;
@@ -12,6 +13,8 @@ async function bot(i) {
   s.on('bal', v => { b.total = v.s; });
   s.on('sping', v => s.emit('spong', v));
   const r = await new Promise(res => s.emit('auth', { mode: 'register', name: 'Meas' + i + '_' + Math.floor(Math.random() * 1e5), password: 'measure-pass', confirm: 'measure-pass' }, res));
+  const want = process.env.UPGRADES === 'max' ? Object.fromEntries(G.UPGRADE_KEYS.map(k => [k, G.UPGRADES[k].max])) : process.env.UPGRADES ? JSON.parse(process.env.UPGRADES) : null;
+  if (want) { const u = await new Promise(res => s.emit('test:upgrades', want, res)); if (!u || !u.ok) throw new Error('test:upgrades failed — start the server with OCS_TEST_HOOKS=1'); }
   b.id = r.you; for (const o of r.orbs) b.orbs.set(o[0], { x: o[1], y: o[2], t: o[3] }); b.pos = r.players.find(p => p.id === r.you);
   const human = process.env.HUMAN === '1';
   const t0 = Date.now(); let target = null, retarget = 0;
@@ -30,4 +33,4 @@ async function bot(i) {
   return b.total / SEC * 60;
 }
 (async () => { const r = await Promise.all(Array.from({ length: N }, (_, i) => bot(i))); const h = await (await fetch(URL + '/api/health')).json();
-  console.log(`bots=${N} ${process.env.HUMAN === '1' ? '(human-like)' : '(greedy)'} orbs/min per bot:`, r.map(x => x.toFixed(0)).join(', '), 'avg', (r.reduce((a, b) => a + b, 0) / N).toFixed(0), 'orbs now', h.orbs, 'target', h.targetOrbs); process.exit(); })();
+  console.log(`bots=${N} ${process.env.HUMAN === '1' ? '(human-like)' : '(greedy)'} upgrades=${process.env.UPGRADES || 'none'} orbs/min per bot:`, r.map(x => x.toFixed(0)).join(', '), 'avg', (r.reduce((a, b) => a + b, 0) / N).toFixed(0), 'orbs now', h.orbs, 'target', h.targetOrbs); process.exit(); })();

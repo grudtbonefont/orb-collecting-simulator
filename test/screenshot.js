@@ -10,6 +10,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 let fails = 0;
 const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) { fails++; process.exitCode = 1; } };
 const PW = 'demo-pass-123';
+const SG = require('../public/shared.js');
 const CHROME = process.env.CHROME || ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find(p => fs.existsSync(p));
 
 async function startOwnServer(port, env = {}, seed = true) {
@@ -22,6 +23,7 @@ async function startOwnServer(port, env = {}, seed = true) {
   return { url: `http://localhost:${port}`, stop: () => { proc.kill('SIGTERM'); fs.rmSync(file, { force: true }); } };
 }
 const shot = (page, name) => page.screenshot({ path: path.join(ROOT, name) });
+const waitFor = async (fn, ms = 4000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = fn(); if (v) return v; await sleep(100); } return fn(); };
 
 function bot(url, name) {
   const s = io(url, { transports: ['websocket'], forceNew: true });
@@ -55,7 +57,7 @@ function bot(url, name) {
   const watch = page => { page.on('pageerror', e => errors.push(e.message)); page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); }); };
 
   // ---------------- item icons: every catalog item, distinct, non-empty, data-driven fallback
-  const galCtx = await browser.newContext({ viewport: { width: 1280, height: 1000 } });
+  const galCtx = await browser.newContext({ viewport: { width: 1840, height: 1100 } });
   const gal = await galCtx.newPage();
   watch(gal);
   await gal.goto(URL); await sleep(500);
@@ -71,6 +73,8 @@ function bot(url, name) {
     };
     const out = [];
     for (const it of G.ITEMS) { const url = window.OCSIcons.url(it.id); out.push({ id: it.id, url, cover: await opaque(url), again: window.OCSIcons.url(it.id) === url }); }
+    const ups = [];
+    for (const k of G.UPGRADE_KEYS) { const url = window.OCSIcons.url('u_' + k); ups.push({ id: 'u_' + k, url, cover: await opaque(url) }); }
     // future items: picked up by type/params; unknown art or ids → fallback gem
     G.ITEM_BY_ID.h_future = { id: 'h_future', type: 'cosmetic', cat: 'hat', value: 'crown', rarity: 'legendary', name: 'Будущая корона' };
     G.ITEM_BY_ID.x_future = { id: 'x_future', type: 'collectible', cat: 'misc', art: 'shard', rarity: 'epic', name: 'Будущий осколок' };
@@ -78,16 +82,20 @@ function bot(url, name) {
     const fut = { hat: window.OCSIcons.url('h_future') === window.OCSIcons.url('h_crown'), shard: window.OCSIcons.url('x_future') === window.OCSIcons.url('x_legend_shard'),
       odd: await opaque(window.OCSIcons.url('x_odd')), unknown: await opaque(window.OCSIcons.url('zz_unknown')) };
     delete G.ITEM_BY_ID.h_future; delete G.ITEM_BY_ID.x_future; delete G.ITEM_BY_ID.x_odd;
-    return { out, fut, unknownUrl: window.OCSIcons.url('zz_unknown') };
+    return { out, ups, fut, unknownUrl: window.OCSIcons.url('zz_unknown') };
   });
   const ITEMS = require('../public/shared.js').ITEMS;
   ok(icons.out.length === ITEMS.length && icons.out.every(x => /^data:image\/png;base64,/.test(x.url) && x.cover > 0.04),
     `every catalog item (${icons.out.length}) renders a non-empty PNG icon (min coverage ${Math.min(...icons.out.map(x => x.cover)).toFixed(2)})`);
-  ok(new Set(icons.out.map(x => x.url)).size === ITEMS.length && !icons.out.some(x => x.url === icons.unknownUrl), 'all icons are distinct (data URLs differ per item)');
+  ok(new Set(icons.out.map(x => x.url)).size === ITEMS.length && !icons.out.some(x => x.url === icons.unknownUrl), `all ${ITEMS.length} item icons are distinct (data URLs differ per item)`);
+  ok(icons.ups.length === SG.UPGRADE_KEYS.length && icons.ups.every(x => x.cover > 0.04) && new Set(icons.ups.map(x => x.url).concat(icons.out.map(x => x.url))).size === ITEMS.length + icons.ups.length,
+    `every upgrade (${icons.ups.length}) has its own non-empty icon, distinct from all item icons`);
   ok(icons.out.every(x => x.again), 'icons are cached (same data URL on the second request)');
   ok(icons.fut.hat && icons.fut.shard && icons.fut.odd > 0.04 && icons.fut.unknown > 0.04, 'future items get icons from their type/params; unknown art / ids get a fallback icon');
   await gal.evaluate(require('./icon-gallery.js'));
   await sleep(300);
+  const galH = await gal.evaluate(() => document.getElementById('iconGallery').scrollHeight);
+  ok(galH <= 1100, `icon gallery (all items grouped by category + upgrades) fits one screenshot (${galH}px)`);
   await shot(gal, 'screenshot-icons-all.png');
   await galCtx.close();
 
@@ -185,11 +193,38 @@ function bot(url, name) {
   // ---------------- shop: only sells; bought items land in the inventory
   await sleep(300);
   const shopState = await desk.evaluate(() => Array.from(document.querySelectorAll('#shopGrid .item')).map(e => [e.querySelector('.name').textContent, e.querySelector('button').textContent, e.querySelector('button').disabled]));
-  ok(shopState.length === 6 && !shopState.some(([n]) => n === 'Бирюзовый') && shopState.filter(x => /В инвентаре/.test(x[1])).length === 4 && shopState.some(x => /Купить · 2\s?400/.test(x[1]) && !x[2]),
-    'shop lists only paid items with prices; owned ones say «В инвентаре»: ' + shopState.map(x => x[0] + '=' + x[1]).join(', '));
+  const paidColors = SG.ITEMS.filter(i => i.cat === 'color' && i.price > 0).length;
+  ok(shopState.length === paidColors && !shopState.some(([n]) => n === 'Бирюзовый') && shopState.filter(x => /В инвентаре/.test(x[1])).length === 4 && shopState.some(x => /Купить · 2\s?400/.test(x[1]) && !x[2]),
+    `shop lists only paid items (${shopState.length} colours) with prices; owned ones say «В инвентаре»`);
+  const shopPrices = await desk.evaluate(() => Array.from(document.querySelectorAll('#shopGrid .item[data-item]')).map(e => G.ITEM_BY_ID[e.dataset.item].price));
+  ok(shopPrices.every((p, i) => !i || p >= shopPrices[i - 1]), 'default sort: cheapest first');
   const shopIcons = await desk.evaluate(() => Array.from(document.querySelectorAll('#shopGrid .item[data-item]')).map(e => { const i = e.querySelector('.ico img'); return !!i && i.dataset.icon === e.dataset.item && i.complete && i.naturalWidth > 0; }));
-  ok(shopIcons.length === 6 && shopIcons.every(Boolean), 'every shop card shows its own item icon');
+  ok(shopIcons.length === paidColors && shopIcons.every(Boolean), 'every shop card shows its own item icon');
   await shot(desk, 'screenshot-shop.png');
+  const shopIds = () => desk.evaluate(() => Array.from(document.querySelectorAll('#shopGrid .item[data-item]')).map(e => e.dataset.item));
+  await desk.click('#shopRarity [data-rarity=legendary]'); await sleep(150);
+  const leg = await shopIds();
+  ok(leg.length === SG.ITEMS.filter(i => i.cat === 'color' && i.rarity === 'legendary').length && leg.every(id => SG.ITEM_BY_ID[id].rarity === 'legendary'), 'rarity filter: only legendary colours — ' + leg.join(', '));
+  await desk.click('#shopRarity [data-rarity=all]');
+  await desk.selectOption('#shopSort', 'price-desc'); await sleep(150);
+  const desc = await shopIds();
+  ok(SG.ITEM_BY_ID[desc[0]].price === Math.max(...SG.ITEMS.filter(i => i.cat === 'color').map(i => i.price)), 'sort «Сначала дорогие»: most expensive first (' + desc[0] + ')');
+  await desk.selectOption('#shopSort', 'rarity'); await sleep(150);
+  const RR = { common: 0, rare: 1, epic: 2, legendary: 3 }, byR = (await shopIds()).map(id => RR[SG.ITEM_BY_ID[id].rarity]);
+  ok(byR.every((r, i) => !i || r >= byR[i - 1]), 'sort «По редкости»: common → legendary');
+  await desk.check('#shopHideOwned'); await sleep(150);
+  ok((await shopIds()).length === paidColors - 4, '«Скрыть купленные» hides the 4 owned colours');
+  await desk.click('#shopTabs .tab[data-tab=hat]'); await sleep(150);
+  ok(await desk.evaluate(() => document.querySelectorAll('#shopGrid .item[data-item]').length) === SG.ITEMS.filter(i => i.cat === 'hat' && i.price > 0).length - 3 && await desk.isVisible('#shopTools'), 'filters stay active across category tabs (hats minus the 3 owned)');
+  await desk.uncheck('#shopHideOwned'); await desk.selectOption('#shopSort', 'price-asc');
+  await desk.click('#shopTabs .tab[data-tab=upgrades]'); await sleep(200);
+  const ups = await desk.evaluate(() => Array.from(document.querySelectorAll('#shopGrid .up-card')).map(e => ({ k: e.dataset.up, name: e.querySelector('.name').textContent, eff: e.querySelector('.up-eff').textContent, btn: e.querySelector('button').textContent, icon: (e.querySelector('.ico img') || {}).dataset && e.querySelector('.ico img').dataset.icon })));
+  const mag = ups.find(u => u.k === 'magnet') || {};
+  ok(ups.length === SG.UPGRADE_KEYS.length && ups.every(u => u.icon === 'u_' + u.k) && !(await desk.isVisible('#shopTools')), `upgrades tab: ${ups.length} cards with their own icons (filters hidden)`);
+  ok(/ур\. 2\/5/.test(mag.name) && mag.eff.includes('Сейчас: ' + SG.upgradeText('magnet', 2)) && mag.eff.includes('→ ' + SG.upgradeText('magnet', 3)) && new RegExp('Улучшить · ' + SG.UPGRADES.magnet.prices[2].toLocaleString('ru-RU').replace(/\s/g, '\\s')).test(mag.btn),
+    `upgrade card shows level, current → next effect and cost: ${mag.name} | ${mag.eff} | ${mag.btn}`);
+  await shot(desk, 'screenshot-shop-upgrades.png');
+  await desk.click('#shopTabs .tab[data-tab=color]'); await sleep(150);
   const hudBal = () => desk.evaluate(() => Number(document.querySelector('#hudBalance').textContent.replace(/\s/g, '')));
   const violetBtn = desk.locator('#shopGrid .item', { hasText: 'Фиолетовый' }).locator('button');
   const balBefore = await hudBal();
@@ -356,6 +391,21 @@ function bot(url, name) {
   await mob.tap('#trashOk'); await sleep(500);
   ok(await mob.locator('#invGrid [data-item=s_square]').count() === 0 && /Занято 4\/100/.test(await mob.textContent('#invCount')), 'mobile: item deleted via the 🗑 button');
   await mob.tap('#inv .close');
+  // mobile shop: 3-column grid, filters fit, nothing overflows sideways
+  await sleep(3200); // let the «Удалено» toast fade before the shop screenshot
+  await mob.tap('.menu-buttons [data-open=shop]'); await sleep(500);
+  const ms = await mob.evaluate(() => {
+    const card = document.querySelector('#shop .modal-card'), grid = document.getElementById('shopGrid'), tools = document.getElementById('shopTools').getBoundingClientRect();
+    const items = Array.from(grid.querySelectorAll('.item')).map(e => e.getBoundingClientRect());
+    return { cols: getComputedStyle(grid).gridTemplateColumns.split(' ').length, w: card.getBoundingClientRect().width, over: card.scrollWidth - card.clientWidth,
+      toolsRight: tools.right, itemsIn: items.every(r => r.left >= 0 && r.right <= 390), n: items.length };
+  });
+  ok(ms.cols >= 3 && ms.w <= 390 && ms.over <= 1 && ms.toolsRight <= 390 && ms.itemsIn && ms.n > 10, `mobile shop: ${ms.cols}-column grid, ${ms.n} cards, filters fit (right edge ${Math.round(ms.toolsRight)}px), no sideways overflow`);
+  await mob.tap('#shopRarity [data-rarity=epic]'); await sleep(200);
+  ok(await mob.evaluate(() => Array.from(document.querySelectorAll('#shopGrid .item[data-item]')).every(e => G.ITEM_BY_ID[e.dataset.item].rarity === 'epic')), 'mobile: rarity filter works by tap');
+  await mob.tap('#shopRarity [data-rarity=all]'); await sleep(200);
+  await shot(mob, 'screenshot-shop-mobile.png');
+  await mob.tap('#shop .close');
 
   // opening the site with a saved session shows the profile first; «Играть» there kicks the other tab
   const tab2 = await deskCtx.newPage();
@@ -384,6 +434,68 @@ function bot(url, name) {
   const rr = await new Promise(r => s.emit('resume', { token }, r));
   ok(!rr.ok, 'logged-out token can no longer be used');
   s.close();
+
+  // ---------------- arena with the new cosmetics: 7 bots wear every new item (2 rounds), then a showcase screenshot
+  const arena = process.argv[2] ? null : await startOwnServer(3106, { OCS_TEST_HOOKS: '1' }, false);
+  if (arena) {
+    const vctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+    const vp = await vctx.newPage();
+    watch(vp);
+    await vp.goto(arena.url); await sleep(500);
+    await vp.click('.auth-tab[data-mode=register]');
+    await vp.fill('#nick', 'Viewer'); await vp.fill('#pass', PW); await vp.fill('#pass2', PW);
+    await vp.click('#authSubmit');
+    await vp.waitForSelector('#profile:not(.hidden)', { timeout: 10000 });
+    await vp.click('#pfPlay');
+    await vp.waitForSelector('#hud:not(.hidden)', { timeout: 10000 });
+    const names = ['Lava_Lord', 'Aurora', 'GearHead', 'Sunny', 'Mint', 'Crimson', 'Leafy'];
+    const NEWI = SG.ITEMS.filter(i => i.type === 'cosmetic' && !['c_cyan', 'c_coral', 'c_lime', 'c_violet', 'c_pink', 'c_gold', 'c_rainbow', 's_circle', 's_square', 's_triangle', 's_hexagon', 's_star',
+      't_none', 't_sparks', 't_neon', 't_fire', 'n_white', 'n_pink', 'n_gold', 'n_rainbow', 'h_none', 'h_cap', 'h_tophat', 'h_halo', 'h_crown'].includes(i.id));
+    const byCat = Object.fromEntries(SG.CATEGORIES.map(c => [c.key, NEWI.filter(i => i.cat === c.key).map(i => i.id)]));
+    const abots = names.map(n => bot(arena.url, n));
+    const call = (b, ev, arg) => new Promise(res => b.s.emit(ev, arg, res));
+    for (const b of abots) {
+      const r = await new Promise(res => b.s.emit('auth', { mode: 'register', name: b.name, password: PW, confirm: PW }, res));
+      b.id = r.you; for (const p of r.players) { b.ids.set(p.name, p.id); if (p.id === r.you) b.pos = { x: p.x, y: p.y }; }
+      for (const id of NEWI.map(i => i.id)) await call(b, 'test:grant', { id, qty: 1, source: 'event' });
+    }
+    const viewerPos = () => { const id = abots[0].ids.get('Viewer'); return id && abots[0].positions.get(id); };
+    abots.forEach((b, i) => { b.timer = setInterval(() => {
+      const t = viewerPos(); if (!b.pos || !t) return;
+      const ang = Date.now() / 1500 + i * (Math.PI * 2 / abots.length), rad = 150 + (i % 3) * 55;
+      const tx = t.x + Math.cos(ang) * rad * 1.5, ty = t.y + Math.sin(ang) * rad * 0.85;
+      let dx = tx - b.pos.x, dy = ty - b.pos.y; const l = Math.hypot(dx, dy);
+      if (l < 6) { dx = dy = 0; } else { dx /= l; dy /= l; }
+      b.s.emit('input', { s: ++b.seq, x: dx, y: dy });
+    }, 50); });
+    const near = async () => { for (let i = 0; i < 300; i++) { const v = viewerPos(); if (v && abots.every(b => b.pos && Math.hypot(b.pos.x - v.x, b.pos.y - v.y) < 520)) return true; await sleep(100); } return false; };
+    ok(await near(), 'arena: 7 bots gathered around the viewer');
+    const worn = new Set(), errBefore = errors.length;
+    for (let round = 0; round < 2; round++) {
+      for (let i = 0; i < abots.length; i++) for (const c of SG.CATEGORIES) {
+        const l = byCat[c.key], id = l[(i + round * abots.length) % l.length];
+        const r = await call(abots[i], 'inv:equip', id); if (r && r.ok) worn.add(id);
+      }
+      await sleep(1600); // several frames with these looks (trails need movement)
+    }
+    ok(worn.size === NEWI.length, `arena: all ${NEWI.length} new cosmetics worn by players on screen (${worn.size})`);
+    ok(errors.length === errBefore, 'arena renders every new cosmetic without errors' + (errors.length > errBefore ? ': ' + errors.slice(errBefore).join(' | ') : ''));
+    const showcase = [
+      ['c_lava', 's_blob', 't_galaxy', 'n_glitch', 'h_wizard'], ['c_aurora', 's_heart', 't_hearts', 'n_ocean', 'h_bunny'], ['c_galaxy', 's_gear', 't_lightning', 'n_neon', 'h_viking'],
+      ['c_sunset', 's_flower', 't_rainbow', 'n_fire', 'h_party'], ['c_mint', 's_drop', 't_bubbles', 'n_ice', 'h_cat'], ['c_crimson', 's_cross', 't_stars', 'n_red', 'h_horns'],
+      ['c_orange', 's_diamond', 't_leaves', 'n_green', 'h_propeller'],
+    ];
+    for (let i = 0; i < abots.length; i++) for (const id of showcase[i]) await call(abots[i], 'inv:equip', id);
+    await sleep(2500);
+    const seen = await waitFor(() => { const m = abots[1].metas.get(abots[0].id); return m && m.eq.hat === 'h_wizard' && m; });
+    ok(!!seen, 'other players see the new look (pmeta): ' + (seen && JSON.stringify(seen.eq)));
+    const px = await vp.evaluate(() => { const c = document.getElementById('game'); return c ? c.width * c.height : 0; });
+    ok(px > 0, 'arena canvas is drawing');
+    await shot(vp, 'screenshot-arena-cosmetics.png');
+    for (const b of abots) b.close();
+    await vctx.close();
+    arena.stop();
+  }
 
   // chat auto-clear in the UI (separate server with a 4 s cycle)
   const cyc = process.argv[2] ? null : await startOwnServer(3105, { CHAT_CLEAR_MS: '4000' }, false);

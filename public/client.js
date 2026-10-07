@@ -47,7 +47,17 @@
   const fmt = n => Number(n).toLocaleString('ru-RU');
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const rainbow = (t, off = 0) => `hsl(${((t * 90 + off) % 360 + 360) % 360},100%,62%)`;
-  const colorOf = (eq, t) => { const v = itemVal(eq.color) || '#3ee0ff'; return v === 'rainbow' ? rainbow(t) : v; };
+  // multi-colour paints (G.PAINTS): colours are cycled slowly — one interpolated colour per call, cheap enough for every frame
+  const hexRgb = h => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+  const PAINT_RGB = {};
+  for (const [k, p] of Object.entries(G.PAINTS)) PAINT_RGB[k] = p.stops.map(hexRgb);
+  const paintOf = v => (typeof v === 'string' && Object.prototype.hasOwnProperty.call(G.PAINTS, v) ? G.PAINTS[v] : null);
+  function paintAt(v, x) {
+    const c = PAINT_RGB[v], n = c.length; if (n === 1) return `rgb(${c[0][0]},${c[0][1]},${c[0][2]})`;
+    const m = ((x % n) + n) % n, i = Math.floor(m), f = m - i, a = c[i], b = c[(i + 1) % n];
+    return `rgb(${(a[0] + (b[0] - a[0]) * f) | 0},${(a[1] + (b[1] - a[1]) * f) | 0},${(a[2] + (b[2] - a[2]) * f) | 0})`;
+  }
+  const colorOf = (eq, t) => { const v = itemVal(eq.color) || '#3ee0ff'; return v === 'rainbow' ? rainbow(t) : paintOf(v) ? paintAt(v, t * 0.6) : v; };
 
   function toast(text, kind) {
     const el = document.createElement('div');
@@ -219,6 +229,7 @@
   socket.on('pmeta', p => { const pl = players.get(p.id); if (pl) { pl.eq = p.eq; pl.name = p.name; } });
   socket.on('sping', v => socket.emit('spong', v));
   socket.on('announce', a => toast('✨ ' + a.text));
+  socket.on('legend:soon', d => { const sec = Math.max(1, Math.round(((d && d.in) || 0) / 1000)); toast(`🧭 Чутьё легенды: легендарная сфера появится через ~${sec} с`, 'ok'); });
 
   socket.on('s', st => {
     if (!joined) return;
@@ -257,6 +268,7 @@
 
   socket.on('bal', b => {
     if (!profile) return;
+    if (b.l > 0 && joined) floaters.push({ x: dispMe.x + 18, y: dispMe.y - 30, text: '×2!', color: '#4fd36b', start: performance.now(), big: true }); // «Удача»
     profile.balance = b.b; profile.total = b.t; sessionScore = b.s;
     updateHud(true);
   });
@@ -387,7 +399,10 @@
     }
   }
 
-  const SHAPE_TOP = { circle: 1, square: 0.9, triangle: 1.15, hexagon: 1.05, star: 1.3 };
+  const SHAPE_TOP = { circle: 1, square: 0.9, triangle: 1.15, hexagon: 1.05, star: 1.3,
+    diamond: 1.3, pentagon: 1.12, octagon: 1.0, drop: 1.5, cross: 1.15, heart: 0.95, gear: 1.15, flower: 1.15, blob: 1.08 };
+  function polarPath(g, n, rf) { for (let i = 0; i <= n; i++) { const a = i / n * Math.PI * 2, rr = rf(a); const x = Math.cos(a) * rr, y = Math.sin(a) * rr; i ? g.lineTo(x, y) : g.moveTo(x, y); } }
+  function polyPath(g, n, rr, rot) { for (let i = 0; i < n; i++) { const a = rot + i * 2 * Math.PI / n; const x = Math.cos(a) * rr, y = Math.sin(a) * rr; i ? g.lineTo(x, y) : g.moveTo(x, y); } }
   function shapePath(g, shape, r, t) {
     g.beginPath();
     if (shape === 'square') {
@@ -401,6 +416,33 @@
     } else if (shape === 'star') {
       const rot = t * 0.6;
       for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5 + rot; const rr = i % 2 ? r * 0.62 : r * 1.3; const x = Math.cos(a) * rr, y = Math.sin(a) * rr; i ? g.lineTo(x, y) : g.moveTo(x, y); }
+    } else if (shape === 'diamond') {
+      g.moveTo(0, -r * 1.3); g.lineTo(r * 1.1, 0); g.lineTo(0, r * 1.3); g.lineTo(-r * 1.1, 0);
+    } else if (shape === 'pentagon') {
+      polyPath(g, 5, r * 1.12, -Math.PI / 2);
+    } else if (shape === 'octagon') {
+      polyPath(g, 8, r * 1.07, Math.PI / 8);
+    } else if (shape === 'drop') { // teardrop, tip up
+      const cy = r * 0.12, tip = -r * 1.5, a = Math.acos(r / (cy - tip));
+      g.moveTo(0, tip); g.arc(0, cy, r, -Math.PI / 2 + a, -Math.PI / 2 - a + Math.PI * 2);
+    } else if (shape === 'cross') {
+      const a = r * 0.45, b = r * 1.15;
+      [[-a, -b], [a, -b], [a, -a], [b, -a], [b, a], [a, a], [a, b], [-a, b], [-a, a], [-b, a], [-b, -a], [-a, -a]].forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
+    } else if (shape === 'heart') {
+      g.moveTo(0, r * 1.15);
+      g.bezierCurveTo(-r * 1.55, r * 0.05, -r * 1.05, -r * 1.3, 0, -r * 0.5);
+      g.bezierCurveTo(r * 1.05, -r * 1.3, r * 1.55, r * 0.05, 0, r * 1.15);
+    } else if (shape === 'gear') {
+      const rot = t * 0.5, n = 10, ro = r * 1.18, ri = r * 0.96;
+      for (let i = 0; i < n; i++) {
+        const a = rot + i * 2 * Math.PI / n, s = Math.PI / n;
+        const pts = [[ri, a - s * 0.95], [ro, a - s * 0.5], [ro, a + s * 0.5], [ri, a + s * 0.95]];
+        pts.forEach(([rr, aa], j) => { const x = Math.cos(aa) * rr, y = Math.sin(aa) * rr; i || j ? g.lineTo(x, y) : g.moveTo(x, y); });
+      }
+    } else if (shape === 'flower') {
+      const rot = t * 0.3; polarPath(g, 48, a => r * (0.97 + 0.2 * Math.cos(6 * (a - rot))));
+    } else if (shape === 'blob') { // wobbling jelly (legendary)
+      polarPath(g, 32, a => r * (1.02 + 0.08 * Math.sin(3 * a + t * 3) + 0.05 * Math.sin(5 * a - t * 2.3)));
     } else {
       g.arc(0, 0, r, 0, Math.PI * 2);
     }
@@ -430,23 +472,96 @@
       g.shadowBlur = 0;
       const gems = ['#ff4d6d', '#3ee0ff', '#9dff4f'];
       [-w * 0.55, 0, w * 0.55].forEach((gx, i) => { g.fillStyle = gems[i]; g.beginPath(); g.arc(gx, by - h * 0.22, 2.6, 0, Math.PI * 2); g.fill(); });
+    } else if (hat === 'beanie') {
+      g.fillStyle = '#35b9aa'; g.beginPath(); g.arc(0, y + 6, r * 0.78, Math.PI, 0); g.closePath(); g.fill();
+      g.strokeStyle = 'rgba(255,255,255,0.25)'; g.lineWidth = 1.2; g.beginPath();
+      for (let i = -2; i <= 2; i++) { g.moveTo(i * r * 0.2, y + 2); g.lineTo(i * r * 0.16, y + 6 - r * 0.66); } g.stroke();
+      g.fillStyle = '#23887d'; g.beginPath(); g.roundRect(-r * 0.84, y + 1, r * 1.68, 6, 3); g.fill();
+      g.fillStyle = '#f2f6ff'; g.beginPath(); g.arc(0, y + 6 - r * 0.8, 4, 0, Math.PI * 2); g.fill();
+    } else if (hat === 'party') {
+      const h = r * 1.25;
+      g.save(); g.beginPath(); g.moveTo(-r * 0.5, y + 4); g.lineTo(r * 0.5, y + 4); g.lineTo(0, y + 4 - h); g.closePath();
+      g.fillStyle = '#ff5fd2'; g.fill(); g.clip();
+      g.strokeStyle = '#ffd34d'; g.lineWidth = 3.5; g.beginPath();
+      for (let i = 0; i < 4; i++) { const yy = y + 4 - i * h * 0.3; g.moveTo(-r, yy + 4); g.lineTo(r, yy - 6); } g.stroke(); g.restore();
+      g.fillStyle = '#3ee0ff'; g.shadowColor = '#3ee0ff'; g.shadowBlur = 6; g.beginPath(); g.arc(0, y + 4 - h, 3.5, 0, Math.PI * 2); g.fill();
+    } else if (hat === 'bunny') {
+      for (const s of [-1, 1]) {
+        g.save(); g.translate(s * r * 0.36, y + 2); g.rotate(s * (0.2 + Math.sin(t * 2.2 + s) * 0.05));
+        g.fillStyle = '#f4f4ff'; g.beginPath(); g.ellipse(0, -r * 0.6, r * 0.22, r * 0.66, 0, 0, Math.PI * 2); g.fill();
+        g.fillStyle = '#ffb3d1'; g.beginPath(); g.ellipse(0, -r * 0.58, r * 0.11, r * 0.48, 0, 0, Math.PI * 2); g.fill();
+        g.restore();
+      }
+    } else if (hat === 'cat') {
+      for (const s of [-1, 1]) {
+        g.fillStyle = '#2f2b45'; g.beginPath(); g.moveTo(s * r * 0.92, y + r * 0.42); g.lineTo(s * r * 0.78, y - r * 0.5); g.lineTo(s * r * 0.18, y + r * 0.06); g.closePath(); g.fill();
+        g.fillStyle = '#ff9ccc'; g.beginPath(); g.moveTo(s * r * 0.78, y + r * 0.26); g.lineTo(s * r * 0.72, y - r * 0.24); g.lineTo(s * r * 0.38, y + r * 0.08); g.closePath(); g.fill();
+      }
+    } else if (hat === 'headphones') {
+      g.strokeStyle = '#2b2f45'; g.lineWidth = 4; g.beginPath(); g.arc(0, 0, top * r + 3, Math.PI + 0.35, -0.35); g.stroke();
+      g.fillStyle = '#ff4d6d'; g.shadowColor = '#ff4d6d'; g.shadowBlur = 8;
+      for (const s of [-1, 1]) { g.beginPath(); g.roundRect(s * (r * 1.02) - 4.5, -r * 0.45, 9, 15, 4); g.fill(); }
+    } else if (hat === 'cowboy') {
+      g.fillStyle = '#9a5a26'; g.beginPath(); g.ellipse(0, y + 3, r * 1.2, r * 0.24, 0, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#b8733a'; g.beginPath(); g.moveTo(-r * 0.58, y + 3); g.lineTo(-r * 0.5, y - r * 0.62);
+      g.quadraticCurveTo(0, y - r * 0.35, r * 0.5, y - r * 0.62); g.lineTo(r * 0.58, y + 3); g.closePath(); g.fill();
+      g.fillStyle = '#5a3415'; g.fillRect(-r * 0.57, y - 2, r * 1.14, 4);
+    } else if (hat === 'horns') {
+      for (const s of [-1, 1]) {
+        const gr = g.createLinearGradient(0, y + 5, 0, y - r * 0.75); gr.addColorStop(0, '#c41f2f'); gr.addColorStop(1, '#ff6b5e');
+        g.fillStyle = gr; g.beginPath(); g.moveTo(s * r * 0.62, y + 6); g.quadraticCurveTo(s * r * 1.08, y - r * 0.1, s * r * 0.92, y - r * 0.75);
+        g.quadraticCurveTo(s * r * 0.68, y - r * 0.15, s * r * 0.22, y + 4); g.closePath(); g.fill();
+      }
+    } else if (hat === 'viking') {
+      for (const s of [-1, 1]) {
+        g.fillStyle = '#f1e6c8'; g.beginPath(); g.moveTo(s * r * 0.7, y + 4); g.quadraticCurveTo(s * r * 1.3, y - r * 0.05, s * r * 1.22, y - r * 0.85);
+        g.quadraticCurveTo(s * r * 1.02, y - r * 0.2, s * r * 0.55, y - 2); g.closePath(); g.fill();
+      }
+      g.fillStyle = '#9aa3b5'; g.beginPath(); g.arc(0, y + 7, r * 0.8, Math.PI, 0); g.closePath(); g.fill();
+      g.fillStyle = '#6b5332'; g.fillRect(-r * 0.82, y + 3, r * 1.64, 5);
+      g.fillStyle = 'rgba(255,255,255,0.35)'; g.beginPath(); g.arc(-r * 0.25, y - r * 0.25, 3, 0, Math.PI * 2); g.fill();
+    } else if (hat === 'propeller') {
+      const segs = ['#ff4d6d', '#ffd34d', '#3e8bff'];
+      for (let i = 0; i < 3; i++) { g.fillStyle = segs[i]; g.beginPath(); g.moveTo(0, y + 5); g.arc(0, y + 5, r * 0.72, Math.PI + i * Math.PI / 3, Math.PI + (i + 1) * Math.PI / 3); g.closePath(); g.fill(); }
+      g.strokeStyle = '#dfe6ff'; g.lineWidth = 2; g.beginPath(); g.moveTo(0, y + 5 - r * 0.72); g.lineTo(0, y - r * 0.95); g.stroke();
+      const w = r * 0.85 * Math.abs(Math.cos(t * 9)) + 2;
+      g.fillStyle = '#3ee0ff'; g.beginPath(); g.ellipse(-w / 2, y - r * 0.95, w / 2, 2.6, 0, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#ff4d6d'; g.beginPath(); g.ellipse(w / 2, y - r * 0.95, w / 2, 2.6, 0, 0, Math.PI * 2); g.fill();
+    } else if (hat === 'wizard') {
+      g.fillStyle = '#3a2a8f'; g.beginPath(); g.ellipse(0, y + 4, r * 0.98, r * 0.2, 0, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#5236c9'; g.beginPath(); g.moveTo(-r * 0.56, y + 3); g.quadraticCurveTo(-r * 0.2, y - r * 0.8, r * 0.3, y - r * 1.62);
+      g.quadraticCurveTo(r * 0.18, y - r * 0.7, r * 0.56, y + 3); g.closePath(); g.fill();
+      g.fillStyle = '#ffd34d'; g.fillRect(-r * 0.52, y - 1, r * 1.04, 3.5);
+      g.shadowColor = '#ffe680'; g.shadowBlur = 8;
+      [[-r * 0.12, y - r * 0.45, 3.2, 0], [r * 0.16, y - r * 0.95, 2.4, 1.7], [r * 0.3, y - r * 1.62, 3 + Math.sin(t * 4) * 0.8, 3.1]].forEach(([sx, sy, sr, ph]) => {
+        g.globalAlpha = 0.65 + 0.35 * Math.sin(t * 3 + ph); g.fillStyle = '#fff3a0'; g.beginPath();
+        g.moveTo(sx, sy - sr); g.quadraticCurveTo(sx, sy, sx + sr, sy); g.quadraticCurveTo(sx, sy, sx, sy + sr); g.quadraticCurveTo(sx, sy, sx - sr, sy); g.quadraticCurveTo(sx, sy, sx, sy - sr); g.fill();
+      });
+      g.globalAlpha = 1;
     }
     g.restore();
   }
+  // vertical room the hat takes above the body (nickname is drawn above it)
+  const HAT_ROOM = { none: () => 10, tophat: r => r * 1.05 + 8, party: r => r * 1.25 + 4, bunny: r => r * 1.2 + 4, wizard: r => r * 1.62 + 6,
+    propeller: r => r * 0.95 + 6, viking: r => r * 0.85 + 6, cowboy: r => r * 0.62 + 8, headphones: () => 14, cat: r => r * 0.5 + 8 };
+  const hatRoom = (hat, r) => (HAT_ROOM[hat] ? HAT_ROOM[hat](r) : 22);
 
   function drawAvatar(g, x, y, r, eq, t, opts = {}) {
     const color = opts.color || colorOf(eq, t + (opts.phase || 0));
+    const paintKey = opts.color ? null : itemVal(eq.color), paint = paintOf(paintKey);
+    const color2 = paint ? paintAt(paintKey, (t + (opts.phase || 0)) * 0.6 + paint.stops.length / 2) : color;
     const shape = itemVal(eq.shape) || 'circle';
     const top = SHAPE_TOP[shape] || 1;
     g.save(); g.translate(x, y);
-    g.shadowColor = color; g.shadowBlur = opts.isMe ? 26 : 18;
+    g.shadowColor = color; g.shadowBlur = (opts.isMe ? 26 : 18) + (paint && paint.fx === 'embers' ? 6 + 6 * Math.sin(t * 4) : 0);
     shapePath(g, shape, r, t);
     const grd = g.createRadialGradient(-r * 0.4, -r * 0.45, r * 0.1, 0, 0, r * 1.4);
-    grd.addColorStop(0, 'rgba(255,255,255,0.9)'); grd.addColorStop(0.25, color); grd.addColorStop(1, color);
+    grd.addColorStop(0, 'rgba(255,255,255,0.9)'); grd.addColorStop(0.25, color); grd.addColorStop(1, color2);
     g.fillStyle = grd; g.fill();
-    if (opts.staticRainbow && itemVal(eq.color) === 'rainbow') { // icons: whole rainbow at once instead of the animated hue
+    if (opts.staticRainbow && (itemVal(eq.color) === 'rainbow' || paint)) { // icons: whole rainbow / paint at once instead of the animated colour
       const rb = g.createLinearGradient(-r, -r, r, r);
-      for (let i = 0; i <= 5; i++) rb.addColorStop(i / 5, `hsl(${i * 60},100%,62%)`);
+      if (paint) paint.stops.forEach((c, i) => rb.addColorStop(i / Math.max(1, paint.stops.length - 1), c));
+      else for (let i = 0; i <= 5; i++) rb.addColorStop(i / 5, `hsl(${i * 60},100%,62%)`);
       g.fillStyle = rb; g.fill();
       const hl = g.createRadialGradient(-r * 0.4, -r * 0.45, r * 0.05, -r * 0.2, -r * 0.2, r * 1.1);
       hl.addColorStop(0, 'rgba(255,255,255,0.85)'); hl.addColorStop(0.35, 'rgba(255,255,255,0.12)'); hl.addColorStop(1, 'rgba(255,255,255,0)');
@@ -454,6 +569,16 @@
     }
     g.shadowBlur = 0;
     g.lineWidth = 2; g.strokeStyle = 'rgba(255,255,255,0.45)'; g.stroke();
+    if (paint && paint.fx === 'stars') { // galaxy: a few twinkling stars on the body
+      g.fillStyle = '#fff';
+      [[-0.45, 0.35, 0], [0.42, -0.05, 2.1], [0.1, 0.55, 4.2], [-0.15, -0.5, 1.3]].forEach(([sx, sy, ph]) => {
+        g.globalAlpha = 0.35 + 0.65 * Math.abs(Math.sin(t * 2.2 + ph)); g.beginPath(); g.arc(sx * r, sy * r, r * 0.07, 0, Math.PI * 2); g.fill();
+      });
+      g.globalAlpha = 1;
+    } else if (paint && paint.fx === 'embers') { // lava: dark crust patches
+      g.fillStyle = 'rgba(40,6,0,0.45)';
+      [[-0.5, 0.4, 0.22], [0.45, 0.35, 0.16], [0.05, 0.7, 0.13]].forEach(([sx, sy, sr]) => { g.beginPath(); g.arc(sx * r, sy * r, sr * r, 0, Math.PI * 2); g.fill(); });
+    }
     // eyes
     const d = opts.dir || { x: 1, y: 0 };
     for (const s of [-1, 1]) {
@@ -464,7 +589,7 @@
     const hat = itemVal(eq.hat) || 'none';
     if (hat !== 'none') drawHat(g, hat, r, top, t);
     if (opts.name) {
-      const ny = -top * r - (hat === 'none' ? 10 : hat === 'tophat' ? r * 1.05 + 8 : 22);
+      const ny = -top * r - hatRoom(hat, r);
       drawNameTag(g, opts.name, 0, ny, itemVal(eq.nameColor) || '#fff', t, opts.isMe ? 14 : 13);
     }
     g.restore();
@@ -474,12 +599,30 @@
     g.font = `${weight} ${px}px Segoe UI, system-ui, sans-serif`;
     g.textAlign = 'center'; g.textBaseline = 'bottom';
     let fill = nc;
+    const paint = paintOf(nc);
     if (nc === 'rainbow') {
       const w = g.measureText(text).width;
       fill = g.createLinearGradient(x - w / 2, 0, x + w / 2, 0);
       for (let i = 0; i <= 4; i++) fill.addColorStop(i / 4, rainbow(t, i * 70));
-    }
+    } else if (paint && !paint.fx) {
+      const w = g.measureText(text).width, n = paint.stops.length;
+      fill = g.createLinearGradient(x - w / 2, 0, x + w / 2, 0);
+      for (let i = 0; i <= 3; i++) fill.addColorStop(i / 3, paintAt(nc, t * 0.8 + i * n / 4));
+    } else if (paint) fill = paint.base;
     g.lineWidth = Math.max(4, px * 0.22); g.lineJoin = 'round'; g.strokeStyle = 'rgba(0,0,0,0.65)'; g.strokeText(text, x, y);
+    if (paint && paint.fx === 'glitch') { // RGB-split flicker in short bursts
+      const burst = Math.sin(t * 7) > 0.55 || ((t * 0.9) % 1) < 0.1, o = Math.max(1.5, px * 0.09);
+      if (burst) {
+        g.globalAlpha = 0.85; g.fillStyle = '#ff2fd6'; g.fillText(text, x - o, y); g.fillStyle = '#2ff3ff'; g.fillText(text, x + o, y + (Math.sin(t * 31) > 0 ? 1 : -1)); g.globalAlpha = 1;
+      }
+      g.fillStyle = '#ffffff'; g.fillText(text, x, y);
+      return;
+    }
+    if (paint && paint.fx === 'pulse') { // neon: glow + brightness pulse
+      const k = 0.5 + 0.5 * Math.sin(t * 4);
+      g.save(); g.shadowColor = paint.base; g.shadowBlur = 4 + 10 * k; g.fillStyle = paintAt(nc, k); g.fillText(text, x, y); g.restore();
+      return;
+    }
     g.fillStyle = fill; g.fillText(text, x, y);
   }
 
@@ -518,9 +661,122 @@
         grd.addColorStop(0, `rgba(255,240,150,${0.7 * k})`); grd.addColorStop(0.4, `rgba(255,140,30,${0.55 * k})`); grd.addColorStop(1, 'rgba(255,40,0,0)');
         g.fillStyle = grd; g.beginPath(); g.arc(p.x, p.y - (1 - k) * 10, rr, 0, Math.PI * 2); g.fill();
       }
+    } else if (TRAILS[kind]) {
+      TRAILS[kind](g, pts, n, t, now, pl);
     }
     g.restore();
   }
+  // New trails: plain fills/strokes only (no per-point gradients or shadows) so dozens of players stay cheap, also on mobile.
+  // Every effect is deterministic from the point's own seed/age (no Math.random while drawing).
+  const ageK = (p, now, life = 650) => 1 - (now - p.time) / life;
+  const hash = (a, b) => { const v = Math.sin(a * 12.9898 + b * 78.233) * 43758.5453; return v - Math.floor(v); };
+  function heartPath(g, x, y, s) {
+    g.moveTo(x, y + s * 0.9); g.bezierCurveTo(x - s * 1.4, y, x - s * 0.8, y - s * 1.1, x, y - s * 0.35);
+    g.bezierCurveTo(x + s * 0.8, y - s * 1.1, x + s * 1.4, y, x, y + s * 0.9);
+  }
+  function starPath(g, x, y, ro, rot) {
+    for (let i = 0; i < 10; i++) { const a = rot - Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? ro * 0.45 : ro; const px = x + Math.cos(a) * rr, py = y + Math.sin(a) * rr; i ? g.lineTo(px, py) : g.moveTo(px, py); }
+    g.closePath();
+  }
+  const TRAILS = {
+    smoke(g, pts, n, t, now) {
+      g.fillStyle = 'rgb(176,186,210)';
+      for (let i = 0; i < n; i++) {
+        const p = pts[i], k = ageK(p, now); if (k <= 0) continue;
+        g.globalAlpha = 0.26 * k; g.beginPath(); g.arc(p.x + (p.seed - 0.5) * 8, p.y - (1 - k) * 9, 5 + (1 - k) * 12, 0, Math.PI * 2); g.fill();
+      }
+    },
+    bubbles(g, pts, n, t, now) {
+      g.lineWidth = 1.5;
+      for (let i = 0; i < n; i += 2) {
+        const p = pts[i], k = ageK(p, now); if (k <= 0) continue;
+        const x = p.x + Math.sin(p.seed * 6.28 + (1 - k) * 5) * 6, y = p.y - (1 - k) * 16, rr = 2.5 + p.seed * 4.5;
+        g.globalAlpha = 0.9 * k; g.strokeStyle = '#9fe9ff'; g.beginPath(); g.arc(x, y, rr, 0, Math.PI * 2); g.stroke();
+        g.fillStyle = '#ffffff'; g.beginPath(); g.arc(x - rr * 0.35, y - rr * 0.35, Math.max(0.8, rr * 0.25), 0, Math.PI * 2); g.fill();
+      }
+    },
+    pixel(g, pts, n, t, now) {
+      const pal = ['#ff4d6d', '#ffd34d', '#3ee0ff', '#9dff4f'];
+      for (let i = 0; i < n; i++) {
+        const p = pts[i], k = ageK(p, now); if (k <= 0) continue;
+        for (let j = 0; j < 2; j++) {
+          const sd = (p.seed + j * 0.5) % 1, sz = 3 + Math.round(k * 3);
+          const x = Math.round((p.x + (sd - 0.5) * 14) / 4) * 4, y = Math.round((p.y + (hash(sd, j) - 0.5) * 14) / 4) * 4;
+          g.globalAlpha = k; g.fillStyle = pal[Math.floor(sd * 4) % 4]; g.fillRect(x - sz / 2, y - sz / 2, sz, sz);
+        }
+      }
+    },
+    leaves(g, pts, n, t, now) {
+      const pal = ['#7ed957', '#ffb347', '#e8743b'];
+      for (let i = 0; i < n; i += 2) {
+        const p = pts[i], k = ageK(p, now); if (k <= 0) continue;
+        g.save(); g.translate(p.x + Math.sin(p.seed * 9 + (1 - k) * 4) * 7, p.y + (1 - k) * 14); g.rotate(p.seed * 6.28 + (1 - k) * 3);
+        g.globalAlpha = k; g.fillStyle = pal[Math.floor(p.seed * 3) % 3]; g.beginPath(); g.ellipse(0, 0, 5, 2.4, 0, 0, Math.PI * 2); g.fill();
+        g.strokeStyle = 'rgba(0,0,0,0.25)'; g.lineWidth = 0.8; g.beginPath(); g.moveTo(-4, 0); g.lineTo(4, 0); g.stroke();
+        g.restore();
+      }
+    },
+    snow(g, pts, n, t, now) {
+      g.strokeStyle = '#ffffff'; g.lineWidth = 1.3; g.lineCap = 'round';
+      for (let i = 0; i < n; i += 2) {
+        const p = pts[i], k = ageK(p, now, 800); if (k <= 0) continue;
+        const x = p.x + Math.sin(p.seed * 6.28 + (1 - k) * 4) * 6, y = p.y + (1 - k) * 12, rr = 2.5 + p.seed * 2;
+        g.globalAlpha = k; g.beginPath();
+        for (let a = 0; a < 3; a++) { const an = a * Math.PI / 3 + p.seed; g.moveTo(x - Math.cos(an) * rr, y - Math.sin(an) * rr); g.lineTo(x + Math.cos(an) * rr, y + Math.sin(an) * rr); }
+        g.stroke();
+      }
+    },
+    hearts(g, pts, n, t, now) {
+      for (let i = 0; i < n; i += 2) {
+        const p = pts[i], k = ageK(p, now); if (k <= 0) continue;
+        g.globalAlpha = k; g.fillStyle = p.seed < 0.5 ? '#ff5fa2' : '#ff8fc2';
+        g.beginPath(); heartPath(g, p.x + (p.seed - 0.5) * 10, p.y - (1 - k) * 16, 3.5 + k * 3.5); g.fill();
+      }
+    },
+    stars(g, pts, n, t, now) {
+      g.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < n; i += 2) {
+        const p = pts[i], k = ageK(p, now); if (k <= 0) continue;
+        g.globalAlpha = k; g.fillStyle = p.seed < 0.6 ? '#ffe066' : '#fff6c2';
+        g.beginPath(); starPath(g, p.x + (p.seed - 0.5) * 12, p.y + (hash(p.seed, 1) - 0.5) * 12, 3.5 + k * 4, p.seed * 6 + t * 2); g.fill();
+      }
+    },
+    lightning(g, pts, n, t, now) {
+      const q = Math.floor(now / 70); // re-jag ~14×/s
+      g.lineJoin = 'round'; g.lineCap = 'round';
+      const path = () => {
+        g.beginPath();
+        for (let i = 0; i < n; i++) {
+          const p = pts[i], prev = pts[Math.max(0, i - 1)], dx = p.x - prev.x, dy = p.y - prev.y, l = Math.hypot(dx, dy) || 1;
+          const off = (hash(i, q) - 0.5) * 12 * (i / n);
+          const x = p.x - dy / l * off, y = p.y + dx / l * off; i ? g.lineTo(x, y) : g.moveTo(x, y);
+        }
+      };
+      g.globalAlpha = 0.35; g.strokeStyle = '#7cc8ff'; g.lineWidth = 7; path(); g.stroke();
+      g.globalAlpha = 0.95; g.strokeStyle = '#eaffff'; g.lineWidth = 2; path(); g.stroke();
+    },
+    rainbow(g, pts, n, t, now) {
+      g.lineCap = 'round';
+      for (let i = 1; i < n; i++) {
+        const k = i / n;
+        g.globalAlpha = k * 0.85; g.lineWidth = 3 + k * 10; g.strokeStyle = `hsl(${(i * 24 + t * 140) % 360},100%,62%)`;
+        g.beginPath(); g.moveTo(pts[i - 1].x, pts[i - 1].y); g.lineTo(pts[i].x, pts[i].y); g.stroke();
+      }
+    },
+    galaxy(g, pts, n, t, now) {
+      const pal = ['#8a3cff', '#ff4fd8', '#3ee0ff', '#ffffff'];
+      g.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < n; i++) {
+        const p = pts[i], k = ageK(p, now); if (k <= 0) continue;
+        for (let j = 0; j < 2; j++) {
+          const sd = (p.seed + j * 0.37) % 1, d = (1 - k) * 18 + 3, a = sd * 20;
+          g.globalAlpha = k * (0.6 + 0.4 * Math.sin(t * 6 + sd * 9)); g.fillStyle = pal[Math.floor(sd * 4) % 4];
+          g.beginPath(); g.arc(p.x + Math.cos(a) * d, p.y + Math.sin(a) * d, 1 + k * 2.2, 0, Math.PI * 2); g.fill();
+        }
+        if (i % 5 === 0) { g.globalAlpha = k; g.fillStyle = '#ffffff'; g.beginPath(); starPath(g, p.x, p.y, 2 + k * 3, t); g.fill(); }
+      }
+    },
+  };
 
   // ------------------------------------------------------------ main loop
   const dispMe = { x: 0, y: 0 };
@@ -613,11 +869,37 @@
       ctx.fillText(f.text, f.x, f.y - k * 40); ctx.shadowBlur = 0; ctx.globalAlpha = 1;
     }
     ctx.restore();
+    drawLegendArrow(t);
     if (frameNo % 4 === 0) drawMinimap();
     drawPreviews(t, now);
     if (rushActive) drawRush(now);
   }
 
+  // «Чутьё легенды»: arrow at the screen edge towards the legendary orb (lvl 2+: with distance). Positions are public anyway (minimap).
+  function drawLegendArrow(t) {
+    const lvl = profile ? G.upLevel('sense', profile.upgrades.sense) : 0;
+    if (lvl < 1) return;
+    let lo = null;
+    for (const o of orbs.values()) if (o.t === 'l') { lo = o; break; }
+    if (!lo) return;
+    const sx = lo.x - cam.x, sy = lo.y - cam.y;
+    if (sx > 30 && sx < W - 30 && sy > 30 && sy < H - 30) return; // already on screen
+    const cx = W / 2, cy = H / 2, dx = sx - cx, dy = sy - cy, a = Math.atan2(dy, dx);
+    const m = 46, k = Math.min((W / 2 - m) / Math.abs(dx || 1e-6), (H / 2 - m) / Math.abs(dy || 1e-6));
+    const ax = cx + dx * k, ay = cy + dy * k, pulse = 1 + 0.12 * Math.sin(t * 5);
+    ctx.save(); ctx.translate(ax, ay);
+    ctx.save(); ctx.rotate(a); ctx.scale(pulse, pulse);
+    ctx.fillStyle = '#ffcc33'; ctx.shadowColor = '#ffcc33'; ctx.shadowBlur = 14;
+    ctx.beginPath(); ctx.moveTo(16, 0); ctx.lineTo(-8, -11); ctx.lineTo(-3, 0); ctx.lineTo(-8, 11); ctx.closePath(); ctx.fill();
+    ctx.restore();
+    if (lvl >= 2) {
+      const d = Math.hypot(lo.x - dispMe.x, lo.y - dispMe.y);
+      ctx.font = '700 12px Segoe UI, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,0.7)'; const tx = -Math.cos(a) * 26, ty = -Math.sin(a) * 22;
+      ctx.strokeText(Math.round(d / 10) + ' м', tx, ty); ctx.fillStyle = '#ffe9a3'; ctx.fillText(Math.round(d / 10) + ' м', tx, ty);
+    }
+    ctx.restore();
+  }
   function drawBackground(t) {
     ctx.fillStyle = '#060912'; ctx.fillRect(0, 0, W, H);
     const vg = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.75);
@@ -687,7 +969,8 @@
   // collectibles by their `art` key, anything else gets a fallback gem. Drawn lazily once per item at devicePixelRatio
   // and cached as PNG data URLs (allowed by the CSP's img-src data:).
   const ICON_PX = 96, ICON_T = 0.35, ICON_NOW = 10000; // fixed animation time → deterministic icons
-  const NEUTRAL_BODY = '#d4dcf7';                       // shapes in neutral silver so the outline is what you notice
+  const NEUTRAL_BODY = '#d4dcf7';
+  const HAT_ICON_H = { wizard: 36 }; // hats taller than ~26 px need a smaller body in the icon                       // shapes in neutral silver so the outline is what you notice
   const iconCache = new Map();
   const eqWith = (cat, id) => Object.assign({}, G.DEFAULT_EQUIPPED, { [cat]: id });
   function avatarAt(g, x, y, k, eq, opts = {}) {
@@ -721,7 +1004,8 @@
       drawNameTag(g, 'Aa', 48, 68, def.value, ICON_T, 36, 800);
     },
     hat(g, def) {
-      avatarAt(g, 48, 68, 1.3, eqWith('hat', def.id)); // bigger body so the hat is the focus
+      const k = Math.min(1.3, 64 / (G.PLAYER_R + (HAT_ICON_H[def.value] || 0))); // tall hats: shrink a little so they fit
+      avatarAt(g, 48, 68, k, eqWith('hat', def.id)); // bigger body so the hat is the focus
       if (def.value === 'none') dashedHint(g, () => g.arc(48, 68 - 26 - 5, 16, Math.PI, 0));
     },
     shard(g) {
@@ -739,6 +1023,61 @@
       sparkle(g, 76, 20, 7, '#fff3b0'); sparkle(g, 22, 72, 5, '#ffe27a'); sparkle(g, 78, 70, 4, '#ffffff');
     },
   };
+  // ---- upgrade icons (ids 'u_<key>')
+  const UPGRADE_ICON_DEFS = {};
+  for (const k of G.UPGRADE_KEYS) UPGRADE_ICON_DEFS['u_' + k] = { id: 'u_' + k, type: 'upgrade', art: 'u_' + k, name: G.UPGRADES[k].name, rarity: ['mult', 'luck'].includes(k) ? 'epic' : 'rare' };
+  Object.assign(ICON_ART, {
+    u_magnet(g) {
+      g.save(); g.lineCap = 'butt'; g.lineWidth = 14; g.lineJoin = 'round';
+      g.strokeStyle = '#ff4d5e'; g.shadowColor = '#ff4d5e'; g.shadowBlur = 10;
+      g.beginPath(); g.moveTo(28, 66); g.lineTo(28, 46); g.arc(48, 46, 20, Math.PI, 0); g.lineTo(68, 66); g.stroke();
+      g.shadowBlur = 0; g.strokeStyle = '#e6ecff';
+      g.beginPath(); g.moveTo(28, 66); g.lineTo(28, 78); g.moveTo(68, 66); g.lineTo(68, 78); g.stroke();
+      g.strokeStyle = 'rgba(62,224,255,0.65)'; g.lineWidth = 2; g.setLineDash([3, 4]);
+      g.beginPath(); g.moveTo(14, 88); g.lineTo(22, 82); g.moveTo(84, 88); g.lineTo(75, 82); g.stroke();
+      g.restore();
+      drawOrb(g, 48, 72, 'c', ICON_T, 0, 1.0); drawOrb(g, 10, 90, 'c', ICON_T, 3, 0.7); drawOrb(g, 88, 90, 'r', ICON_T, 1, 0.6);
+    },
+    u_speed(g) {
+      g.save(); g.lineCap = 'round'; g.strokeStyle = 'rgba(62,224,255,0.7)'; g.lineWidth = 4;
+      [[10, 34, 34], [16, 50, 40], [10, 66, 32]].forEach(([x, y, l]) => { g.beginPath(); g.moveTo(x, y); g.lineTo(x + l, y); g.stroke(); });
+      g.fillStyle = '#3ee0ff'; g.shadowColor = '#3ee0ff'; g.shadowBlur = 12;
+      for (const ox of [44, 62]) { g.beginPath(); g.moveTo(ox, 26); g.lineTo(ox + 22, 50); g.lineTo(ox, 74); g.lineTo(ox + 9, 50); g.closePath(); g.fill(); }
+      g.restore();
+    },
+    u_mult(g) {
+      drawOrb(g, 38, 44, 'c', ICON_T, 0, 1.7);
+      drawOrb(g, 60, 30, 'r', ICON_T, 2, 0.9);
+      g.save(); g.font = '900 30px Segoe UI, system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.lineWidth = 5; g.strokeStyle = 'rgba(0,0,0,0.7)'; g.strokeText('×%', 64, 72); g.fillStyle = '#ffcc33'; g.shadowColor = '#ffcc33'; g.shadowBlur = 10; g.fillText('×%', 64, 72);
+      g.restore();
+    },
+    u_luck(g) {
+      g.save(); g.translate(46, 46); g.fillStyle = '#4fd36b'; g.shadowColor = '#4fd36b'; g.shadowBlur = 10;
+      for (let i = 0; i < 4; i++) { g.save(); g.rotate(i * Math.PI / 2 + Math.PI / 4); g.beginPath(); heartPath(g, 0, -15, 12); g.fill(); g.restore(); }
+      g.shadowBlur = 0; g.strokeStyle = '#2f9a48'; g.lineWidth = 4; g.lineCap = 'round'; g.beginPath(); g.moveTo(2, 4); g.quadraticCurveTo(10, 26, 24, 38); g.stroke();
+      g.restore();
+      sparkle(g, 78, 20, 7, '#fff3b0'); sparkle(g, 20, 78, 5, '#ffe27a');
+    },
+    u_sense(g) {
+      g.save(); g.strokeStyle = 'rgba(255,204,51,0.85)'; g.lineWidth = 3; g.shadowColor = '#ffcc33'; g.shadowBlur = 8;
+      g.beginPath(); g.arc(48, 50, 32, 0, Math.PI * 2); g.stroke();
+      g.lineWidth = 1.5; g.strokeStyle = 'rgba(255,204,51,0.35)'; g.beginPath(); g.arc(48, 50, 20, 0, Math.PI * 2); g.stroke();
+      g.shadowBlur = 0; g.translate(48, 50); g.rotate(-0.8);
+      g.fillStyle = '#ffcc33'; g.beginPath(); g.moveTo(0, -27); g.lineTo(8, 0); g.lineTo(-8, 0); g.closePath(); g.fill();
+      g.fillStyle = '#9aa3c7'; g.beginPath(); g.moveTo(0, 27); g.lineTo(8, 0); g.lineTo(-8, 0); g.closePath(); g.fill();
+      g.restore();
+      drawOrb(g, 82, 16, 'l', ICON_T, 0, 0.75);
+    },
+    u_skill(g) {
+      g.save(); g.fillStyle = '#7a5cff'; g.shadowColor = '#b46bff'; g.shadowBlur = 12;
+      g.beginPath(); g.roundRect(12, 32, 72, 38, 18); g.fill(); g.shadowBlur = 0;
+      g.fillStyle = '#e8ecff'; g.fillRect(24, 47, 18, 6); g.fillRect(30, 41, 6, 18);
+      [['#ff4d6d', 64, 44], ['#3ee0ff', 72, 52], ['#9dff4f', 56, 52], ['#ffd34d', 64, 60]].forEach(([c, x, y]) => { g.fillStyle = c; g.beginPath(); g.arc(x, y, 4, 0, Math.PI * 2); g.fill(); });
+      g.restore();
+      sparkle(g, 80, 20, 7, '#ffffff');
+    },
+  });
   function drawFallbackIcon(g, def) {
     const rc = (G.RARITIES[def && def.rarity] || G.RARITIES.common).color;
     g.save(); g.shadowColor = rc; g.shadowBlur = 16; g.fillStyle = rc; g.globalAlpha = 0.9;
@@ -749,7 +1088,8 @@
   function iconUrl(id) {
     const key = String(id);
     if (iconCache.has(key)) return iconCache.get(key);
-    const def = Object.prototype.hasOwnProperty.call(G.ITEM_BY_ID, key) ? G.ITEM_BY_ID[key] : null;
+    const def = Object.prototype.hasOwnProperty.call(G.ITEM_BY_ID, key) ? G.ITEM_BY_ID[key]
+      : Object.prototype.hasOwnProperty.call(UPGRADE_ICON_DEFS, key) ? UPGRADE_ICON_DEFS[key] : null;
     const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
     const cv = document.createElement('canvas'); cv.width = cv.height = Math.round(ICON_PX * dpr);
     const g = cv.getContext('2d');
@@ -762,7 +1102,7 @@
   }
   // <div class="ico"> with a rarity-coloured frame/glow and the cached icon
   function iconEl(id, cls) {
-    const def = G.ITEM_BY_ID[id];
+    const def = G.ITEM_BY_ID[id] || UPGRADE_ICON_DEFS[id];
     const box = document.createElement('div');
     box.className = 'ico' + (cls ? ' ' + cls : '');
     box.style.setProperty('--rc', (G.RARITIES[def && def.rarity] || G.RARITIES.common).color);
@@ -799,7 +1139,34 @@
   function rarityTag(def) { const r = rarityOf(def); const el = document.createElement('div'); el.className = 'rar'; el.style.color = r.color; el.textContent = r.name; return el; }
 
   // ------------------------------------------------------------ shop (only sells; purchases go to the inventory)
-  let shopTab = 'color';
+  let shopTab = 'color', shopRarity = 'all', shopSort = 'price-asc', shopHideOwned = false;
+  const RAR_RANK = { common: 0, rare: 1, epic: 2, legendary: 3 };
+  const SHOP_SORTS = {
+    'price-asc': (a, b) => a.price - b.price || RAR_RANK[a.rarity] - RAR_RANK[b.rarity],
+    'price-desc': (a, b) => b.price - a.price || RAR_RANK[b.rarity] - RAR_RANK[a.rarity],
+    rarity: (a, b) => RAR_RANK[a.rarity] - RAR_RANK[b.rarity] || a.price - b.price,
+    name: (a, b) => a.name.localeCompare(b.name, 'ru'),
+  };
+  $('shopSort').addEventListener('change', e => { if (SHOP_SORTS[e.target.value]) { shopSort = e.target.value; renderShop(); } });
+  $('shopHideOwned').addEventListener('change', e => { shopHideOwned = e.target.checked; renderShop(); });
+  function upgradeCard(up) {
+    const lvl = G.upLevel(up.key, profile.upgrades[up.key]), price = up.prices[lvl], maxed = lvl >= up.max;
+    const el = document.createElement('div'); el.className = 'item up-card'; el.dataset.up = up.key;
+    el.appendChild(iconEl('u_' + up.key));
+    const nm = document.createElement('div'); nm.className = 'name'; nm.textContent = `${up.name} — ур. ${lvl}/${up.max}`;
+    const pips = document.createElement('div'); pips.className = 'up-level';
+    for (let i = 0; i < up.max; i++) { const p = document.createElement('i'); if (i < lvl) p.className = 'on'; pips.appendChild(p); }
+    const desc = document.createElement('div'); desc.className = 'desc'; desc.textContent = up.desc;
+    const eff = document.createElement('div'); eff.className = 'up-eff';
+    const now = document.createElement('div'); now.className = 'now'; now.textContent = 'Сейчас: ' + G.upgradeText(up.key, lvl);
+    eff.appendChild(now);
+    if (!maxed) { const nx = document.createElement('div'); nx.className = 'next'; nx.textContent = '→ ' + G.upgradeText(up.key, lvl + 1); eff.appendChild(nx); }
+    const btn = document.createElement('button'); btn.className = 'btn' + (maxed ? '' : ' primary');
+    if (maxed) { btn.textContent = 'Максимум'; btn.disabled = true; }
+    else { btn.textContent = `Улучшить · ${fmt(price)} ◉`; btn.disabled = profile.balance < price; btn.onclick = () => socket.emit('upgrade', up.key, res => afterAction(res, `${up.name}: уровень ${lvl + 1}!`)); }
+    el.append(nm, pips, desc, eff, btn);
+    return el;
+  }
   function renderShop() {
     if (!profile) return;
     pruneHidden('shop');
@@ -808,22 +1175,29 @@
     $('shopTabs').querySelectorAll('.tab').forEach(b => b.onclick = () => { shopTab = b.dataset.tab; renderShop(); });
     const grid = $('shopGrid');
     grid.innerHTML = '';
+    $('shopTools').classList.toggle('hidden', shopTab === 'upgrades');
+    $('shopEmpty').classList.add('hidden');
     if (shopTab === 'upgrades') {
-      for (const up of Object.values(G.UPGRADES)) {
-        const lvl = profile.upgrades[up.key] || 0, price = up.prices[lvl];
-        const el = document.createElement('div'); el.className = 'item';
-        const cur = up.key === 'magnet' ? `Радиус сбора: ${G.pickupFor(lvl)}` : `Скорость: ${Math.round(G.speedFor(lvl))}`;
-        el.innerHTML = `<div class="big-icon">${up.key === 'magnet' ? '🧲' : '👟'}</div>
-          <div class="name">${up.name} — ур. ${lvl}/${up.max}</div><div class="desc">${up.desc}<br>${cur}</div>`;
-        const btn = document.createElement('button'); btn.className = 'btn' + (lvl < up.max ? ' primary' : '');
-        if (lvl >= up.max) { btn.textContent = 'Максимум'; btn.disabled = true; }
-        else { btn.textContent = `Улучшить · ${fmt(price)} ◉`; btn.disabled = profile.balance < price; btn.onclick = () => socket.emit('upgrade', up.key, res => afterAction(res, `${up.name}: уровень ${lvl + 1}!`)); }
-        el.appendChild(btn); grid.appendChild(el);
-      }
+      for (const up of Object.values(G.UPGRADES)) grid.appendChild(upgradeCard(up));
       return;
     }
+    const inCat = G.ITEMS.filter(i => i.cat === shopTab && i.price > 0 && i.sources.includes('shop'));
+    if (shopRarity !== 'all' && !inCat.some(i => i.rarity === shopRarity)) shopRarity = 'all';
+    const chips = [{ key: 'all', name: 'Все', color: '#aab3d9' }].concat(Object.entries(G.RARITIES).map(([k, r]) => ({ key: k, name: r.name, color: r.color })));
+    const rc = $('shopRarity'); rc.innerHTML = '';
+    for (const c of chips) {
+      const n = c.key === 'all' ? inCat.length : inCat.filter(i => i.rarity === c.key).length;
+      if (c.key !== 'all' && !n) continue;
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'rar-chip' + (c.key === shopRarity ? ' active' : ''); b.dataset.rarity = c.key;
+      b.style.setProperty('--rc', c.color); b.textContent = `${c.name} ${n}`;
+      b.onclick = () => { shopRarity = c.key; renderShop(); };
+      rc.appendChild(b);
+    }
+    $('shopSort').value = shopSort; $('shopHideOwned').checked = shopHideOwned;
     const full = profile.inventory.length >= profile.slots;
-    for (const it of G.ITEMS.filter(i => i.cat === shopTab && i.price > 0 && i.sources.includes('shop'))) {
+    const list = inCat.filter(i => (shopRarity === 'all' || i.rarity === shopRarity) && !(shopHideOwned && owns(i.id))).sort(SHOP_SORTS[shopSort]);
+    $('shopEmpty').classList.toggle('hidden', list.length > 0);
+    for (const it of list) {
       const owned = owns(it.id);
       const el = document.createElement('div'); el.className = 'item rar-' + it.rarity;
       el.dataset.item = it.id;
@@ -979,7 +1353,7 @@
     $('pfReaction').textContent = st.bestReaction ? st.bestReaction + ' мс' : '—';
     $('pfRush').textContent = st.bestRush ? st.bestRush + ' очк.' : '—';
     $('pfGames').textContent = fmt(st.minigames || 0);
-    $('pfUpgrades').textContent = `Улучшения: магнит ${p.upgrades.magnet}/${G.UPGRADES.magnet.max} · ускорение ${p.upgrades.speed}/${G.UPGRADES.speed.max}`;
+    $('pfUpgrades').textContent = 'Улучшения: ' + G.UPGRADE_KEYS.map(k => `${G.UPGRADES[k].name.toLowerCase()} ${G.upLevel(k, p.upgrades[k])}/${G.UPGRADES[k].max}`).join(' · ');
     const inGame = stage === 'game';
     $('pfPlay').textContent = inGame ? '▶ Продолжить' : '▶ Играть';
     $('profileClose').classList.toggle('hidden', !inGame);
@@ -999,15 +1373,16 @@
   function toggleProfile() { $('profile').classList.contains('hidden') ? openProfile() : closeProfile(); }
 
   // ------------------------------------------------------------ leaderboard
-  const safeColor = c => (c === 'rainbow' || /^#[0-9a-fA-F]{3,8}$/.test(c) ? c : '#3ee0ff');
+  const safeColor = c => (c === 'rainbow' || paintOf(c) || /^#[0-9a-fA-F]{3,8}$/.test(c) ? c : '#3ee0ff');
   function lbRow(p) {
     const tr = document.createElement('tr'); if (p.name === myName) tr.className = 'me';
     const td1 = document.createElement('td'); td1.textContent = p.rank <= 3 ? ['🥇', '🥈', '🥉'][p.rank - 1] : p.rank;
     const td2 = document.createElement('td');
     const dot = document.createElement('i'); dot.className = 'dot';
     const c = safeColor(p.color);
-    dot.style.background = c === 'rainbow' ? 'linear-gradient(90deg,#f55,#ff5,#5f5,#5ff,#a5f)' : c;
-    dot.style.boxShadow = '0 0 8px ' + (c === 'rainbow' ? '#fff' : c);
+    const pc = paintOf(c);
+    dot.style.background = c === 'rainbow' ? 'linear-gradient(90deg,#f55,#ff5,#5f5,#5ff,#a5f)' : pc ? `linear-gradient(90deg, ${pc.stops.join(', ')})` : c;
+    dot.style.boxShadow = '0 0 8px ' + (c === 'rainbow' ? '#fff' : pc ? pc.base : c);
     td2.append(dot, String(p.name));
     if (p.online) { const on = document.createElement('span'); on.className = 'on'; on.title = 'онлайн'; td2.appendChild(on); }
     const td3 = document.createElement('td'); td3.className = 'num'; td3.textContent = fmt(p.total);
@@ -1145,7 +1520,7 @@
     const net = r.prize - r.fee;
     const box = $('mgResult');
     box.innerHTML = `<div>${esc(name)}: ${esc(r.message || '')}</div><span class="big">${r.prize > 0 ? '+' + r.prize + ' ◉' : '0 ◉'}</span>
-      <div class="muted">Взнос ${r.fee} · итог ${net >= 0 ? '+' : ''}${net}</div>
+      <div class="muted">Взнос ${r.fee} · итог ${net >= 0 ? '+' : ''}${net}${r.bonus > 0 ? ` · «Мастер мини-игр» +${Number(r.bonus) | 0}` : ''}</div>
       <div style="margin-top:10px;display:flex;gap:8px;justify-content:center">
         <button class="btn primary" id="mgAgain">Ещё раз</button><button class="btn" id="mgBack">К списку игр</button></div>`;
     box.classList.remove('hidden');
@@ -1160,7 +1535,11 @@
   // ------------------------------------------------------------ chat
   // User content is only ever rendered with textContent (never innerHTML).
   function nameColorize(el, c) {
+    const p = paintOf(c);
     if (c === 'rainbow') el.classList.add('rainbow-text');
+    else if (p && p.fx === 'pulse') { el.style.color = p.base; el.style.textShadow = `0 0 6px ${p.base}`; }
+    else if (p && p.fx === 'glitch') { el.style.color = '#fff'; el.style.textShadow = '-1px 0 #ff2fd6, 1px 0 #2ff3ff'; }
+    else if (p) { el.classList.add('paint-text'); el.style.backgroundImage = `linear-gradient(90deg, ${p.stops.join(', ')})`; }
     else if (typeof c === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(c)) el.style.color = c;
   }
   function chatLine(m) {

@@ -244,6 +244,49 @@ async function profileSuite(URL) {
   S.close();
 }
 
+const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+// catalog of commit f731c5a: these ids and prices must never change
+const OLD_PRICES = { c_cyan: 0, c_coral: 150, c_lime: 150, c_violet: 400, c_pink: 700, c_gold: 2400, c_rainbow: 15000, s_circle: 0, s_square: 400, s_triangle: 800, s_hexagon: 1400, s_star: 4000,
+  t_none: 0, t_sparks: 1000, t_neon: 2800, t_fire: 12000, n_white: 0, n_pink: 300, n_gold: 1800, n_rainbow: 9000, h_none: 0, h_cap: 500, h_tophat: 1500, h_halo: 3200, h_crown: 20000, x_legend_shard: null };
+const NEW_ITEMS = () => G.ITEMS.filter(i => !has(OLD_PRICES, i.id));
+
+// ------------------------------------------------------------------ upgrades: pure rules (curves, caps, multiplier fractions, luck, migration)
+function upgradeRules() {
+  console.log('--- upgrades (rules)');
+  const U = G.UPGRADES;
+  ok(G.UPGRADE_KEYS.join(',') === 'magnet,speed,mult,luck,sense,skill', 'upgrades: magnet, speed, orb multiplier, luck, legendary sense, mini-game skill');
+  const dim = ['magnet', 'speed', 'mult', 'luck'].filter(k => { const v = U[k].values, inc = v.slice(1).map((x, i) => x - v[i]); return inc.every(d => d > 0) && inc.every((d, i) => !i || d <= inc[i - 1]); });
+  ok(dim.length === 4, `diminishing (or flat for the multiplier) returns per level: ${dim.join(', ')}`);
+  const RATE = 80;
+  ok(G.UPGRADE_KEYS.every(k => U[k].prices.length === U[k].max && U[k].values.length === U[k].max + 1 && U[k].prices.every((v, i) => !i || v > U[k].prices[i - 1])), 'one price per level, strictly increasing; one effect value per level');
+  ok(G.UPGRADE_KEYS.every(k => U[k].prices[0] >= 300 && U[k].prices[0] <= 800), 'first levels are cheap (300–800): ' + G.UPGRADE_KEYS.map(k => U[k].prices[0]).join('/'));
+  const lastMax = ['magnet', 'speed', 'mult', 'luck'].map(k => U[k].prices[U[k].max - 1]);
+  ok(lastMax.every(p => p / RATE / 60 >= 2 && p / RATE / 60 <= 3.5), `max levels cost several hours of play: ${lastMax.map(p => (p / RATE / 60).toFixed(1) + ' h').join(' / ')}`);
+  // caps
+  ok(G.speedFor(99) === G.speedFor(U.speed.max) && G.speedFor(-4) === G.BASE_SPEED && G.speedFor('x') === G.BASE_SPEED && G.speedFor(U.speed.max) <= G.BASE_SPEED * 1.2,
+    `speed capped: max ${G.speedFor(U.speed.max).toFixed(0)} px/s (base ${G.BASE_SPEED}, ≤ +20 %), out-of-range levels clamp`);
+  ok(G.pickupFor(99) === G.pickupFor(U.magnet.max) && G.pickupFor(U.magnet.max) <= G.PLAYER_R * 3, `pickup radius capped at ${G.pickupFor(U.magnet.max)} px`);
+  // multiplier with fractional carry: +5 % on 1-orb pickups must not be rounded away
+  const sum = (n, v, ups, rnd) => { const st = { frac: 0 }; let t = 0; for (let i = 0; i < n; i++) t += G.orbReward(v, ups, st, rnd).value; return t; };
+  ok(sum(20, 1, { mult: 1 }, () => 1) === 21 && sum(100, 1, { mult: 5 }, () => 1) === 125 && sum(19, 1, { mult: 1 }, () => 1) === 19 && sum(4, 5, { mult: 5 }, () => 1) === 25,
+    'multiplier: 20×1 orb at +5 % → 21, 100×1 at +25 % → 125 (fractions carried, never lost)');
+  const lucky = G.orbReward(5, { luck: 5 }, {}, () => 0), unlucky = G.orbReward(5, { luck: 5 }, {}, () => 0.5), noLuck = G.orbReward(5, {}, {}, () => 0);
+  ok(lucky.value === 10 && lucky.lucky && unlucky.value === 5 && !unlucky.lucky && noLuck.value === 5, `luck: ${U.luck.values[U.luck.max]} % chance at max to count an orb twice (roll < chance → ×2)`);
+  ok(sum(4, 1, { mult: 5, luck: 5 }, () => 0) === 10, 'luck and multiplier stack (2 per orb +25 % → 10 for 4 orbs)');
+  const analytic = (1 + G.upValue('mult', 5) / 100) * (1 + G.upValue('luck', 5) / 100);
+  ok(analytic >= 1.3 && analytic <= 1.5, `multiplier × luck at max = ×${analytic.toFixed(3)} (movement upgrades add the rest of the +60–80 % target)`);
+  ok(G.skillPrize(16, 3) === 18 && G.skillPrize(16, 0) === 16 && G.skillPrize(0, 3) === 0 && G.skillPrize(40, 99) === 46, 'mini-game skill: +5/10/15 % on prizes > 0, capped at level 3');
+  // migration of stored upgrade levels (levels kept 1:1, unknown keys dropped, above-max clamped + refunded)
+  const INV = require('../lib/inventory.js');
+  const acc = { key: 'mig', name: 'Mig', passHash: 'x', balance: 100, total: 5, owned: [], equipped: {}, upgrades: { magnet: 7, speed: '2', bogus: 4, luck: -1 }, stats: {} };
+  INV.migrateAccount(acc);
+  ok(JSON.stringify(acc.upgrades) === JSON.stringify({ magnet: 5, speed: 2, mult: 0, luck: 0, sense: 0, skill: 0 }) && acc.balance === 100 + 2 * U.magnet.prices[4],
+    `stored levels migrate: magnet 7→5 (+${2 * U.magnet.prices[4]} refunded), speed "2"→2, unknown dropped, new upgrades start at 0`);
+  const acc2 = { key: 'mig2', name: 'Mig2', passHash: 'x', balance: 7, total: 5, owned: [], equipped: {}, upgrades: { magnet: 3, speed: 5 }, stats: {} };
+  INV.migrateAccount(acc2);
+  ok(acc2.upgrades.magnet === 3 && acc2.upgrades.speed === 5 && acc2.balance === 7, 'existing levels (magnet 3, speed 5) are kept on the new curves, no refund needed');
+}
+
 // ------------------------------------------------------------------ shop + inventory (needs OCS_TEST_HOOKS=1)
 function priceSanity() {
   console.log('--- economy');
@@ -258,9 +301,22 @@ function priceSanity() {
   ok(Object.values(G.UPGRADES).every(u => u.prices.every((v, i) => !i || v > u.prices[i - 1])), 'upgrade prices strictly increase per level');
   // mini-games must earn less per minute than farming
   const rush = G.MINIGAMES.rush, re = G.MINIGAMES.reaction;
-  const rushPerMin = (G.rushPrize(1e9) - rush.fee) / ((rush.duration + rush.cooldownMs) / 60000);
-  const reactPerMin = (G.REACTION_PRIZES[0][1] - re.fee) / ((2500 + re.cooldownMs) / 60000);
-  ok(rushPerMin < RATE * 0.5 && reactPerMin < RATE * 0.5, `perfect play nets at most ${rushPerMin.toFixed(0)} (rush) / ${reactPerMin.toFixed(0)} (reaction) orbs/min, farming ≈${RATE}`);
+  const skillMax = G.UPGRADES.skill.max; // worst case: «Мастер мини-игр» maxed
+  const rushPerMin = (G.skillPrize(G.rushPrize(1e9), skillMax) - rush.fee) / ((rush.duration + rush.cooldownMs) / 60000);
+  const reactPerMin = (G.skillPrize(G.REACTION_PRIZES[0][1], skillMax) - re.fee) / ((2500 + re.cooldownMs) / 60000);
+  ok(rushPerMin < RATE * 0.5 && reactPerMin < RATE * 0.5, `perfect play with maxed «Мастер мини-игр» nets at most ${rushPerMin.toFixed(0)} (rush) / ${reactPerMin.toFixed(0)} (reaction) orbs/min, farming ≈${RATE}`);
+  const TIERS = { common: [150, 500], rare: [400, 1500], epic: [1800, 4000], legendary: [9000, 20000] };
+  const outOfTier = sold.filter(i => i.price < TIERS[i.rarity][0] || i.price > TIERS[i.rarity][1]);
+  ok(!outOfTier.length, `every shop item priced inside its tier (common 150–500, rare 400–1500, epic 1800–4000, legendary 9000–20000)${outOfTier.length ? ': ' + outOfTier.map(i => i.id).join(',') : ''}`);
+  const old = OLD_PRICES, changed = Object.keys(old).filter(id => !G.ITEM_BY_ID[id] || G.ITEM_BY_ID[id].price !== old[id]);
+  ok(!changed.length, `existing items (${Object.keys(old).length}) keep their ids and prices${changed.length ? ': ' + changed.join(',') : ''}`);
+  const NEW = G.ITEMS.filter(i => !has(old, i.id));
+  const perCat = G.CATEGORIES.map(c => [c.key, NEW.filter(i => i.cat === c.key)]);
+  ok(perCat.every(([, l]) => l.length >= 6 && l.length <= 10) && perCat.every(([, l]) => new Set(l.map(i => i.rarity)).size >= 3),
+    'new cosmetics: ' + perCat.map(([k, l]) => `${k} +${l.length}`).join(', ') + ' (6–10 per category, ≥3 rarities each)');
+  ok(G.ITEMS.every(i => i.type !== 'cosmetic' || typeof i.value === 'string') && new Set(G.ITEMS.map(i => i.id)).size === G.ITEMS.length, 'item ids unique, every cosmetic has a visual value');
+  const paintVals = G.ITEMS.filter(i => (i.cat === 'color' || i.cat === 'nameColor') && !/^#[0-9a-f]{6}$/i.test(i.value) && i.value !== 'rainbow').map(i => i.value);
+  ok(paintVals.every(v => has(G.PAINTS, v)), `multi-colour values all defined in G.PAINTS (${paintVals.join(', ')})`);
   ok(G.rushPrize(20) === 15 && G.rushPrize(100) === rush.maxPrize && G.rushPrize(-5) === 0, `rush payout 75% capped at ${rush.maxPrize}`);
 }
 
@@ -417,6 +473,117 @@ async function minigameSuite(URL) {
   A.close(); B.close();
 }
 
+// upgrades in the arena: purchases, caps, multiplier (exact, server-side), luck consistency, speed, mini-game skill
+async function upgradeSuite(URL) {
+  console.log('--- upgrades (arena, server-authoritative)');
+  const A = makeClient(URL), W = makeClient(URL);
+  await A.register('Upgr' + rnd()); await W.register('Watch' + rnd());
+  await A.emit('test:orbs', 200000);
+  const bal0 = A.profile.balance;
+  let spent = 0, okAll = true;
+  for (const k of G.UPGRADE_KEYS) for (let l = 0; l < G.UPGRADES[k].max; l++) { const r = await A.emit('upgrade', k); okAll = okAll && r.ok && r.profile.upgrades[k] === l + 1; spent += G.UPGRADES[k].prices[l]; }
+  const over = await A.emit('upgrade', 'mult');
+  ok(okAll && A.profile.balance === bal0 - spent && !over.ok && /Максимальный/.test(over.error), `all 6 upgrades bought level by level to max for ${spent} (exact price table), level above max refused`);
+  ok(!(await A.emit('upgrade', 'hasOwnProperty')).ok && !(await A.emit('upgrade', { k: 1 })).ok, 'unknown / non-string upgrade keys rejected');
+  const pub = JSON.stringify(Array.from(W.metas.values()));
+  ok(!/upgrades|"mult"|"luck"/.test(pub), 'other players never see upgrade levels');
+  // multiplier: exact server-side accounting (luck off) — every collected orb counts value × 1.25 with carried fractions
+  await A.emit('test:upgrades', { mult: 5, luck: 0, magnet: 0, speed: 0 });
+  const types = new Map(Array.from(A.orbs.values()).map(o => [o.id, o.t]));
+  let raw = 0, counted = 0;
+  const onState = st => { for (const [id, , , t] of st.oa) types.set(id, t); for (const [id, by] of st.od) if (by === A.id) { raw += G.ORB_TYPES[types.get(id)].value; counted++; } };
+  A.s.on('s', onState);
+  const start = A.profile.balance;
+  await A.farm(start + 40, 40000); await sleep(400);
+  A.s.off('s', onState);
+  const gained = A.profile.balance - start, expect = raw + Math.floor(raw * 0.25 + 1e-9);
+  ok(counted >= 10 && Math.abs(gained - expect) <= 1, `«Множитель сфер» max: ${counted} orbs worth ${raw} → +${gained} (expected ${expect}, fractions carried)`);
+  // luck: only ever adds (×2 per lucky orb), reported via bal.l
+  await A.emit('test:upgrades', { mult: 0, luck: 5 });
+  let luckyEv = 0, raw2 = 0; const onBal = b => { luckyEv += b.l || 0; };
+  const onState2 = st => { for (const [id, , , t] of st.oa) types.set(id, t); for (const [id, by] of st.od) if (by === A.id) raw2 += G.ORB_TYPES[types.get(id)].value; };
+  A.s.on('bal', onBal); A.s.on('s', onState2);
+  const s2 = A.profile.balance;
+  await A.farm(s2 + 40, 40000); await sleep(400);
+  A.s.off('bal', onBal); A.s.off('s', onState2);
+  const g2 = A.profile.balance - s2;
+  ok(g2 >= raw2 && g2 <= raw2 * 2 && (luckyEv > 0) === (g2 > raw2), `«Удача» max: ${raw2} orb value → +${g2} (${luckyEv} lucky ×2 pickups, never less than the base)`);
+  // speed: exactly 10 inputs move exactly 10 × speed × step; stored levels above the max are clamped
+  const capped = await A.emit('test:upgrades', { speed: 99 });
+  ok(capped.ok && capped.profile.upgrades.speed === G.UPGRADES.speed.max, 'a level above the max is clamped to the max');
+  const B = makeClient(URL); await B.register('Base' + rnd());
+  await sleep(300);
+  const moveTen = async c => { const p0 = { ...c.pos }; const dir = p0.x > G.WORLD.w / 2 ? -1 : 1; for (let i = 0; i < 10; i++) c.s.emit('input', { s: ++c.seq, x: dir, y: 0 }); await sleep(900); return Math.hypot(c.pos.x - p0.x, c.pos.y - p0.y); };
+  const [dA, dB] = await Promise.all([moveTen(A), moveTen(B)]);
+  ok(Math.abs(dA - 10 * G.speedFor(5) * G.STEP_DT) < 1 && Math.abs(dB - 10 * G.speedFor(0) * G.STEP_DT) < 1,
+    `speed upgrade applied server-side and capped: 10 inputs → ${dA.toFixed(1)} px (max level) vs ${dB.toFixed(1)} px (base)`);
+  // mini-game skill: reaction prize × 1.3
+  await A.emit('test:upgrades', { skill: 3 });
+  const res = new Promise(r => A.s.once('mg:result', r));
+  A.s.once('mg:reaction:go', () => setTimeout(() => A.s.emit('mg:reaction:click'), 120));
+  await A.emit('mg:start', 'reaction');
+  const rr = await res;
+  const base = (G.REACTION_PRIZES.find(([ms]) => rr.rt < ms) || [0, 0])[1];
+  ok(rr.prize === G.skillPrize(base, 3) && (base === 0 || rr.bonus === rr.prize - base), `«Мастер мини-игр» lvl 3: reaction prize ${base} → ${rr.prize}`);
+  A.close(); W.close(); B.close();
+}
+
+// income with every upgrade maxed vs none: N fresh servers per group, one greedy bot each (test/measure-earn-rate.js), run in parallel
+// with the other suites. The README target is +60–80 %; single short runs are noisy, so the check uses a wider band.
+async function incomeSuite() {
+  const N = 3, SEC = Number(process.env.OCS_INCOME_SEC) || 75;
+  const runOne = async (port, maxed) => {
+    const tmp = path.join(os.tmpdir(), `ocs-income-${process.pid}-${port}.json`);
+    const srv = await startServer(port, { DATA_FILE: tmp, OCS_TEST_HOOKS: '1' });
+    const out = await new Promise(res => {
+      const p = spawn(process.execPath, [path.join(__dirname, 'measure-earn-rate.js'), '1', String(SEC), srv.url], { env: Object.assign({}, process.env, maxed ? { UPGRADES: 'max' } : { UPGRADES: '' }) });
+      let o = ''; p.stdout.on('data', d => { o += d; }); p.stderr.on('data', d => { o += d; }); p.on('exit', () => res(o));
+    });
+    await srv.stop(); fs.rmSync(tmp, { force: true });
+    const m = /avg (\d+)/.exec(out); return m ? Number(m[1]) : NaN;
+  };
+  const all = await Promise.all(Array.from({ length: 2 * N }, (_, i) => runOne(3130 + i, i >= N)));
+  return { none: all.slice(0, N), max: all.slice(N) };
+}
+function incomeReport(r) {
+  console.log('--- income: all upgrades maxed vs none');
+  const avg = a => a.reduce((x, y) => x + y, 0) / a.length;
+  const ratio = avg(r.max) / avg(r.none);
+  ok(r.none.concat(r.max).every(Number.isFinite) && ratio >= 1.35 && ratio <= 2.1,
+    `income ×${ratio.toFixed(2)} with everything maxed (none ${r.none.join('/')} → max ${r.max.join('/')} orbs/min; target +60–80 %, band 1.35–2.1 for run-to-run noise)`);
+}
+
+// every new cosmetic: buy → equip (others see it) → trash
+async function newItemsSuite(URL) {
+  console.log('--- new cosmetics: buy / equip / trash');
+  const N = makeClient(URL), W = makeClient(URL);
+  await N.register('Shopper' + rnd()); await W.register('Viewer' + rnd());
+  const list = NEW_ITEMS();
+  const total = list.reduce((n, i) => n + i.price, 0);
+  await N.emit('test:orbs', total + 10);
+  const bad = [];
+  for (const it of list) {
+    const b = await N.emit('buy', it.id);
+    if (!b.ok || !b.profile.inventory.some(x => x.id === it.id && x.src === 'shop')) { bad.push('buy:' + it.id); continue; }
+    const e = await N.emit('inv:equip', it.id);
+    if (!e.ok || e.profile.equipped[it.cat] !== it.id) bad.push('equip:' + it.id);
+  }
+  ok(!bad.length && N.profile.balance === 10, `all ${list.length} new items bought (total ${total}) and equipped${bad.length ? ' — failed: ' + bad.join(', ') : ''}`);
+  const meta = await waitFor(() => { const m = W.metas.get(N.id); return m && m.eq.hat === list.filter(i => i.cat === 'hat').pop().id && m; });
+  ok(!!meta, 'other players receive the new look (last equipped of each category): ' + (meta && JSON.stringify(meta.eq)));
+  const dup = await N.emit('buy', list[0].id);
+  ok(!dup.ok && dup.code === 'owned', 'buying an owned new item is refused');
+  const tbad = [];
+  for (let i = 0; i < list.length; i++) {
+    if (i && i % 8 === 0) await sleep(5100); // trash is rate-limited to 8 per 5 s
+    const r = await N.emit('inv:trash', { id: list[i].id, qty: 1 });
+    if (!r.ok) tbad.push(list[i].id + ':' + r.error);
+  }
+  ok(!tbad.length && N.profile.inventory.length === 0 && JSON.stringify(N.profile.equipped) === JSON.stringify(G.DEFAULT_EQUIPPED),
+    `all ${list.length} new items trashed (equipped ones reverted to the free defaults)${tbad.length ? ' — failed: ' + tbad.join(', ') : ''}`);
+  N.close(); W.close();
+}
+
 // light gameplay checks that work against any server (no test hooks)
 async function gameplaySuite(URL) {
   console.log('--- gameplay');
@@ -501,6 +668,11 @@ async function spawnSuite(URL) {
 
 async function legendarySuite(URL) {
   console.log('--- legendary event');
+  const S3 = makeClient(URL), S0 = makeClient(URL);
+  await S3.register('Sense' + rnd()); await S0.register('NoSense' + rnd());
+  await S3.emit('test:upgrades', { sense: 3 });
+  const warn3 = [], warn0 = [];
+  S3.s.on('legend:soon', d => warn3.push(d)); S0.s.on('legend:soon', d => warn0.push(d));
   const A = makeClient(URL); await A.register('Hunter' + rnd());
   const atJoin = Array.from(A.orbs.values()).filter(o => o.t === 'l').length;
   const items = [], announces = [];
@@ -520,7 +692,10 @@ async function legendarySuite(URL) {
   const after = Array.from(A.orbs.values()).filter(o => o.t === 'l').length;
   ok((announces.length >= 1 || atJoin === 1) && maxAlive <= 1 && after === 0, `legendary orb is a timed event (on field at join: ${atJoin}, announced ${announces.length}×, max ${maxAlive} alive, none 0.3 s after pickup — cooldown)`);
   ok(items.length === 1 && items[0].id === 'x_legend_shard' && sh && sh.src === 'arena', 'collecting it grants a «Легендарный осколок» via grantItem (source "arena")');
-  A.close();
+  await waitFor(() => warn3.length, 4000);
+  ok(warn3.length >= 1 && warn0.length === 0 && warn3.every(w => JSON.stringify(Object.keys(w)) === '["in"]' && w.in >= 0 && w.in <= 15000),
+    `«Чутьё легенды» lvl 3 gets a heads-up before a legendary appears (${warn3.length}×, ${warn3[0] && warn3[0].in} ms ahead, no position), players without it get none`);
+  A.close(); S3.close(); S0.close();
 }
 
 // ------------------------------------------------------------------ migration of accounts saved by the previous version (7c2dacd)
@@ -696,7 +871,7 @@ async function runMode(label, env, opts) {
   if (opts.legacy) await migrationSuite(srv.url, opts.legacy, label);
   await authSuite(srv.url);
   await profileSuite(srv.url);
-  if (opts.full) { await chatSuite(srv.url); await gameplaySuite(srv.url); await minigameSuite(srv.url); }
+  if (opts.full) { await chatSuite(srv.url); await gameplaySuite(srv.url); await minigameSuite(srv.url); await upgradeSuite(srv.url); await newItemsSuite(srv.url); }
   await shopInventorySuite(srv.url);
   await trashSuite(srv.url);
   await leaderboardAudit(srv.url);
@@ -736,8 +911,16 @@ async function runCycleMode() {
     privacyAudit(null);
   } else if (process.env.OCS_TEST_ONLY === 'cycle') {
     privacyAudit(await runCycleMode());
+  } else if (process.env.OCS_TEST_ONLY === 'upgrades') {
+    upgradeRules();
+    const tmp = path.join(os.tmpdir(), `ocs-up-${process.pid}.json`);
+    const srv = await startServer(3101, { DATA_FILE: tmp, OCS_TEST_HOOKS: '1' });
+    await upgradeSuite(srv.url); await newItemsSuite(srv.url);
+    await srv.stop(); fs.rmSync(tmp, { force: true });
   } else {
     priceSanity();
+    upgradeRules();
+    const income = process.env.OCS_TEST_INCOME === '0' ? null : incomeSuite();
     let logs = '';
     const tmp = path.join(os.tmpdir(), `ocs-test-${process.pid}.json`);
     const L1 = legacyAccount();
@@ -750,6 +933,7 @@ async function runCycleMode() {
       await seedLegacyPg(process.env.TEST_DATABASE_URL, L2); // old (7c2dacd) schema + data, the new server must migrate it
       logs += await runMode('PostgreSQL mode', { DATABASE_URL: process.env.TEST_DATABASE_URL }, { full: false, legacy: L2 });
     } else console.log('\n(PostgreSQL mode skipped: set TEST_DATABASE_URL to run it)');
+    if (income) incomeReport(await income);
     privacyAudit(logs);
   }
   console.log(`\n${passes} passed, ${failures} failed`);
