@@ -293,7 +293,7 @@
   function setProfile(p) {
     if (!p) return;
     profile = p;
-    if (summary) { Object.assign(summary, p); summary.items = p.inventory.reduce((n, s) => n + s.q, 0); summary.slotsUsed = p.inventory.length; }
+    if (summary) { Object.assign(summary, p); summary.items = p.inventory.reduce((n, s) => n + s.q, 0); summary.slotsUsed = p.inventory.length; summary.used = p.used; }
     updateHud();
     if (!$('shop').classList.contains('hidden')) renderShop();
     if (!$('inv').classList.contains('hidden')) renderInv();
@@ -1669,7 +1669,6 @@
       rc.appendChild(b);
     }
     $('shopSort').value = shopSort; $('shopHideOwned').checked = shopHideOwned;
-    const full = profile.inventory.length >= profile.slots;
     const list = inCat.filter(i => (shopRarity === 'all' || i.rarity === shopRarity) && !(shopHideOwned && owns(i.id))).sort(SHOP_SORTS[shopSort]);
     $('shopEmpty').classList.toggle('hidden', list.length > 0);
     for (const it of list) {
@@ -1678,15 +1677,8 @@
       el.dataset.item = it.id;
       el.appendChild(iconEl(it.id));
       const nm = document.createElement('div'); nm.className = 'name'; nm.textContent = it.name; el.append(nm, rarityTag(it));
-      const btn = document.createElement('button');
-      if (owned) { btn.className = 'btn equipped'; btn.textContent = '✓ В инвентаре'; btn.disabled = true; }
-      else {
-        btn.className = 'btn primary'; btn.innerHTML = `Купить · ${orbsH(it.price)}`;
-        btn.disabled = profile.balance < it.price;
-        if (full) btn.title = 'Инвентарь полон';
-        btn.onclick = () => socket.emit('buy', it.id, res => afterAction(res, `Куплено: ${it.name} — предмет в инвентаре (I)`));
-      }
-      el.appendChild(btn); grid.appendChild(el);
+      buyControls(el, it, it.price, profile.balance, orbsH, 'buy', owned);
+      grid.appendChild(el);
     }
   }
   // «Лавка осколков»: exclusives for legendary shards only (+ optional shard → orb exchange)
@@ -1718,15 +1710,8 @@
       const nm = document.createElement('div'); nm.className = 'name'; nm.textContent = it.name;
       const cat = document.createElement('div'); cat.className = 'desc'; cat.textContent = (G.CATEGORIES.find(c => c.key === it.cat) || {}).name || '';
       el.append(nm, rarityTag(it), cat);
-      const bt = document.createElement('button');
-      if (owned) { bt.className = 'btn equipped'; bt.textContent = '✓ В инвентаре'; bt.disabled = true; }
-      else {
-        bt.className = 'btn primary shard-buy'; bt.innerHTML = `Купить · ${shardsH(it.shardPrice)}`;
-        bt.disabled = have < it.shardPrice;
-        if (have < it.shardPrice) bt.title = `Не хватает ${it.shardPrice - have} осколк.`;
-        bt.onclick = () => { bt.disabled = true; socket.emit('shard:buy', it.id, res => afterAction(res, `Куплено: ${it.name} — эксклюзив в инвентаре (I)`)); };
-      }
-      el.appendChild(bt); grid.appendChild(el);
+      buyControls(el, it, it.shardPrice, have, shardsH, 'shard:buy', owned);
+      grid.appendChild(el);
     }
   }
   function afterAction(res, okMsg) {
@@ -1737,13 +1722,40 @@
 
   // ------------------------------------------------------------ inventory (100 slots; stackable items up to 99 per slot)
   let invTab = 'all';
+  const invUsed = () => profile.inventory.reduce((n, s) => n + s.q, 0);
+  const invCap = () => profile.cap || G.INV_CAP;
+  // quantity selector (− / qty / + / Макс) + «Купить ×N · total»; the server re-checks qty, money and space
+  function buyControls(el, it, unit, money, priceH, ev, owned) {
+    const n = profile.inventory.reduce((k, s) => k + (s.id === it.id ? s.q : 0), 0);
+    if (owned) { const o = document.createElement('div'); o.className = 'owned-n'; o.textContent = `✓ В инвентаре: ${n}`; el.appendChild(o); }
+    const maxQ = () => Math.max(1, Math.min(G.BUY_MAX_QTY, Math.floor(money / unit), invCap() - invUsed()));
+    const row = document.createElement('div'); row.className = 'qty-row';
+    const mk = (t, cls) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'qbtn ' + cls; b.textContent = t; return b; };
+    const minus = mk('−', 'q-minus'), plus = mk('+', 'q-plus'), mx = mk('Макс', 'q-max');
+    const inp = document.createElement('input'); inp.type = 'number'; inp.min = 1; inp.max = G.BUY_MAX_QTY; inp.value = 1; inp.className = 'q-in'; inp.setAttribute('aria-label', 'Количество');
+    const btn = document.createElement('button'); btn.className = 'btn primary buy-btn' + (ev === 'shard:buy' ? ' shard-buy' : '');
+    const q = () => Math.max(1, Math.min(G.BUY_MAX_QTY, Math.floor(Number(inp.value)) || 1));
+    const upd = () => {
+      const k = q(), cost = unit * k, room = invCap() - invUsed();
+      btn.innerHTML = `Купить${k > 1 ? ' ×' + k : ''} · ${priceH(cost)}`;
+      btn.disabled = money < cost || room < k;
+      btn.title = room < k ? `Инвентарь полон (${invUsed()} / ${invCap()})` : money < cost ? 'Не хватает' : '';
+    };
+    minus.onclick = () => { inp.value = Math.max(1, q() - 1); upd(); };
+    plus.onclick = () => { inp.value = Math.min(G.BUY_MAX_QTY, q() + 1); upd(); };
+    mx.onclick = () => { inp.value = maxQ(); upd(); };
+    inp.oninput = upd;
+    btn.onclick = () => { const k = q(); btn.disabled = true; socket.emit(ev, it.id, k, res => afterAction(res, `Куплено: ${it.name}${k > 1 ? ' ×' + k : ''} — в инвентаре (I)`)); };
+    row.append(minus, inp, plus, mx);
+    el.append(row, btn); upd();
+  }
   function renderInv() {
     if (!profile) return;
     pruneHidden('inv');
-    const inv = profile.inventory, slots = profile.slots || G.INV_SLOTS;
-    $('invCount').textContent = `Занято ${inv.length}/${slots}`;
-    $('invMeter').style.width = Math.min(100, inv.length / slots * 100) + '%';
-    $('invMeter').classList.toggle('full', inv.length >= slots);
+    const inv = profile.inventory, used = invUsed(), cap = invCap();
+    $('invCount').textContent = `${fmt(used)} / ${fmt(cap)}`; $('invCount').title = 'Предметов в инвентаре (каждая штука в стопке считается)';
+    $('invMeter').style.width = Math.min(100, used / cap * 100) + '%';
+    $('invMeter').classList.toggle('full', used >= cap);
     const tabs = [{ key: 'all', name: 'Все' }].concat(G.INV_CATEGORIES);
     $('invTabs').innerHTML = tabs.map(c => {
       const n = c.key === 'all' ? inv.length : inv.filter(s => (G.ITEM_BY_ID[s.id] || {}).cat === c.key).length;
@@ -1864,7 +1876,7 @@
     $('pfTime').textContent = fmtDur(p.playMs != null ? p.playMs : (p.stats && p.stats.playMs));
     const st = p.stats || {};
     $('pfSessions').textContent = fmt(st.sessions || 0);
-    $('pfItems').textContent = `${fmt(p.items != null ? p.items : p.inventory.length)} · ${p.slotsUsed != null ? p.slotsUsed : p.inventory.length}/${p.slots}`;
+    $('pfItems').textContent = `${fmt(p.items != null ? p.items : p.inventory.reduce((n, s) => n + s.q, 0))} / ${fmt(p.cap || G.INV_CAP)}`;
     $('pfReaction').textContent = st.bestReaction ? st.bestReaction + ' мс' : '—';
     $('pfRush').textContent = st.bestRush ? st.bestRush + ' очк.' : '—';
     $('pfGames').textContent = fmt(st.minigames || 0);

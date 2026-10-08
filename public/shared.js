@@ -68,9 +68,9 @@
     shard: { stops: ['#fff3b0', '#ffcc33', '#ffffff', '#9de8ff'], base: '#ffd966', fx: 'shard' },
   };
   const C = (id, cat, name, price, rarity, value) => ({ id, type: 'cosmetic', cat, name, price, rarity, value,
-    stackable: false, maxStack: 1, base: price === 0, sources: price === 0 ? ['base'] : ['shop', 'event', 'admin'] });
+    stackable: price !== 0, maxStack: price === 0 ? 1 : 99, base: price === 0, sources: price === 0 ? ['base'] : ['shop', 'event', 'admin'] }); // duplicates stack (wear one)
   const X = (id, cat, name, shardPrice, rarity, value) => ({ id, type: 'cosmetic', cat, name, price: null, shardPrice, exclusive: true, rarity, value,
-    stackable: false, maxStack: 1, base: false, sources: ['shard_shop', 'admin'] });
+    stackable: true, maxStack: 99, base: false, sources: ['shard_shop', 'admin'] });
   const ITEMS = [
     // colors
     C('c_cyan', 'color', 'Бирюзовый', 0, 'common', '#3ee0ff'),
@@ -169,7 +169,9 @@
   const SHARD_EXCHANGE = { orbs: 40, maxPerTrade: 99 }; // «Лавка осколков»: 1 shard → 40 orbs (balance only, not the all-time total)
   const ITEM_BY_ID = {};
   for (const it of ITEMS) ITEM_BY_ID[it.id] = it;
-  const INV_SLOTS = 100;
+  const INV_CAP = 450;       // inventory capacity in UNITS (a stack of 10 uses 10); stacks only group items (≤ maxStack each)
+  const INV_SLOTS = INV_CAP; // legacy name kept for old references
+  const BUY_MAX_QTY = 99;
   const INV_CATEGORIES = CATEGORIES.concat([{ key: 'misc', name: 'Прочее' }]);
 
   const DEFAULT_EQUIPPED = { color: 'c_cyan', shape: 's_circle', trail: 't_none', nameColor: 'n_white', hat: 'h_none' };
@@ -363,7 +365,7 @@
   }
 
   const api = {
-    WORLD, PLAYER_R, BASE_SPEED, TICK_MS, STEP_DT, ORB_TYPES, ORB_RANK, ORB_LEGEND, POOL_WEIGHTS, RAIN_WEIGHTS, rollOrbType, expectedOrbValue, CATEGORIES, INV_CATEGORIES, RARITIES, ITEMS, ITEM_BY_ID, INV_SLOTS, PAINTS,
+    WORLD, PLAYER_R, BASE_SPEED, TICK_MS, STEP_DT, ORB_TYPES, ORB_RANK, ORB_LEGEND, POOL_WEIGHTS, RAIN_WEIGHTS, rollOrbType, expectedOrbValue, CATEGORIES, INV_CATEGORIES, RARITIES, ITEMS, ITEM_BY_ID, INV_SLOTS, INV_CAP, BUY_MAX_QTY, PAINTS,
     DEFAULT_EQUIPPED, DEFAULT_OWNED, UPGRADES, UPGRADE_KEYS, upLevel, upValue, jackpotChance, upgradeText, orbReward, skillPrize, compassTargets, SENSE_EPIC_RANGE, RADAR, radarBlips, PUSH, separatePlayers,
     EVENTS, EVENT_KEYS, EVENT_SCHEDULE, SHARD_ID, SHARD_EXCHANGE,
     MINIGAMES, REACTION_PRIZES, rushPrize, memoryPrize, memoryShowMs, shellFinal, shellShuffleMs, throwPos, throwPoints, throwPrize, chainPrize, minigameMinMs, speedFor, pickupFor, applyInput,

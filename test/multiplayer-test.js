@@ -38,7 +38,7 @@ function makeClient(url) {
   s.on('kicked', m => { c.kicked = m; });
   s.on('sping', v => s.emit('spong', v));
   c.ready = new Promise(r => s.on('connect', r));
-  c.call = (ev, arg) => new Promise(res => { const t = setTimeout(() => res({ ok: false, error: 'timeout' }), 10000); s.emit(ev, arg, r => { clearTimeout(t); res(r); }); });
+  c.call = (ev, ...args) => new Promise(res => { const t = setTimeout(() => res({ ok: false, error: 'timeout' }), 10000); s.emit(ev, ...args, r => { clearTimeout(t); res(r); }); });
   c.entered = r => {
     if (!r || !r.ok) return r;
     if (r.token) { c.token = r.token; issuedTokens.push(r.token); }
@@ -50,7 +50,7 @@ function makeClient(url) {
   c.register = async (name, password = PASS, confirm = password) => { await c.ready; return c.entered(await c.call('auth', { mode: 'register', name, password, confirm })); };
   c.login = async (name, password = PASS) => { await c.ready; return c.entered(await c.call('auth', { mode: 'login', name, password })); };
   c.resume = async token => { await c.ready; return c.entered(await c.call('resume', { token })); };
-  c.emit = async (ev, arg) => { const r = await c.call(ev, arg); if (r && r.profile) c.profile = r.profile; return r; };
+  c.emit = async (ev, ...args) => { const r = await c.call(ev, ...args); if (r && r.profile) c.profile = r.profile; return r; };
   c.farm = async (target, maxMs) => { // chase nearest (valuable) orb until balance >= target
     const t0 = Date.now();
     while (c.profile.balance < target && Date.now() - t0 < maxMs) {
@@ -492,7 +492,7 @@ async function shardShopSuite(URL) {
   const slot = S.profile.inventory.find(x => x.id === 'c_void');
   ok(r.ok && r.spent === 40 && shards() === 5 && slot && slot.src === 'shard_shop' && S.profile.balance === bal, 'bought «Пустота» for exactly 40 shards (5 left, orbs untouched, source "shard_shop")');
   const dup = await S.emit('shard:buy', 'c_void'), plain = await S.emit('shard:buy', 'c_coral'), proto = await S.emit('shard:buy', '__proto__');
-  ok(!dup.ok && dup.code === 'owned' && !plain.ok && !proto.ok && shards() === 5, 'owned / non-exclusive / bogus ids refused, no shards taken');
+  ok(!dup.ok && dup.code === 'shards' && !plain.ok && !proto.ok && shards() === 5, 'second copy needs its own shards; non-exclusive / bogus ids refused, no shards taken');
   await S.emit('inv:equip', 'c_void');
   ok(!!(await waitFor(() => { const m = W.metas.get(S.id); return m && m.eq.color === 'c_void'; })), 'exclusive can be worn; other players see it');
   const bad = await Promise.all([0, 100, 2.5, '3', null].map(q => S.emit('shard:exchange', q)));
@@ -502,12 +502,20 @@ async function shardShopSuite(URL) {
   ok(bad.every(x => !x.ok) && !tooMany.ok && ex.ok && shards() === 3 && S.profile.balance === b2 + 2 * G.SHARD_EXCHANGE.orbs && S.profile.total === tot,
     `exchange: invalid amounts refused, 2 💎 → +${2 * G.SHARD_EXCHANGE.orbs} ◉ (balance only, all-time total unchanged)`);
   await sleep(5100); // shard actions are rate-limited (8 per 5 s)
-  // full inventory: buying fails all-or-nothing, the shards stay
-  const free = G.INV_SLOTS - S.profile.inventory.length, top = S.profile.inventory.filter(x => x.id === G.SHARD_ID).pop();
-  await S.emit('test:grant', { id: G.SHARD_ID, qty: (99 - top.q) + 99 * free, source: 'event' });
-  const have = shards();
-  r = await S.emit('shard:buy', 'n_shard');
-  ok(S.profile.inventory.length === G.INV_SLOTS && !r.ok && r.code === 'full' && shards() === have && !S.profile.inventory.some(x => x.id === 'n_shard'), `inventory full → purchase refused, all ${have} shards kept (all-or-nothing)`);
+  // multi-buy in «Лавка осколков»: qty validated, cost = price × qty, all-or-nothing
+  await S.emit('test:grant', { id: G.SHARD_ID, qty: 200, source: 'event' });
+  const badQ = await Promise.all([0, 100, 2.5, '3', -1, null].map(q => S.emit('shard:buy', 'n_shard', q)));
+  let have = shards();
+  const poor = await S.emit('shard:buy', 'n_shard', 99);
+  ok(badQ.every(x => !x.ok && x.code === 'qty') && !poor.ok && poor.code === 'shards' && shards() === have, `shard shop qty: 0 / 100 / 2.5 / "3" / −1 / null refused; ×99 without enough shards refused (${poor.error})`);
+  r = await S.emit('shard:buy', 'n_shard', 3);
+  ok(r.ok && r.spent === 3 * 50 && r.qty === 3 && shards() === have - 150 && S.profile.inventory.filter(x => x.id === 'n_shard').reduce((n, x) => n + x.q, 0) === 3, 'shard shop ×3 «Осколочный ник»: exactly 150 shards spent, 3 copies stacked');
+  // over-cap account (e.g. migrated): items kept, every grant refused until under the cap
+  const INV = require('../lib/inventory');
+  const big = { inventory: { v: 1, slots: [{ id: G.SHARD_ID, q: 99 }, { id: G.SHARD_ID, q: 99 }, { id: G.SHARD_ID, q: 99 }, { id: G.SHARD_ID, q: 99 }, { id: G.SHARD_ID, q: 99 }, { id: 'c_coral', q: 5 }] }, owned: [], equipped: {} };
+  INV.migrateAccount(big);
+  const gb = INV.grantItem(big, G.SHARD_ID, 1, 'event');
+  ok(INV.unitsUsed(big) === 500 && !gb.ok && gb.code === 'full' && INV.roomFor(big, G.ITEM_BY_ID.c_lime) === 0 && /500 \/ 450/.test(gb.error), `migration keeps an over-cap inventory (500 / ${G.INV_CAP}); grants refused: ${gb.error}`);
   const shop = await (await fetch(URL + '/api/shop')).json();
   ok(shop.shardExchange.orbs === G.SHARD_EXCHANGE.orbs && shop.items.filter(i => i.exclusive).length === G.ITEMS.filter(i => i.exclusive).length && shop.events.koth.name === 'Царь горы', '/api/shop lists exclusives, events and the exchange rate');
   S.close(); W.close();
@@ -602,7 +610,14 @@ async function shopInventorySuite(URL) {
   ok(b1.ok && b1.profile.balance === bal0 - G.ITEM_BY_ID.c_coral.price && slot && slot.q === 1 && slot.src === 'shop', `buy c_coral: −${G.ITEM_BY_ID.c_coral.price}, item in inventory with source "shop"`);
   ok(b1.profile.equipped.color === 'c_cyan', 'buying does not auto-equip (shop only sells)');
   const b2 = await A.emit('buy', 'c_coral');
-  ok(!b2.ok && b2.code === 'owned', 'cosmetics are unique: second purchase refused: ' + b2.error);
+  ok(b2.ok && b2.profile.inventory.filter(x => x.id === 'c_coral').reduce((n, x) => n + x.q, 0) === 2, 'duplicates allowed: a second copy stacks (×2 c_coral)');
+  // multi-buy validation: qty, funds, atomic
+  const bq = await Promise.all([0, 100, 1.5, '2', -3, {}].map(q => A.emit('buy', 'c_lime', q)));
+  const balQ = A.profile.balance, tooMany = Math.min(99, Math.floor(balQ / G.ITEM_BY_ID.h_crown.price) + 1);
+  const bfunds = await A.emit('buy', 'h_crown', tooMany);
+  ok(bq.every(x => !x.ok && x.code === 'qty') && !bfunds.ok && bfunds.code === 'funds' && A.profile.balance === balQ && !A.profile.inventory.some(x => x.id === 'h_crown'), `multi-buy: bad qty refused; ×${tooMany} Корона without enough orbs refused, nothing taken`);
+  const b5 = await A.emit('buy', 'c_lime', 5);
+  ok(b5.ok && b5.profile.balance === balQ - 5 * G.ITEM_BY_ID.c_lime.price && b5.profile.inventory.filter(x => x.id === 'c_lime').reduce((n, x) => n + x.q, 0) === 5, `multi-buy ×5 Лаймовый: −${5 * G.ITEM_BY_ID.c_lime.price}, 5 copies in one stack`);
   const free = await A.emit('buy', 'c_cyan'), shard = await A.emit('buy', 'x_legend_shard'), proto = await A.emit('buy', '__proto__');
   ok(!free.ok && !shard.ok && !proto.ok, 'free/base items, non-shop items and junk ids cannot be bought');
   const e1 = await A.emit('inv:equip', 'c_coral');
@@ -623,19 +638,18 @@ async function shopInventorySuite(URL) {
   await A.emit('test:grant', { id: 'x_legend_shard', qty: 48, source: 'event' });
   const st2 = A.profile.inventory.filter(x => x.id === 'x_legend_shard').map(x => x.q);
   ok(st2.join(',') === '99,99', `partial stack topped up first → [${st2}]`);
-  // fill up to 100 slots
-  const used = A.profile.inventory.length, freeSlots = G.INV_SLOTS - used;
-  const g2 = await A.emit('test:grant', { id: 'x_legend_shard', qty: freeSlots * 99, source: 'event' });
-  ok(g2.ok && A.profile.inventory.length === G.INV_SLOTS, `inventory filled to ${A.profile.inventory.length}/${G.INV_SLOTS} slots`);
+  // capacity: 450 units in total (every unit in a stack counts)
+  const units = () => A.profile.inventory.reduce((n, x) => n + x.q, 0);
+  const g2 = await A.emit('test:grant', { id: 'x_legend_shard', qty: G.INV_CAP - units(), source: 'event' });
+  ok(g2.ok && units() === G.INV_CAP && A.profile.used === G.INV_CAP && A.profile.cap === G.INV_CAP, `inventory filled to ${units()} / ${G.INV_CAP} units (${A.profile.inventory.length} stacks)`);
   const g3 = await A.emit('test:grant', { id: 'x_legend_shard', qty: 1, source: 'event' });
-  ok(!g3.ok && g3.code === 'full', 'grant refused when full: ' + g3.error);
+  ok(!g3.ok && g3.code === 'full' && /450 \/ 450/.test(g3.error), 'grant refused at the cap: ' + g3.error);
   const balF = A.profile.balance;
   const bf = await A.emit('buy', 'c_lime');
   ok(!bf.ok && bf.code === 'full' && /Инвентарь полон/.test(bf.error) && A.profile.balance === balF, 'buying with a full inventory refused, no orbs taken: ' + bf.error);
-  const lastShard = A.profile.inventory.length - 1;
-  const tf = await A.emit('inv:trash', { id: 'x_legend_shard', qty: 99, slot: lastShard });
-  const bf2 = await A.emit('buy', 'c_lime');
-  ok(tf.ok && tf.profile.inventory.length === G.INV_SLOTS - 1 && bf2.ok && A.profile.inventory.length === G.INV_SLOTS, 'trashing a stack frees a slot; the purchase then succeeds');
+  const tf = await A.emit('inv:trash', { id: 'x_legend_shard', qty: 3 });
+  const bf3 = await A.emit('buy', 'c_lime', 4), bf2 = await A.emit('buy', 'c_lime', 3);
+  ok(tf.ok && !bf3.ok && bf3.code === 'full' && bf2.ok && units() === G.INV_CAP && A.profile.balance === balF - 3 * G.ITEM_BY_ID.c_lime.price, 'trash 3 units → ×4 refused (not enough space, all-or-nothing), ×3 fits exactly');
   const g4 = await A.emit('test:grant', { id: 'c_coral', qty: 1, source: 'nope' }), g5 = await A.emit('test:grant', { id: 'x_legend_shard', qty: -3 });
   ok(!g4.ok && !g5.ok, 'grantItem validates source and quantity');
   // upgrades
@@ -923,7 +937,7 @@ async function newItemsSuite(URL) {
   const meta = await waitFor(() => { const m = W.metas.get(N.id); return m && m.eq.hat === list.filter(i => i.cat === 'hat').pop().id && m; });
   ok(!!meta, 'other players receive the new look (last equipped of each category): ' + (meta && JSON.stringify(meta.eq)));
   const dup = await N.emit('buy', list[0].id);
-  ok(!dup.ok && dup.code === 'owned', 'buying an owned new item is refused');
+  ok(!dup.ok && dup.code === 'funds', 'another copy needs orbs again (balance 10 → refused)');
   const tbad = [];
   for (let i = 0; i < list.length; i++) {
     if (i && i % 8 === 0) await sleep(5100); // trash is rate-limited to 8 per 5 s

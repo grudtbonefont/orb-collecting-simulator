@@ -67,7 +67,7 @@ function newAccount(name, passHash) {
 // Only what the owner may see about their own account (never the hash/key).
 function ownProfile(a) {
   return { name: a.name, balance: a.balance, total: a.total, equipped: a.equipped, upgrades: a.upgrades, stats: a.stats,
-    inventory: a.inventory.slots.map(s => ({ id: s.id, q: s.q, src: s.src })), slots: G.INV_SLOTS, createdAt: a.createdAt };
+    inventory: a.inventory.slots.map(s => ({ id: s.id, q: s.q, src: s.src })), slots: G.INV_CAP, cap: G.INV_CAP, used: INV.unitsUsed(a), createdAt: a.createdAt };
 }
 async function loadAccount(key) {
   if (profiles.has(key)) return profiles.get(key);
@@ -937,18 +937,24 @@ io.on('connection', socket => {
   });
 
   // ---- shop: only sells; purchases go to the inventory via grantItem
-  socket.on('buy', (itemId, ack) => {
+  // buy(itemId, [qty 1..99], ack) — qty optional (old clients send 1)
+  const qtyArg = (q, ack) => (typeof q === 'function' ? [1, q] : [q === undefined ? 1 : q, ack]);
+  const badQty = q => typeof q !== 'number' || !Number.isInteger(q) || q < 1 || q > G.BUY_MAX_QTY;
+  socket.on('buy', (itemId, q, ack) => {
+    [q, ack] = qtyArg(q, ack);
     ack = safeAck(ack);
     if (!acct) return ack({ ok: false, error: 'Сначала войдите в аккаунт' });
+    if (badQty(q)) return ack({ ok: false, error: `Количество: от 1 до ${G.BUY_MAX_QTY}`, code: 'qty' });
     const def = INV.itemDef(itemId);
     if (def && def.exclusive) return ack({ ok: false, error: 'Эксклюзив — только за осколки в «Лавке осколков»', code: 'exclusive' });
     if (!def || !def.sources.includes('shop') || !(def.price > 0)) return ack({ ok: false, error: 'Этот предмет не продаётся' });
     const a = acct.acc;
-    if (!def.stackable && INV.hasItem(a, def.id)) return ack({ ok: false, error: 'Уже есть в инвентаре', code: 'owned' });
-    if (a.balance < def.price) return ack({ ok: false, error: `Не хватает сфер: нужно ${def.price}` });
-    const g = INV.grantItem(a, def.id, 1, 'shop');
+    if (!def.stackable && (q > 1 || INV.hasItem(a, def.id))) return ack({ ok: false, error: 'Уже есть в инвентаре', code: 'owned' });
+    const cost = def.price * q;
+    if (a.balance < cost) return ack({ ok: false, error: `Не хватает сфер: нужно ${cost}`, code: 'funds' });
+    const g = INV.grantItem(a, def.id, q, 'shop'); // all-or-nothing (space checked inside)
     if (!g.ok) return ack({ ok: false, error: g.error, code: g.code });
-    a.balance -= def.price;
+    a.balance -= cost;
     accountChanged(a);
     ack({ ok: true, profile: ownProfile(a) });
   });
@@ -997,24 +1003,25 @@ io.on('connection', socket => {
   // ---- «Лавка осколков»: exclusives for legendary shards + shards → orbs. Shards are consumed with removeItem(…, 'shard_shop').
   let shardTimes = [];
   const shardRateOk = now => { shardTimes = shardTimes.filter(t => now - t < 5000); if (shardTimes.length >= 8) return false; shardTimes.push(now); return true; };
-  socket.on('shard:buy', async (itemId, ack) => {
+  socket.on('shard:buy', async (itemId, q, ack) => {
+    [q, ack] = qtyArg(q, ack);
     ack = safeAck(ack);
     if (!acct) return ack({ ok: false, error: 'Сначала войдите в аккаунт' });
+    if (badQty(q)) return ack({ ok: false, error: `Количество: от 1 до ${G.BUY_MAX_QTY}`, code: 'qty' });
     if (!shardRateOk(Date.now())) return ack({ ok: false, error: 'Не так быстро! Подождите пару секунд.', code: 'rate' });
     const def = INV.itemDef(itemId);
     if (!def || !def.exclusive || !(def.shardPrice > 0)) return ack({ ok: false, error: 'Этого нет в «Лавке осколков»' });
     const a = acct.acc;
-    if (INV.hasItem(a, def.id)) return ack({ ok: false, error: 'Уже есть в инвентаре', code: 'owned' });
-    const have = INV.countItem(a, G.SHARD_ID);
-    if (have < def.shardPrice) return ack({ ok: false, error: `Не хватает осколков: нужно ${def.shardPrice}, у вас ${have}`, code: 'shards' });
+    const have = INV.countItem(a, G.SHARD_ID), cost = def.shardPrice * q;
+    if (have < cost) return ack({ ok: false, error: `Не хватает осколков: нужно ${cost}, у вас ${have}`, code: 'shards' });
     // all-or-nothing: spend the shards, grant the item; if the item does not fit, the shards are put back exactly as they were
     const snap = { inv: JSON.stringify(a.inventory), owned: a.owned.slice(), eq: Object.assign({}, a.equipped) };
-    const r = INV.removeItem(a, G.SHARD_ID, def.shardPrice, 'shard_shop');
-    const g = r.ok ? INV.grantItem(a, def.id, 1, 'shard_shop') : r;
+    const r = INV.removeItem(a, G.SHARD_ID, cost, 'shard_shop');
+    const g = r.ok ? INV.grantItem(a, def.id, q, 'shard_shop') : r;
     if (!g.ok) { a.inventory = JSON.parse(snap.inv); a.owned = snap.owned; a.equipped = snap.eq; return ack({ ok: false, error: g.error, code: g.code }); }
     accountChanged(a);
     try { await flush(); } catch (_) { /* stays dirty, retried by the periodic flush */ }
-    ack({ ok: true, spent: def.shardPrice, profile: ownProfile(a) });
+    ack({ ok: true, spent: cost, qty: q, profile: ownProfile(a) });
   });
   socket.on('shard:exchange', async (qty, ack) => {
     ack = safeAck(ack);
