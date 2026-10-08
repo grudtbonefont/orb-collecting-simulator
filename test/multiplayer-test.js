@@ -476,6 +476,31 @@ async function pushSuite(URL) {
   A.close(); B.close();
 }
 
+async function codesSuite(URL) {
+  console.log('--- promo codes');
+  const A = makeClient(URL), B = makeClient(URL), C = makeClient(URL);
+  await A.register('CodeA' + rnd()); await B.register('CodeB' + rnd()); await C.register('CodeC' + rnd());
+  const units = (P, id) => P.profile.inventory.filter(x => x.id === id).reduce((n, x) => n + x.q, 0);
+  const bal = A.profile.balance, tot = A.profile.total;
+  let r = await A.emit('code:redeem', '  test-gift ');
+  const lime = A.profile.inventory.find(x => x.id === 'c_lime');
+  ok(r.ok && A.profile.balance === bal + 250 && A.profile.total === tot && units(A, G.SHARD_ID) === 2 && units(A, 'c_lime') === 3 && lime.src === 'code' && r.rewards.orbs === 250,
+    'code redeemed case-insensitively (trimmed): +250 orbs to balance only, 2 shards, 3× c_lime (source "code")');
+  r = await A.emit('code:redeem', 'TEST-GIFT');
+  ok(!r.ok && r.code === 'invalid' && r.error === 'Код не найден или уже использован' && A.profile.balance === bal + 250, 'second redeem on the same account refused with the generic message');
+  const nf = await A.emit('code:redeem', 'NO-SUCH-CODE'), ex = await A.emit('code:redeem', 'test-old');
+  ok(!nf.ok && nf.error === 'Код не найден или уже использован' && !ex.ok && ex.code === 'expired', 'unknown code → generic error; expired code → ' + ex.error);
+  const o1 = await A.emit('code:redeem', 'TEST-ONCE'), o2 = await B.emit('code:redeem', 'test-once');
+  ok(o1.ok && !o2.ok && o2.code === 'invalid', 'maxUses: 1 → the second account is refused');
+  await C.emit('test:grant', { id: G.SHARD_ID, qty: 448, source: 'event' });
+  const cb = C.profile.balance;
+  r = await C.emit('code:redeem', 'TEST-GIFT');
+  ok(!r.ok && r.code === 'full' && C.profile.balance === cb && units(C, G.SHARD_ID) === 448 && !units(C, 'c_lime'), 'rewards that do not fit into 450 units → refused, nothing given: ' + r.error);
+  const rs = [];
+  for (let i = 0; i < 5; i++) rs.push(await C.emit('code:redeem', 'BRUTE' + i));
+  ok(rs.slice(0, 4).every(x => x.code === 'invalid') && rs[4].code === 'rate', 'rate limit: the 6th attempt within a minute is refused (' + rs[4].error + ')');
+  A.close(); B.close(); C.close();
+}
 async function shardShopSuite(URL) {
   console.log('--- «Лавка осколков»');
   const S = makeClient(URL), W = makeClient(URL);
@@ -1086,7 +1111,7 @@ CREATE TABLE ocs_sessions (token_hash TEXT PRIMARY KEY, account_key TEXT NOT NUL
 async function seedLegacyPg(dbUrl, L) {
   const { Client } = require('pg');
   const db = new Client({ connectionString: dbUrl }); await db.connect();
-  await db.query('DROP TABLE IF EXISTS ocs_sessions; DROP TABLE IF EXISTS ocs_accounts;');
+  await db.query('DROP TABLE IF EXISTS ocs_sessions; DROP TABLE IF EXISTS ocs_accounts; DROP TABLE IF EXISTS ocs_code_uses;');
   await db.query(OLD_PG_SCHEMA);
   const a = L.acc;
   await db.query('INSERT INTO ocs_accounts (key,name,pass_hash,balance,total,owned,equipped,upgrades,stats,created_at,last_seen) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
@@ -1239,6 +1264,7 @@ async function runMode(label, env, opts) {
   await profileSuite(srv.url);
   if (opts.full) { await chatSuite(srv.url); await gameplaySuite(srv.url); await minigameSuite(srv.url); await newGamesSuite(srv.url); await upgradeSuite(srv.url); await newItemsSuite(srv.url); await tiersSuite(srv.url); await eventSuite(srv.url); await pushSuite(srv.url); }
   await shardShopSuite(srv.url);
+  await codesSuite(srv.url);
   await shopInventorySuite(srv.url);
   await trashSuite(srv.url);
   await leaderboardAudit(srv.url);
@@ -1285,6 +1311,11 @@ async function runCycleMode() {
     await tiersSuite(srv.url); await eventSuite(srv.url); await pushSuite(srv.url); await shardShopSuite(srv.url);
     await srv.stop(); fs.rmSync(tmp, { force: true });
     privacyAudit(await schedulerSuite());
+  } else if (process.env.OCS_TEST_ONLY === 'codes') {
+    const tmp = path.join(os.tmpdir(), `ocs-codes-${process.pid}.json`);
+    const srv = await startServer(3101, { DATA_FILE: tmp, OCS_TEST_HOOKS: '1' });
+    await codesSuite(srv.url);
+    await srv.stop(); fs.rmSync(tmp, { force: true });
   } else if (process.env.OCS_TEST_ONLY === 'games') {
     const tmp = path.join(os.tmpdir(), `ocs-mg-${process.pid}.json`);
     const srv = await startServer(3101, { DATA_FILE: tmp, OCS_TEST_HOOKS: '1' });

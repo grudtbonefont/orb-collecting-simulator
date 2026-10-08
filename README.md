@@ -121,6 +121,21 @@ Exclusive cosmetics that **cannot be bought with orbs**, only with «Леген�
 
 All 8 together: 1 020 shards. Exchange: **1 shard → 40 orbs** (balance only, not the all-time total; up to 99 per trade). Shard income (estimate): legendary orbs ≈ up to 30/h if you catch every one, mythic orbs ≈ 7/h server-wide, events ≈ 2–4/h → a typical active player gets ≈ 15–35 shards/h, so the top item takes ≈ 8–20 h of play. Socket: `shard:buy(itemId)`, `shard:exchange(qty)` (rate limited 8 / 5 s).
 
+## Promo codes (shop tab «Коды»)
+Codes live in **`lib/codes.js`** (the shipped list is empty; three `TEST-*` codes exist only with `OCS_TEST_HOOKS=1`). To add a code, append an entry and redeploy:
+```js
+const CODES = [
+  { code: 'WELCOME2026',                                   // case-insensitive, surrounding spaces ignored
+    rewards: { orbs: 500, shards: 3, items: [{ id: 'c_lime', qty: 2 }] }, // every field optional
+    expiresAt: '2026-12-31T23:59:59Z',                     // ISO date or null = never
+    maxUses: 1000 },                                       // total redemptions across all accounts, or null = unlimited
+];
+```
+- Socket `code:redeem(code, ack)` → `{ok, rewards:{orbs,shards,items}, profile}` or `{ok:false, error, code}` with `invalid` («Код не найден или уже использован»: unknown, already redeemed by this account, or out of uses), `expired`, `full`, `rate`.
+- Once per account (`ocs_accounts.codes` JSONB, additive column); global use counters in table `ocs_code_uses` (JSON store: `codeUses`), taken atomically before granting and released if the grant fails.
+- Orbs go to the balance only (not the all-time total). Shards and items are granted via `grantItem(…, 'code')`; if they do not fit into the 450-unit inventory nothing is given.
+- Rate limit: 5 attempts per minute per account.
+
 ## Economy
 Measured with greedy bots on the new spawn settings (`node test/measure-earn-rate.js <bots> <seconds>` against a scratch server, no upgrades): **≈ 80–110 orbs/min** per player with 1–4 players online (≈ 80 used for pricing; humans are usually a bit slower, upgrades make it faster).
 

@@ -62,10 +62,10 @@
   }
   const colorOf = (eq, t) => { const v = itemVal(eq.color) || '#3ee0ff'; return v === 'rainbow' ? rainbow(t) : paintOf(v) ? paintAt(v, t * 0.6) : v; };
 
-  function toast(text, kind) {
+  function toast(text, kind, html) {
     const el = document.createElement('div');
     el.className = 'toast' + (kind ? ' ' + kind : '');
-    el.textContent = text;
+    if (html) el.innerHTML = html; else el.textContent = text;
     $('toasts').appendChild(el);
     setTimeout(() => el.remove(), 3200);
     while ($('toasts').children.length > 4) $('toasts').firstChild.remove();
@@ -1644,14 +1644,15 @@
   function renderShop() {
     if (!profile) return;
     pruneHidden('shop');
-    const tabs = G.CATEGORIES.concat([{ key: 'upgrades', name: '⚡ Улучшения' }, { key: 'shards', name: 'Лавка осколков', icon: SHARD_I }]);
+    const tabs = G.CATEGORIES.concat([{ key: 'upgrades', name: '⚡ Улучшения' }, { key: 'shards', name: 'Лавка осколков', icon: SHARD_I }, { key: 'codes', name: '🎟 Коды' }]);
     $('shopTabs').innerHTML = tabs.map(c => `<button class="tab ${c.key === shopTab ? 'active' : ''}" data-tab="${c.key}">${c.icon ? c.icon + ' ' : ''}${c.name}</button>`).join('');
     $('shopTabs').querySelectorAll('.tab').forEach(b => b.onclick = () => { shopTab = b.dataset.tab; renderShop(); });
     const grid = $('shopGrid');
     grid.innerHTML = '';
-    $('shopTools').classList.toggle('hidden', shopTab === 'upgrades' || shopTab === 'shards');
+    $('shopTools').classList.toggle('hidden', shopTab === 'upgrades' || shopTab === 'shards' || shopTab === 'codes');
     $('shopEmpty').classList.add('hidden');
     if (shopTab === 'shards') { renderShardShop(grid); return; }
+    if (shopTab === 'codes') { renderCodes(grid); return; }
     if (shopTab === 'upgrades') {
       for (const up of Object.values(G.UPGRADES)) grid.appendChild(upgradeCard(up));
       return;
@@ -1713,6 +1714,31 @@
       buyControls(el, it, it.shardPrice, have, shardsH, 'shard:buy', owned);
       grid.appendChild(el);
     }
+  }
+  // promo codes: the server checks everything (once per account, expiry, uses, inventory space, rate limit)
+  function renderCodes(grid) {
+    const box = document.createElement('div');
+    box.className = 'code-box';
+    box.innerHTML = `<div class="code-title">🎟 Промокод</div><div class="code-hint">Введите код из новостей или от разработчика. Каждый код можно активировать один раз.</div>
+      <form class="code-row" id="codeForm"><input id="codeIn" maxlength="64" autocomplete="off" spellcheck="false" placeholder="Например: SUMMER2026"><button class="btn" id="codeBtn" type="submit">Активировать</button></form>`;
+    grid.appendChild(box);
+    box.querySelector('#codeForm').onsubmit = e => {
+      e.preventDefault();
+      const inp = box.querySelector('#codeIn'), btn = box.querySelector('#codeBtn'), v = inp.value.trim();
+      if (!v) { toast('Введите код', 'err'); return; }
+      btn.disabled = true;
+      socket.emit('code:redeem', v, res => {
+        btn.disabled = false;
+        if (!res || !res.ok) { toast((res && res.error) || 'Ошибка', 'err'); return; }
+        inp.value = '';
+        setProfile(res.profile);
+        const r = res.rewards, parts = [];
+        if (r.orbs) parts.push('+' + orbsH(r.orbs));
+        if (r.shards) parts.push('+' + shardsH(r.shards));
+        for (const it of r.items) { const d = G.ITEM_BY_ID[it.id]; parts.push(esc(d ? d.name : it.id) + (it.qty > 1 ? ' ×' + it.qty : '')); }
+        toast('', 'ok', 'Код активирован! ' + (parts.join(', ') || 'Готово'));
+      });
+    };
   }
   function afterAction(res, okMsg) {
     if (!res || !res.ok) { toast((res && res.error) || 'Ошибка', 'err'); return; }

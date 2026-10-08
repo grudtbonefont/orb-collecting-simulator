@@ -9,6 +9,7 @@ const G = require('./public/shared.js');
 const R = require('./public/rules.js');
 const { createStore } = require('./lib/storage');
 const INV = require('./lib/inventory');
+const CODES = require('./lib/codes');
 
 const PORT = parseInt(process.env.PORT, 10) || 3000;
 const SESSION_TTL_MS = 30 * 24 * 3600 * 1000;
@@ -50,6 +51,7 @@ const store = createStore();
 const profiles = new Map(); // account key -> live account object (online, held by a lobby socket, or not yet flushed)
 const holders = new Map();  // account key -> number of authenticated sockets (lobby or arena)
 const dirty = new Set();
+const codeTries = new Map(); // account key -> recent promo-code attempt timestamps (rate limit)
 const mgCooldowns = new Map(); // account key -> { kind: until }
 function markDirty(acc) { dirty.add(acc.key); }
 function hold(key, d) { const n = (holders.get(key) || 0) + d; if (n > 0) holders.set(key, n); else holders.delete(key); }
@@ -1022,6 +1024,41 @@ io.on('connection', socket => {
     accountChanged(a);
     try { await flush(); } catch (_) { /* stays dirty, retried by the periodic flush */ }
     ack({ ok: true, spent: cost, qty: q, profile: ownProfile(a) });
+  });
+  // ---- promo codes (lib/codes.js): once per account, global maxUses, atomic, 5 attempts / minute / account
+  socket.on('code:redeem', async (input, ack) => {
+    ack = safeAck(ack);
+    if (!acct) return ack({ ok: false, error: 'Сначала войдите в аккаунт' });
+    const a = acct.acc, now = Date.now();
+    const tries = (codeTries.get(a.key) || []).filter(t => now - t < 60000);
+    if (tries.length >= 5) { codeTries.set(a.key, tries); return ack({ ok: false, error: 'Слишком много попыток. Подождите минуту.', code: 'rate' }); }
+    tries.push(now); codeTries.set(a.key, tries);
+    if (a._redeeming) return ack({ ok: false, error: 'Подождите…', code: 'busy' });
+    const c = CODES.findCode(input), NOPE = { ok: false, error: 'Код не найден или уже использован', code: 'invalid' };
+    if (!c) return ack(NOPE);
+    const key = CODES.norm(c.code);
+    if (a.codes.includes(key)) return ack(NOPE);
+    if (CODES.isExpired(c, now)) return ack({ ok: false, error: 'Срок действия кода истёк', code: 'expired' });
+    const rw = c.rewards || {}, grants = (rw.items || []).map(x => ({ id: x.id, qty: x.qty || 1 }));
+    if (rw.shards > 0) grants.push({ id: G.SHARD_ID, qty: rw.shards });
+    const units = grants.reduce((n, x) => n + x.qty, 0);
+    if (units > G.INV_CAP - INV.unitsUsed(a)) return ack({ ok: false, error: `Награда не помещается в инвентарь (${INV.unitsUsed(a)} / ${G.INV_CAP}, нужно ещё ${units}). Освободите место.`, code: 'full' });
+    a._redeeming = true;
+    try {
+      if (!(await store.takeCodeUse(key, c.maxUses == null ? null : c.maxUses))) return ack(NOPE);
+      if (a.codes.includes(key)) { store.releaseCodeUse(key).catch(() => {}); return ack(NOPE); }
+      const snap = { inv: JSON.stringify(a.inventory), owned: a.owned.slice() };
+      for (const g of grants) {
+        const r = INV.grantItem(a, g.id, g.qty, 'code');
+        if (!r.ok) { a.inventory = JSON.parse(snap.inv); a.owned = snap.owned; store.releaseCodeUse(key).catch(() => {}); return ack({ ok: false, error: r.error, code: r.code || 'full' }); }
+      }
+      a.balance += rw.orbs > 0 ? rw.orbs : 0; // balance only, the all-time total stays «orbs earned»
+      a.codes.push(key);
+      accountChanged(a);
+      try { await flush(); } catch (_) { /* retried later */ }
+      ack({ ok: true, rewards: { orbs: rw.orbs || 0, shards: rw.shards || 0, items: (rw.items || []).map(x => ({ id: x.id, qty: x.qty || 1 })) }, profile: ownProfile(a) });
+    } catch (e) { console.error('code:redeem failed:', e.message); ack({ ok: false, error: 'Ошибка сервера, попробуйте позже' }); }
+    finally { a._redeeming = false; }
   });
   socket.on('shard:exchange', async (qty, ack) => {
     ack = safeAck(ack);
