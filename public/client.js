@@ -347,7 +347,7 @@
     if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
   });
   window.addEventListener('keyup', e => { keys[e.code] = false; });
-  window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; pointer.down = false; });
+  window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; pointer.down = false; joy = null; });
   // camera zoom: wheel / pinch / +− buttons; 0.5×–1.5×, saved in localStorage. Phones start zoomed out (see more of the arena).
   // A second finger on the arena starts a pinch: movement pauses until all fingers are lifted (no jump to a stray finger).
   const ZOOM_MIN = 0.5, ZOOM_MAX = 1.5, ZOOM_KEY = 'ocs_zoom';
@@ -367,10 +367,22 @@
   const touchPts = new Map();
   let pinch = null;
   const pinchDist = () => { const [a, b] = Array.from(touchPts.values()); return Math.max(10, Math.hypot(a.x - b.x, a.y - b.y)); };
+  // Touch only: a floating joystick appears where a finger lands on the left part of the arena (knob offset = direction,
+  // analog speed up to JOY_R px); the right part keeps hold-to-move towards the finger. A second finger cancels it (pinch).
+  const JOY_R = 58, JOY_ZONE = 0.55;
+  let joy = null;
+  window.OCSJoy = () => (joy ? { bx: joy.bx, by: joy.by, kx: joy.kx, ky: joy.ky } : null); // read-only hook for the UI test
+  window.OCSMe = () => ({ x: me.x, y: me.y });
+  const joyMove = (x, y) => { const dx = x - joy.bx, dy = y - joy.by, d = Math.hypot(dx, dy), k = d > JOY_R ? JOY_R / d : 1; joy.kx = joy.bx + dx * k; joy.ky = joy.by + dy * k; };
   canvas.addEventListener('pointerdown', e => {
     if (e.pointerType === 'touch') {
       touchPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      if (touchPts.size >= 2) { if (!pinch && touchPts.size === 2) pinch = { d: pinchDist(), z: zoom }; pointer.down = false; return; }
+      if (touchPts.size >= 2) { if (!pinch && touchPts.size === 2) pinch = { d: pinchDist(), z: zoom }; pointer.down = false; joy = null; return; }
+      if (!pinch && joined && e.clientX < W * JOY_ZONE) {
+        const bx = Math.max(JOY_R + 12, e.clientX), by = Math.max(JOY_R + 12, Math.min(H - JOY_R - 12, e.clientY));
+        joy = { id: e.pointerId, bx, by, kx: bx, ky: by }; joyMove(e.clientX, e.clientY);
+        return;
+      }
     }
     if (pinch) return;
     pointer.down = true; pointer.x = e.clientX; pointer.y = e.clientY;
@@ -378,9 +390,25 @@
   window.addEventListener('pointermove', e => {
     if (touchPts.has(e.pointerId)) touchPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pinch) { if (touchPts.size >= 2) setZoom(pinch.z * pinchDist() / pinch.d); return; }
+    if (joy) { if (joy.id === e.pointerId) joyMove(e.clientX, e.clientY); return; }
     pointer.x = e.clientX; pointer.y = e.clientY;
   });
-  const ptrEnd = e => { touchPts.delete(e.pointerId); if (pinch && touchPts.size === 0) pinch = null; pointer.down = false; };
+  const ptrEnd = e => { touchPts.delete(e.pointerId); if (pinch && touchPts.size === 0) pinch = null; if (joy && joy.id === e.pointerId) joy = null; pointer.down = false; };
+  function drawJoystick(t) {
+    if (!joy) return;
+    ctx.save();
+    ctx.globalAlpha = 0.9;
+    ctx.lineWidth = 2.5; ctx.strokeStyle = 'rgba(62,224,255,0.75)'; ctx.shadowColor = '#3ee0ff'; ctx.shadowBlur = 16;
+    ctx.fillStyle = 'rgba(20,40,90,0.28)';
+    ctx.beginPath(); ctx.arc(joy.bx, joy.by, JOY_R, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(122,92,255,0.45)';
+    ctx.beginPath(); ctx.arc(joy.bx, joy.by, JOY_R * 0.55 + Math.sin(t * 4) * 2, 0, Math.PI * 2); ctx.stroke();
+    const g = ctx.createRadialGradient(joy.kx - 6, joy.ky - 6, 2, joy.kx, joy.ky, 26);
+    g.addColorStop(0, '#ffffff'); g.addColorStop(0.35, '#7ff0ff'); g.addColorStop(1, 'rgba(62,140,255,0.85)');
+    ctx.fillStyle = g; ctx.shadowBlur = 22;
+    ctx.beginPath(); ctx.arc(joy.kx, joy.ky, 24, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
   window.addEventListener('pointerup', ptrEnd);
   window.addEventListener('pointercancel', ptrEnd);
 
@@ -389,6 +417,12 @@
     let x = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
     let y = (keys.KeyS || keys.ArrowDown ? 1 : 0) - (keys.KeyW || keys.ArrowUp ? 1 : 0);
     if (x || y) { const l = Math.hypot(x, y); return { x: x / l, y: y / l }; }
+    if (joy) {
+      const dx = joy.kx - joy.bx, dy = joy.ky - joy.by, d = Math.hypot(dx, dy);
+      if (d < 6) return { x: 0, y: 0 };
+      const mag = Math.min(1, d / JOY_R); // analog; the server clamps |dir| ≤ 1 anyway
+      return { x: dx / d * mag, y: dy / d * mag };
+    }
     if (pointer.down) {
       const dx = pointer.x - (dispMe.x - cam.x) * zoom, dy = pointer.y - (dispMe.y - cam.y) * zoom;
       const d = Math.hypot(dx, dy);
@@ -1148,6 +1182,7 @@
     ctx.restore();
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0); // screen-space overlays (compass arrows) are not zoomed
     drawCompass(t, now);
+    drawJoystick(t);
     if (frameNo % 2 === 0) drawMinimap(now);
     drawPreviews(t, now);
     if (rushActive) drawRush(now);

@@ -150,6 +150,9 @@ function bot(url, name) {
     const z1 = await desk.evaluate(() => [window.OCSZoom(), localStorage.getItem('ocs_zoom')]);
     await desk.mouse.wheel(0, 300); await sleep(150);
     const z2 = await desk.evaluate(() => window.OCSZoom());
+    await desk.mouse.move(200, 400); await desk.mouse.down(); await sleep(100);
+    const dj = await desk.evaluate(() => window.OCSJoy()); await desk.mouse.up();
+    ok(dj === null, 'desktop: mouse press on the arena shows no joystick (touch only)');
     ok(z0 === 1 && z1[0] > 1.3 && z1[0] <= 1.5 && z1[1] === String(z1[0]) && z2 < z1[0], `desktop: wheel zooms in/out (1 → ${z1[0]} → ${z2}), stored in localStorage`);
   }
   ok(!/очищ|очистк/i.test(await desk.textContent('#chatLog')), 'chat shows no clear schedule');
@@ -368,6 +371,19 @@ function bot(url, name) {
     await sleep(300);
     await shot(mob, 'screenshot-zoom-mobile.png');
   }
+  { // virtual joystick (touch only): appears under the finger on the left, knob offset drives the player, release stops
+    const p0 = await mob.evaluate(() => window.OCSMe());
+    const sgn = p0.x > (await mob.evaluate(() => G.WORLD.w)) / 2 ? -1 : 1; // towards the arena centre (never into a wall)
+    await mob.evaluate(sg => { const cv = document.getElementById('game'); for (const [type, x] of [['pointerdown', 110], ['pointermove', 110 + sg * 30], ['pointermove', 110 + sg * 90]]) cv.dispatchEvent(new PointerEvent(type, { pointerId: 21, pointerType: 'touch', clientX: x, clientY: 560, bubbles: true, isPrimary: true })); }, sgn);
+    await sleep(900);
+    const j = await mob.evaluate(() => window.OCSJoy()), p1 = await mob.evaluate(() => window.OCSMe());
+    await shot(mob, 'screenshot-joystick-mobile.png');
+    await mob.evaluate(() => document.getElementById('game').dispatchEvent(new PointerEvent('pointerup', { pointerId: 21, pointerType: 'touch', clientX: 200, clientY: 560, bubbles: true })));
+    await sleep(500);
+    const p2 = await mob.evaluate(() => window.OCSMe()); await sleep(400); const p3 = await mob.evaluate(() => window.OCSMe());
+    ok(j && j.bx === 110 && Math.round(Math.abs(j.kx - j.bx)) === 58 && sgn * (p1.x - p0.x) > 60 && Math.abs(p1.y - p0.y) < 30 && !(await mob.evaluate(() => window.OCSJoy())) && Math.hypot(p3.x - p2.x, p3.y - p2.y) < 3,
+      `mobile: joystick under the finger (knob clamped to 58 px) moves the player by ${Math.round(p1.x - p0.x)} px; released → gone, player stops ${JSON.stringify({ j, sgn, dy: Math.round(p1.y - p0.y), stop: Math.round(Math.hypot(p3.x - p2.x, p3.y - p2.y)) })}`);
+  }
   await sleep(1700);
   await bots[0].say('Mobile_Max, давай к нам на север!');
   await sleep(400);
@@ -388,7 +404,7 @@ function bot(url, name) {
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   await sleep(300);
   const p1 = bots[0].positions.get(id);
-  ok(p0 && p1 && p1.x - p0.x > 40, `touch movement works with chat closed (moved ${p0 && p1 ? Math.round(p1.x - p0.x) : '?'}px)`);
+  ok(p0 && p1 && p1.x - p0.x > 40, `touch movement works with chat closed (moved ${p0 && p1 ? Math.round(p1.x - p0.x) : '?'}px from x=${p0 && Math.round(p0.x)})`);
   await mob.tap('#chatBtn');
   await sleep(300);
   const box = await mob.locator('#chat').boundingBox();

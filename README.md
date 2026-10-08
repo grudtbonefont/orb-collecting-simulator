@@ -136,6 +136,11 @@ const CODES = [
 - Orbs go to the balance only (not the all-time total). Shards and items are granted via `grantItem(…, 'code')`; if they do not fit into the 450-unit inventory nothing is given.
 - Rate limit: 5 attempts per minute per account.
 
+## Touch controls
+- **Virtual joystick** (touch only, never on desktop): a finger on the left 55 % of the arena spawns a floating neon joystick under it; knob offset = direction, speed is analog (offset / 58 px, max 1), release = stop. A second finger cancels it and starts pinch-zoom.
+- **Right side:** hold to move towards the finger (the old tap-to-move), so either hand works. HUD buttons (zoom, radar, chat, menu) sit above the canvas and stay tappable.
+- The server already clamps every input vector to length ≤ 1 (`G.applyInput`), so analog input gives no speed advantage. Screenshot: `screenshot-joystick-mobile.png`.
+
 ## Camera zoom
 - 0.5×–1.5×: mouse wheel on the arena, two-finger pinch on phones, or the small «+ / −» buttons left of the radar. Saved in `localStorage` (`ocs_zoom`); phones start at 0.75× (see more of the arena), desktop at 1×.
 - A second finger on the arena starts a pinch; movement pauses until all fingers are lifted. Page pinch-zoom is blocked (`touch-action: none`, viewport `user-scalable=no`, iOS `gesturestart`).
