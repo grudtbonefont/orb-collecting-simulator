@@ -144,6 +144,14 @@ function bot(url, name) {
   await desk.waitForSelector('#hud:not(.hidden)', { timeout: 10000 });
   ok(!(await desk.isVisible('#profile')), 'Играть enters the arena');
   ok(await desk.isVisible('#chat') && !(await desk.isVisible('#chatBtn')), 'desktop: chat panel visible, mobile chat button hidden');
+  { // camera zoom: mouse wheel on the arena, saved in localStorage
+    const z0 = await desk.evaluate(() => window.OCSZoom());
+    await desk.mouse.move(640, 300); await desk.mouse.wheel(0, -300); await sleep(150);
+    const z1 = await desk.evaluate(() => [window.OCSZoom(), localStorage.getItem('ocs_zoom')]);
+    await desk.mouse.wheel(0, 300); await sleep(150);
+    const z2 = await desk.evaluate(() => window.OCSZoom());
+    ok(z0 === 1 && z1[0] > 1.3 && z1[0] <= 1.5 && z1[1] === String(z1[0]) && z2 < z1[0], `desktop: wheel zooms in/out (1 → ${z1[0]} → ${z2}), stored in localStorage`);
+  }
   ok(!/очищ|очистк/i.test(await desk.textContent('#chatLog')), 'chat shows no clear schedule');
 
   // bots
@@ -336,6 +344,30 @@ function bot(url, name) {
   const mb = await mob.locator('.menu-buttons').boundingBox();
   ok(mb && mb.x >= 0 && mb.x + mb.width <= 390, `mobile menu (4 buttons) fits the screen width (${mb && Math.round(mb.width)}px)`);
   ok(await mob.isVisible('#chatBtn') && !(await mob.isVisible('#chat')), 'mobile: chat collapsed to a button');
+  { // camera zoom on phones: zoomed out by default, pinch with two fingers, +/− buttons that don't overlap the HUD
+    const z0 = await mob.evaluate(() => window.OCSZoom());
+    const boxes = await mob.evaluate(() => ['.zoom-btns', '#radar', '#chatBtn', '.menu-buttons', '#helpBtn'].map(q => { const r = document.querySelector(q).getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom]; }));
+    const hit = (a, b) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
+    ok(z0 === 0.75 && boxes.slice(1).every(b => !hit(boxes[0], b)) && boxes[0][2] <= 390, `mobile: default zoom ${z0} (sees more), zoom buttons don't overlap radar/chat/menu/help`);
+    const pinch = await mob.evaluate(async () => {
+      const cv = document.getElementById('game'), ev = (type, id, x, y) => cv.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: 'touch', clientX: x, clientY: y, bubbles: true, isPrimary: id === 11 }));
+      ev('pointerdown', 11, 150, 400); ev('pointerdown', 12, 240, 400);
+      for (let i = 1; i <= 5; i++) { ev('pointermove', 12, 240 + i * 12, 400); await new Promise(r => setTimeout(r, 30)); }
+      const zin = window.OCSZoom();
+      for (let i = 1; i <= 8; i++) { ev('pointermove', 12, 300 - i * 15, 400); await new Promise(r => setTimeout(r, 30)); }
+      const zout = window.OCSZoom();
+      ev('pointerup', 12, 180, 400); ev('pointerup', 11, 150, 400);
+      return [zin, zout];
+    });
+    ok(pinch[0] > 0.75 && pinch[1] < pinch[0] && pinch[1] >= 0.5, `mobile: two-finger pinch zooms (${pinch.map(z => z.toFixed(2)).join(' → ')})`);
+    await mob.tap('#zoomIn'); await mob.tap('#zoomIn');
+    const zUp = await mob.evaluate(() => window.OCSZoom());
+    for (let i = 0; i < 6 && !(await mob.isDisabled('#zoomOut')); i++) await mob.tap('#zoomOut');
+    const zb = await mob.evaluate(() => [window.OCSZoom(), document.getElementById('zoomOut').disabled]);
+    ok(zUp > 0.6 && zb[0] === 0.5 && zb[1], 'mobile: «+» / «−» buttons work; «−» zooms out to the 0.5× limit (button disabled there)');
+    await sleep(300);
+    await shot(mob, 'screenshot-zoom-mobile.png');
+  }
   await sleep(1700);
   await bots[0].say('Mobile_Max, давай к нам на север!');
   await sleep(400);

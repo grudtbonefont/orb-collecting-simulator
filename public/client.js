@@ -3,7 +3,7 @@
   'use strict';
   const $ = id => document.getElementById(id);
   const canvas = $('game'), ctx = canvas.getContext('2d');
-  let W = 0, H = 0, DPR = 1;
+  let W = 0, H = 0, DPR = 1, VW = 0, VH = 0, zoom = 1; // VW/VH: visible world size (screen / zoom)
   function resize() {
     DPR = Math.min(window.devicePixelRatio || 1, 2);
     W = window.innerWidth; H = window.innerHeight;
@@ -348,10 +348,41 @@
   });
   window.addEventListener('keyup', e => { keys[e.code] = false; });
   window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; pointer.down = false; });
-  canvas.addEventListener('pointerdown', e => { pointer.down = true; pointer.x = e.clientX; pointer.y = e.clientY; });
-  window.addEventListener('pointermove', e => { pointer.x = e.clientX; pointer.y = e.clientY; });
-  window.addEventListener('pointerup', () => { pointer.down = false; });
-  window.addEventListener('pointercancel', () => { pointer.down = false; });
+  // camera zoom: wheel / pinch / +− buttons; 0.5×–1.5×, saved in localStorage. Phones start zoomed out (see more of the arena).
+  // A second finger on the arena starts a pinch: movement pauses until all fingers are lifted (no jump to a stray finger).
+  const ZOOM_MIN = 0.5, ZOOM_MAX = 1.5, ZOOM_KEY = 'ocs_zoom';
+  const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  const clampZ = z => Math.round(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z)) * 1000) / 1000;
+  zoom = clampZ(parseFloat(store.get(ZOOM_KEY)) || (coarse || window.innerWidth <= 760 ? 0.75 : 1));
+  function setZoom(z) {
+    zoom = clampZ(z); store.set(ZOOM_KEY, String(zoom));
+    $('zoomIn').disabled = zoom >= ZOOM_MAX; $('zoomOut').disabled = zoom <= ZOOM_MIN;
+  }
+  window.OCSZoom = () => zoom; // read-only hook for the UI test
+  $('zoomIn').onclick = () => setZoom(zoom * 1.15);
+  $('zoomOut').onclick = () => setZoom(zoom / 1.15);
+  setZoom(zoom);
+  canvas.addEventListener('wheel', e => { if (!joined) return; e.preventDefault(); setZoom(zoom * Math.exp(-e.deltaY * 0.0015)); }, { passive: false });
+  document.addEventListener('gesturestart', e => e.preventDefault()); // iOS Safari page zoom
+  const touchPts = new Map();
+  let pinch = null;
+  const pinchDist = () => { const [a, b] = Array.from(touchPts.values()); return Math.max(10, Math.hypot(a.x - b.x, a.y - b.y)); };
+  canvas.addEventListener('pointerdown', e => {
+    if (e.pointerType === 'touch') {
+      touchPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touchPts.size >= 2) { if (!pinch && touchPts.size === 2) pinch = { d: pinchDist(), z: zoom }; pointer.down = false; return; }
+    }
+    if (pinch) return;
+    pointer.down = true; pointer.x = e.clientX; pointer.y = e.clientY;
+  });
+  window.addEventListener('pointermove', e => {
+    if (touchPts.has(e.pointerId)) touchPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch) { if (touchPts.size >= 2) setZoom(pinch.z * pinchDist() / pinch.d); return; }
+    pointer.x = e.clientX; pointer.y = e.clientY;
+  });
+  const ptrEnd = e => { touchPts.delete(e.pointerId); if (pinch && touchPts.size === 0) pinch = null; pointer.down = false; };
+  window.addEventListener('pointerup', ptrEnd);
+  window.addEventListener('pointercancel', ptrEnd);
 
   function getDir() {
     if (anyModal() || chatOpen) return { x: 0, y: 0 };
@@ -359,7 +390,7 @@
     let y = (keys.KeyS || keys.ArrowDown ? 1 : 0) - (keys.KeyW || keys.ArrowUp ? 1 : 0);
     if (x || y) { const l = Math.hypot(x, y); return { x: x / l, y: y / l }; }
     if (pointer.down) {
-      const dx = pointer.x - (dispMe.x - cam.x), dy = pointer.y - (dispMe.y - cam.y);
+      const dx = pointer.x - (dispMe.x - cam.x) * zoom, dy = pointer.y - (dispMe.y - cam.y) * zoom;
       const d = Math.hypot(dx, dy);
       if (d < 8) return { x: 0, y: 0 };
       const mag = Math.min(1, d / 90);
@@ -1024,13 +1055,15 @@
     frameNo++;
     const now = performance.now(), t = now / 1000;
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    VW = W; VH = H;
     if (!joined) { drawIdleBackground(t); drawPreviews(t, now); return; }
 
     const a = Math.min(1, (now - lastStepAt) / G.TICK_MS);
     corr.x *= 0.86; corr.y *= 0.86;
     dispMe.x = prevMe.x + (me.x - prevMe.x) * a + corr.x;
     dispMe.y = prevMe.y + (me.y - prevMe.y) * a + corr.y;
-    cam.x = dispMe.x - W / 2; cam.y = dispMe.y - H / 2;
+    VW = W / zoom; VH = H / zoom; // culling + camera work in world units of the zoomed viewport
+    cam.x = dispMe.x - VW / 2; cam.y = dispMe.y - VH / 2;
 
     const pos = interpPositions(now);
     pos.set(myId, { x: dispMe.x, y: dispMe.y });
@@ -1046,6 +1079,7 @@
       pl.pos = p;
     }
 
+    ctx.setTransform(DPR * zoom, 0, 0, DPR * zoom, 0, 0);
     drawBackground(t);
     ctx.save(); ctx.translate(-cam.x, -cam.y);
     // world border
@@ -1056,7 +1090,7 @@
     // orbs
     const pad = 60;
     for (const [id, o] of orbs) {
-      if (o.x < cam.x - pad || o.x > cam.x + W + pad || o.y < cam.y - pad - (o.fall ? 320 : 0) || o.y > cam.y + H + pad) continue;
+      if (o.x < cam.x - pad || o.x > cam.x + VW + pad || o.y < cam.y - pad - (o.fall ? 320 : 0) || o.y > cam.y + VH + pad) continue;
       let k = Math.min(1, (now - o.born) / 350), oy = o.y;
       if (o.fall) { // «Сферный дождь»: event orbs drop in from above
         const f = Math.min(1, (now - o.born) / 600);
@@ -1092,7 +1126,7 @@
     let onScreen = 0;
     for (const pl of players.values()) {
       const h = pl.trail.length ? pl.trail[pl.trail.length - 1] : null;
-      pl.trailVis = !!h && h.x > cam.x - 260 && h.x < cam.x + W + 260 && h.y > cam.y - 260 && h.y < cam.y + H + 260;
+      pl.trailVis = !!h && h.x > cam.x - 260 && h.x < cam.x + VW + 260 && h.y > cam.y - 260 && h.y < cam.y + VH + 260;
       if (pl.trailVis && (itemVal(pl.eq.trail) || 'none') !== 'none') onScreen++;
     }
     fxLod = onScreen > 22 || fpsEma < 30 ? 0 : onScreen > 10 || fpsEma < 45 || mobileUI() ? 1 : 2;
@@ -1100,7 +1134,7 @@
     const order = Array.from(players.values()).sort((p, q) => (p.id === myId) - (q.id === myId));
     for (const pl of order) {
       if (!pl.pos) continue;
-      if (pl.pos.x < cam.x - 120 || pl.pos.x > cam.x + W + 120 || pl.pos.y < cam.y - 120 || pl.pos.y > cam.y + H + 120) continue;
+      if (pl.pos.x < cam.x - 120 || pl.pos.x > cam.x + VW + 120 || pl.pos.y < cam.y - 120 || pl.pos.y > cam.y + VH + 120) continue;
       drawAvatar(ctx, pl.pos.x, pl.pos.y, G.PLAYER_R, pl.eq, t, { name: pl.name, dir: pl.dir, isMe: pl.id === myId, phase: pl.id });
     }
     // floating texts
@@ -1112,6 +1146,7 @@
       ctx.fillText(f.text, f.x, f.y - k * 40); ctx.shadowBlur = 0; ctx.globalAlpha = 1;
     }
     ctx.restore();
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0); // screen-space overlays (compass arrows) are not zoomed
     drawCompass(t, now);
     if (frameNo % 2 === 0) drawMinimap(now);
     drawPreviews(t, now);
@@ -1129,7 +1164,7 @@
     for (const tg of list) drawArrow(tg, t);
   }
   function drawArrow(tg, t) {
-    const sx = tg.x - cam.x, sy = tg.y - cam.y;
+    const sx = (tg.x - cam.x) * zoom, sy = (tg.y - cam.y) * zoom;
     if (sx > 30 && sx < W - 30 && sy > 30 && sy < H - 30) return; // already on screen
     const color = COMPASS_COLORS[tg.kind] || '#ffcc33';
     const cx = W / 2, cy = H / 2, dx = sx - cx, dy = sy - cy, a = Math.atan2(dy, dx);
@@ -1149,22 +1184,22 @@
     ctx.restore();
   }
   function drawBackground(t) {
-    ctx.fillStyle = '#060912'; ctx.fillRect(0, 0, W, H);
-    const vg = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.75);
+    ctx.fillStyle = '#060912'; ctx.fillRect(0, 0, VW, VH);
+    const vg = ctx.createRadialGradient(VW / 2, VH / 2, 0, VW / 2, VH / 2, Math.max(VW, VH) * 0.75);
     vg.addColorStop(0, 'rgba(30,40,100,0.25)'); vg.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, VW, VH);
     const step = 64;
     ctx.lineWidth = 1;
     ctx.strokeStyle = 'rgba(90,120,255,0.09)';
     ctx.beginPath();
-    const x0 = Math.max(0, Math.floor(cam.x / step) * step), x1 = Math.min(G.WORLD.w, cam.x + W);
-    const y0 = Math.max(0, Math.floor(cam.y / step) * step), y1 = Math.min(G.WORLD.h, cam.y + H);
-    for (let x = x0; x <= x1; x += step) { ctx.moveTo(x - cam.x + 0.5, Math.max(0, -cam.y)); ctx.lineTo(x - cam.x + 0.5, Math.min(H, G.WORLD.h - cam.y)); }
-    for (let y = y0; y <= y1; y += step) { ctx.moveTo(Math.max(0, -cam.x), y - cam.y + 0.5); ctx.lineTo(Math.min(W, G.WORLD.w - cam.x), y - cam.y + 0.5); }
+    const x0 = Math.max(0, Math.floor(cam.x / step) * step), x1 = Math.min(G.WORLD.w, cam.x + VW);
+    const y0 = Math.max(0, Math.floor(cam.y / step) * step), y1 = Math.min(G.WORLD.h, cam.y + VH);
+    for (let x = x0; x <= x1; x += step) { ctx.moveTo(x - cam.x + 0.5, Math.max(0, -cam.y)); ctx.lineTo(x - cam.x + 0.5, Math.min(VH, G.WORLD.h - cam.y)); }
+    for (let y = y0; y <= y1; y += step) { ctx.moveTo(Math.max(0, -cam.x), y - cam.y + 0.5); ctx.lineTo(Math.min(VW, G.WORLD.w - cam.x), y - cam.y + 0.5); }
     ctx.stroke();
     ctx.strokeStyle = 'rgba(90,120,255,0.16)'; ctx.beginPath();
-    for (let x = Math.max(0, Math.floor(cam.x / 512) * 512); x <= x1; x += 512) { ctx.moveTo(x - cam.x + 0.5, Math.max(0, -cam.y)); ctx.lineTo(x - cam.x + 0.5, Math.min(H, G.WORLD.h - cam.y)); }
-    for (let y = Math.max(0, Math.floor(cam.y / 512) * 512); y <= y1; y += 512) { ctx.moveTo(Math.max(0, -cam.x), y - cam.y + 0.5); ctx.lineTo(Math.min(W, G.WORLD.w - cam.x), y - cam.y + 0.5); }
+    for (let x = Math.max(0, Math.floor(cam.x / 512) * 512); x <= x1; x += 512) { ctx.moveTo(x - cam.x + 0.5, Math.max(0, -cam.y)); ctx.lineTo(x - cam.x + 0.5, Math.min(VH, G.WORLD.h - cam.y)); }
+    for (let y = Math.max(0, Math.floor(cam.y / 512) * 512); y <= y1; y += 512) { ctx.moveTo(Math.max(0, -cam.x), y - cam.y + 0.5); ctx.lineTo(Math.min(VW, G.WORLD.w - cam.x), y - cam.y + 0.5); }
     ctx.stroke();
   }
   const idleOrbs = Array.from({ length: 60 }, (_, i) => ({ x: Math.random(), y: Math.random(), t: i % 29 === 0 ? 'm' : i % 25 === 0 ? 'l' : i % 13 === 0 ? 'e' : i % 6 === 0 ? 'r' : i % 4 === 0 ? 'u' : 'c', v: 0.2 + Math.random() * 0.6, id: i }));
@@ -1330,7 +1365,7 @@
   function drawEventZone(t) {
     if (!evState || !evState.zone) return;
     const z = evState.zone, active = evState.phase === 'active', inside = Math.hypot(dispMe.x - z.x, dispMe.y - z.y) <= z.r;
-    if (z.x + z.r < cam.x || z.x - z.r > cam.x + W || z.y + z.r < cam.y || z.y - z.r > cam.y + H) return;
+    if (z.x + z.r < cam.x || z.x - z.r > cam.x + VW || z.y + z.r < cam.y || z.y - z.r > cam.y + VH) return;
     ctx.save();
     const gr = ctx.createRadialGradient(z.x, z.y, z.r * 0.2, z.x, z.y, z.r);
     const a = active ? 0.16 + 0.06 * Math.sin(t * 3) : 0.06;
@@ -1355,7 +1390,7 @@
   function drawRunner(t, now) {
     if (!runner) return;
     const x = runnerX(now), y = runnerY(now);
-    if (x < cam.x - 80 || x > cam.x + W + 80 || y < cam.y - 80 || y > cam.y + H + 80) return;
+    if (x < cam.x - 80 || x > cam.x + VW + 80 || y < cam.y - 80 || y > cam.y + VH + 80) return;
     const dx = runner.x - runner.px, dy = runner.y - runner.py, l = Math.hypot(dx, dy);
     if (l > 0.5) { // speed lines
       ctx.save(); ctx.strokeStyle = 'rgba(198,253,255,0.5)'; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.beginPath();

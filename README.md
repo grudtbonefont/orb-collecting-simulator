@@ -136,6 +136,11 @@ const CODES = [
 - Orbs go to the balance only (not the all-time total). Shards and items are granted via `grantItem(…, 'code')`; if they do not fit into the 450-unit inventory nothing is given.
 - Rate limit: 5 attempts per minute per account.
 
+## Camera zoom
+- 0.5×–1.5×: mouse wheel on the arena, two-finger pinch on phones, or the small «+ / −» buttons left of the radar. Saved in `localStorage` (`ocs_zoom`); phones start at 0.75× (see more of the arena), desktop at 1×.
+- A second finger on the arena starts a pinch; movement pauses until all fingers are lifted. Page pinch-zoom is blocked (`touch-action: none`, viewport `user-scalable=no`, iOS `gesturestart`).
+- Client-only: rendering and culling use the zoomed viewport; compass arrows and the radar are unaffected. The server broadcasts the whole arena to every player (no view-range filtering), so zooming out never reveals anything late or gives extra information. Screenshot: `screenshot-zoom-mobile.png`.
+
 ## Economy
 Measured with greedy bots on the new spawn settings (`node test/measure-earn-rate.js <bots> <seconds>` against a scratch server, no upgrades): **≈ 80–110 orbs/min** per player with 1–4 players online (≈ 80 used for pricing; humans are usually a bit slower, upgrades make it faster).
 
