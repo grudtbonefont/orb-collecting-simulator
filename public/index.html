@@ -28,9 +28,9 @@
         <button type="button" class="auth-tab" data-mode="register" role="tab">Регистрация</button>
       </div>
       <form id="authForm" class="auth-form" novalidate>
-        <input id="nick" name="username" autocomplete="username" maxlength="20" placeholder="Ник" autocapitalize="off" autocorrect="off" spellcheck="false">
-        <input id="pass" name="password" type="password" autocomplete="current-password" maxlength="72" placeholder="Пароль">
-        <input id="pass2" name="password2" type="password" autocomplete="new-password" maxlength="72" placeholder="Повторите пароль" class="hidden">
+        <input id="nick" name="username" autocomplete="username" maxlength="20" placeholder="Ник" autocapitalize="none" inputmode="latin" autocorrect="off" spellcheck="false">
+        <input id="pass" name="password" type="password" autocomplete="current-password" maxlength="72" placeholder="Пароль" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <input id="pass2" name="password2" type="password" autocomplete="new-password" maxlength="72" placeholder="Повторите пароль" autocapitalize="off" autocorrect="off" spellcheck="false" class="hidden">
         <div id="authRules" class="rules hidden">Ник: 3–20 символов — английские буквы, цифры и не более одного «_» (не в начале и не в конце).<br>Пароль: от 6 до 72 символов.</div>
         <button type="submit" id="authSubmit" class="btn primary big">Войти</button>
       </form>

@@ -81,6 +81,22 @@ async function authSuite(URL) {
   for (const n of bad) badRes.push(await v.call('auth', { mode: 'register', name: n, password: PASS, confirm: PASS }));
   ok(badRes.every(r => !r.ok && r.error), 'bad nicknames rejected: ' + badRes.map((r, i) => `${bad[i]} → «${r.error}»`).slice(0, 4).join('; ') + ' …');
   v.close();
+  { // login from a second device while the first one is playing: case-insensitive, trimmed, Cyrillic look-alikes, stray spaces in the password
+    const nm = 'Moca' + rnd(), D1 = makeClient(URL), D2 = makeClient(URL), D3 = makeClient(URL), D4 = makeClient(URL);
+    const r1 = await D1.register(nm);
+    const r2 = await D2.login('  ' + nm.toUpperCase() + ' ');
+    await sleep(300);
+    ok(r1.ok && r2.ok && /другой вкладки или устройства/.test(D1.kicked || ''), 'second device logs in (upper case + spaces) while the first plays; the first gets a clear «kicked» message');
+    const cyr = 'Мос' + 'а' + nm.slice(4); // М о с а — Cyrillic look-alikes from a Russian keyboard
+    const r3 = await D3.login(cyr, ' ' + PASS + ' ');
+    const D5 = makeClient(URL), r6 = await D5.login(nm.toLowerCase(), 'C' + PASS.slice(1));
+    ok(r6.ok, 'password with the first letter auto-capitalised by a phone keyboard is accepted');
+    D5.close();
+    const r4 = await D4.call('auth', { mode: 'login', name: 'Дракон', password: PASS });
+    const r5 = await D4.call('auth', { mode: 'login', name: nm, password: PASS + 'x' });
+    ok(r3.ok && !r4.ok && r4.code === 'nick' && /английскими/.test(r4.error) && !r5.ok && r5.code === 'wrong', `Cyrillic look-alike nick + spaces around the password accepted; clear errors: «${r4.error}» / «${r5.error}»`);
+    D1.close(); D2.close(); D3.close(); D4.close();
+  }
   const v2 = makeClient(URL);
   const shortPw = await v2.call('auth', { mode: 'register', name: 'Good_' + rnd(), password: '12345', confirm: '12345' });
   const mismatch = await v2.call('auth', { mode: 'register', name: 'Good_' + rnd(), password: PASS, confirm: PASS + 'x' });

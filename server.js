@@ -462,6 +462,14 @@ const server = http.createServer(app);
 io = new Server(server, { maxHttpBufferSize: 10 * 1024, pingInterval: 10000, pingTimeout: 20000, serveClient: true });
 
 // ---------------------------------------------------------------- auth helpers
+// Cyrillic letters that look like Latin ones (typed on a Russian phone keyboard)
+const HOMO = { 'А': 'A', 'В': 'B', 'Е': 'E', 'К': 'K', 'М': 'M', 'Н': 'H', 'О': 'O', 'Р': 'P', 'С': 'C', 'Т': 'T', 'Х': 'X', 'У': 'Y', 'а': 'a', 'е': 'e', 'о': 'o', 'р': 'p', 'с': 'c', 'у': 'y', 'х': 'x', 'к': 'k', 'м': 'm', 'т': 't', 'в': 'b', 'н': 'h', 'і': 'i', 'І': 'I', 'ј': 'j', 'Ј': 'J' };
+// password variants tried only after a miss, to rescue phone-keyboard edits: trimmed spaces and an auto-capitalised
+// (or auto-lowercased) first letter. Stored hashes are never changed; one login attempt still counts as one failure.
+function pwVariants(pw) {
+  const flip = x => (x ? (x[0] === x[0].toLowerCase() ? x[0].toUpperCase() : x[0].toLowerCase()) + x.slice(1) : x), t = pw.trim();
+  return new Set([t, flip(pw), flip(t)].filter(v => v && v !== pw));
+}
 const nameFails = new Map(); // account key -> {n, until, last}  (in memory only)
 function lockLeft(entry, now) { return entry && entry.until > now ? Math.ceil((entry.until - now) / 1000) : 0; }
 function addFail(map, key, now) {
@@ -806,19 +814,25 @@ io.on('connection', socket => {
         profiles.set(acc.key, acc);
         console.log(`register: ${acc.name}`);
       } else {
-        const key = name.toLowerCase();
+        // phone keyboards: Cyrillic look-alike letters (Russian layout) are mapped to Latin; the key is case-insensitive
+        const lname = name.replace(/[\u0400-\u04FF]/g, c => HOMO[c] || c);
+        if (/[^\x21-\x7E]/.test(lname)) return ack({ ok: false, error: 'Ник пишется английскими буквами (A–Z), цифрами и знаком _. Проверьте раскладку клавиатуры.', field: 'name', code: 'nick' });
+        const key = lname.toLowerCase();
         const nameLeft = lockLeft(nameFails.get(key), now);
-        if (nameLeft) { failSock(now); return ack({ ok: false, error: lockMsg(nameLeft), retryIn: nameLeft }); }
-        const valid = /^[A-Za-z0-9_]{3,20}$/.test(name);
+        if (nameLeft) { failSock(now); return ack({ ok: false, error: lockMsg(nameLeft), retryIn: nameLeft, code: 'locked' }); }
+        const valid = /^[A-Za-z0-9_]{3,20}$/.test(lname);
         const found = valid && password ? (profiles.get(key) || await store.getAccount(key)) : null; // cached only on success
-        const okPw = await bcrypt.compare(password.slice(0, 200), found ? found.passHash : DUMMY_HASH);
+        const pw = password.slice(0, 200);
+        let okPw = await bcrypt.compare(pw, found ? found.passHash : DUMMY_HASH);
+        // mobile keyboards / autofill: stray spaces around the password, other Unicode normalisation (ё, й). Only tried on a miss.
+        if (!okPw && found) for (const v of pwVariants(pw)) if (v && v !== pw && await bcrypt.compare(v, found.passHash)) { okPw = true; break; }
         if (!found || !okPw) {
           const se = failSock(now);
           const ne = valid ? addFail(nameFails, key, now) : null;
           const left = Math.max(lockLeft(se, now), lockLeft(ne, now));
-          if (left) return ack({ ok: false, error: lockMsg(left), retryIn: left });
+          if (left) return ack({ ok: false, error: lockMsg(left), retryIn: left, code: 'locked' });
           const remaining = AUTH_MAX_FAILS - Math.max(se.n, ne ? ne.n : 0);
-          return ack({ ok: false, error: 'Неверный ник или пароль.' + (remaining <= 2 ? ` Осталось попыток: ${remaining}.` : '') });
+          return ack({ ok: false, error: 'Неверный ник или пароль.' + (remaining <= 2 ? ` Осталось попыток: ${remaining}.` : ''), code: 'wrong' });
         }
         nameFails.delete(key); sockFails.delete('s');
         if (profiles.has(key)) acc = profiles.get(key);
