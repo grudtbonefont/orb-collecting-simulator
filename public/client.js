@@ -25,7 +25,7 @@
   $('nick').value = store.get(NICK_KEY) || '';
 
   // ------------------------------------------------------------ state
-  const socket = io({ transports: ['websocket', 'polling'] });
+  const socket = io({ transports: ['websocket', 'polling'], tryAllTransports: true }); // falls back to HTTP long-polling where WebSockets are blocked (school / office / some mobile networks)
   let trashSlot = null, trashBusy = false; // inventory trash dialog
   let joined = false, myName = store.get(NICK_KEY) || '', myId = null, profile = null, sessionScore = 0;
   const players = new Map();   // id -> {id,name,eq,trail:[],dir:{x,y},pos:{x,y}}
@@ -75,7 +75,7 @@
   // stage: 'auth' (login form) → 'lobby' (profile screen) → 'game' (arena)
   let stage = 'auth', authMode = 'login', authPending = false, playPending = false, paused = false;
   let summary = null; // last profile summary (rank, play time…) from the server
-  const setErr = msg => { $('joinError').textContent = msg || ''; };
+  const setErr = msg => { $('joinError').textContent = msg || ''; if (msg && $('joinError').scrollIntoView) $('joinError').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); };
   function setAuthMode(mode) {
     authMode = mode;
     document.querySelectorAll('.auth-tab').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
@@ -87,6 +87,7 @@
     setErr('');
   }
   document.querySelectorAll('.auth-tab').forEach(b => b.addEventListener('click', () => setAuthMode(b.dataset.mode)));
+  $('showPw').addEventListener('change', () => { const t = $('showPw').checked ? 'text' : 'password'; $('pass').type = t; $('pass2').type = t; });
   $('nick').addEventListener('input', () => {
     if (authMode !== 'register') return;
     const v = $('nick').value.trim();
@@ -95,12 +96,14 @@
   $('authForm').addEventListener('submit', e => {
     e.preventDefault();
     if (authPending) return;
-    const name = $('nick').value.trim(), password = $('pass').value, confirm = $('pass2').value;
+    const name = $('nick').value.trim();
+    // phone keyboards / autofill add stray spaces: registration stores the trimmed password (login also accepts it trimmed)
+    const password = authMode === 'register' ? $('pass').value.trim() : $('pass').value, confirm = $('pass2').value.trim();
     if (!name) { setErr('Введите ник'); $('nick').focus(); return; }
     if (authMode === 'register') {
       const ne = RULES.nicknameError(name); if (ne) { setErr(ne); $('nick').focus(); return; }
       const pe = RULES.passwordError(password); if (pe) { setErr(pe); $('pass').focus(); return; }
-      if (password !== confirm) { setErr('Пароли не совпадают'); $('pass2').focus(); return; }
+      if (password !== confirm) { setErr(confirm ? 'Пароли не совпадают — введите пароль ещё раз во втором поле (можно включить «Показать пароль»)' : 'Повторите пароль во втором поле'); $('pass2').value = ''; $('pass2').focus(); return; }
     } else if (!password) { setErr('Введите пароль'); $('pass').focus(); return; }
     if (!socket.connected) { setErr('Нет связи с сервером, подождите…'); socket.connect(); return; }
     authPending = true; $('authSubmit').disabled = true; setErr('');
@@ -264,7 +267,7 @@
   function reconcile(x, y, ack) {
     pending = pending.filter(i => i.s > ack);
     const p = { x, y };
-    for (const i of pending) G.applyInput(p, i.x, i.y, mySpeed());
+    for (const i of pending) { const px = p.x; G.applyInput(p, i.x, i.y, mySpeed()); G.zoneGate(p, px, doorOpen()); }
     const ex = me.x - p.x, ey = me.y - p.y;
     if (Math.abs(ex) + Math.abs(ey) > 0.01) {
       if (Math.hypot(ex, ey) > 250) { corr.x = corr.y = 0; prevMe.x = p.x; prevMe.y = p.y; }
@@ -308,6 +311,44 @@
     }
   });
 
+  // ---- zones + door (zone 1 violet | wall with a door | zone 2 blue, rarer orbs). Unlock is a server action.
+  const doorOpen = () => !!(profile && profile.stats && profile.stats.unlockedDoor2);
+  window.OCSZone = () => ({ zone: G.zoneOf(me.x), open: doorOpen(), x: me.x, y: me.y });
+  function updateDoorBtn() {
+    const b = $('doorBtn'); if (!b) return;
+    const near = joined && !doorOpen() && Math.abs(me.x - G.DOOR.x) < 360 && Math.abs(me.y - G.DOOR.y) < 420;
+    b.classList.toggle('hidden', !near);
+    if (near) { b.disabled = profile.balance < G.DOOR_COST; b.innerHTML = `🚪 Открыть дверь во 2-ю зону · ${orbsH(G.DOOR_COST)}`; }
+  }
+  $('doorBtn').addEventListener('click', () => {
+    socket.emit('door:unlock', null, res => {
+      if (!res || !res.ok) { toast((res && res.error) || 'Ошибка', 'err'); return; }
+      setProfile(res.profile); updateDoorBtn();
+      toast('🚪 Дверь открыта! Синяя зона: только редкие сферы и выше.', 'ok');
+    });
+  });
+  function drawZones(t) {
+    const Z = G.ZONE_W, H = G.ZONE_H, D = G.DOOR;
+    ctx.fillStyle = 'rgba(150,80,255,0.07)'; ctx.fillRect(0, 0, Z, H);          // zone 1: violet tint
+    ctx.fillStyle = 'rgba(40,130,255,0.11)'; ctx.fillRect(Z, 0, Z, H);          // zone 2: blue tint
+    if (cam.x + VW < Z - 400 && cam.x > -1) return;                             // wall far off-screen
+    const open = doorOpen(), pulse = 0.6 + 0.4 * Math.sin(t * 3);
+    ctx.save();
+    ctx.lineWidth = 14; ctx.strokeStyle = 'rgba(140,110,255,0.85)'; ctx.shadowColor = '#7a5cff'; ctx.shadowBlur = 18;
+    ctx.beginPath(); ctx.moveTo(Z, 0); ctx.lineTo(Z, D.y - D.half); ctx.moveTo(Z, D.y + D.half); ctx.lineTo(Z, H); ctx.stroke();
+    // door frame
+    ctx.lineWidth = 6; ctx.strokeStyle = open ? '#5dff8f' : '#ffcc33'; ctx.shadowColor = open ? '#5dff8f' : '#ffcc33'; ctx.shadowBlur = 24 * pulse;
+    ctx.strokeRect(Z - 22, D.y - D.half, 44, D.half * 2);
+    if (!open) { // bars + lock
+      ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,204,51,0.8)'; ctx.shadowBlur = 0;
+      ctx.beginPath(); for (let y = D.y - D.half + 28; y < D.y + D.half; y += 28) { ctx.moveTo(Z - 20, y); ctx.lineTo(Z + 20, y); } ctx.stroke();
+    }
+    ctx.shadowBlur = 0; ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = '700 18px system-ui, sans-serif';
+    ctx.fillText(open ? '🚪 Зона 2' : `🔒 ${G.DOOR_COST} сфер`, Z, D.y - D.half - 16);
+    ctx.font = '600 14px system-ui, sans-serif'; ctx.fillStyle = 'rgba(200,215,255,0.8)';
+    ctx.fillText('редкие сферы и выше →', Z + 120, D.y + 6);
+    ctx.restore();
+  }
   function updateHud(bump) {
     if (!profile) return;
     $('hudBalance').textContent = fmt(profile.balance);
@@ -440,7 +481,9 @@
     socket.emit('input', inp);
     prevMe.x = me.x; prevMe.y = me.y;
     G.applyInput(me, inp.x, inp.y, mySpeed());
+    G.zoneGate(me, prevMe.x, doorOpen());
     pending.push(inp);
+    updateDoorBtn();
     if (pending.length > 80) pending.shift();
     lastStepAt = performance.now();
     if (inp.x || inp.y) { const l = Math.hypot(inp.x, inp.y); myDir = { x: inp.x / l, y: inp.y / l }; }
@@ -1116,6 +1159,7 @@
     ctx.setTransform(DPR * zoom, 0, 0, DPR * zoom, 0, 0);
     drawBackground(t);
     ctx.save(); ctx.translate(-cam.x, -cam.y);
+    drawZones(t);
     // world border
     ctx.strokeStyle = 'rgba(120,90,255,0.8)'; ctx.lineWidth = 4; ctx.shadowColor = '#7a5cff'; ctx.shadowBlur = 20;
     ctx.strokeRect(0, 0, G.WORLD.w, G.WORLD.h); ctx.shadowBlur = 0;

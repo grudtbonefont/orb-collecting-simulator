@@ -420,3 +420,10 @@ canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: blo
   font: 800 18px/1 system-ui, sans-serif; cursor: pointer; padding: 0; touch-action: manipulation; opacity: .85; }
 .zoom-btns button:disabled { opacity: .35; cursor: default; }
 @media (max-width: 640px) { .zoom-btns { right: 110px; bottom: calc(70px + env(safe-area-inset-bottom)); } .zoom-btns button { width: 34px; height: 34px; } }
+
+.show-pw { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #aab3d9; cursor: pointer; user-select: none; }
+.show-pw input { width: 16px; height: 16px; margin: 0; }
+
+/* zone-2 door unlock button (appears near the door) */
+.door-btn { position: absolute; left: 50%; bottom: 74px; transform: translateX(-50%); pointer-events: auto; z-index: 6; white-space: nowrap; box-shadow: 0 0 22px rgba(255,204,51,.45); }
+@media (max-width: 640px) { .door-btn { bottom: calc(176px + env(safe-area-inset-bottom)); font-size: 13px; max-width: 92vw; } }

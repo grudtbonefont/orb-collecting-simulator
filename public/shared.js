@@ -1,6 +1,17 @@
 // Shared constants and logic (used by both server and browser client)
 (function (root) {
-  const WORLD = { w: 3000, h: 3000 };
+  const ZONE_W = 6000, ZONE_H = 6000; // one zone (was 3000×3000; 2× each side)
+  const WORLD = { w: ZONE_W * 2, h: ZONE_H }; // zone 1 (violet) | door | zone 2 (blue)
+  const DOOR_COST = 1000; // one-time unlock for zone 2 (~10 min of base farming)
+  const ZONE2_WEIGHTS = { r: 5200, e: 3500, m: 300 }; // rare+ only, richer than zone 1
+  const zoneOf = x => (x < ZONE_W ? 1 : 2);
+  const DOOR = { x: ZONE_W, y: ZONE_H / 2, half: 170 }; // opening in the wall between the zones (340 px tall)
+  // The wall at x = ZONE_W blocks everyone; only an unlocked player inside the door opening may cross. prevX = x before the move.
+  function zoneGate(pos, prevX, unlocked) {
+    if (unlocked && Math.abs(pos.y - DOOR.y) <= DOOR.half - PLAYER_R) return;
+    if (prevX <= ZONE_W) { if (pos.x > ZONE_W - PLAYER_R) pos.x = ZONE_W - PLAYER_R; }
+    else if (pos.x < ZONE_W + PLAYER_R) pos.x = ZONE_W + PLAYER_R;
+  }
   const PLAYER_R = 20;
   const BASE_SPEED = 230; // px per second
   const TICK_MS = 50;     // 20 ticks per second
@@ -180,14 +191,20 @@
   // Upgrades: optional, diminishing returns per level, costs scale from a few minutes to ~3 h of play for the last level.
   // `values[level]` is the cumulative effect at that level (index 0 = not bought). All effects are applied server-side.
   // Fully maxed magnet + speed + multiplier + luck ≈ +60–80 % orb income (measured, see README "Upgrades").
+  // Softer curve: maxed farm ≈ ≤1.4× base (magnet no longer vacuums the field). Same names/levels.
   const UPGRADES = {
-    magnet: { key: 'magnet', name: 'Магнит', desc: 'Больше радиус сбора сфер', max: 5, prices: [300, 900, 2400, 5500, 11000], values: [0, 10, 19, 26, 32, 36], unit: 'px' },
-    speed: { key: 'speed', name: 'Ускорение', desc: 'Быстрее движение по арене', max: 5, prices: [400, 1100, 2800, 6000, 12000], values: [0, 6, 10, 13, 16, 18], unit: '%' },
-    mult: { key: 'mult', name: 'Множитель сфер', desc: 'Каждая сфера приносит больше (дробные части копятся)', max: 5, prices: [600, 1600, 3800, 8000, 15000], values: [0, 5, 10, 15, 20, 25], unit: '%' },
-    luck: { key: 'luck', name: 'Удача', desc: 'Шанс ×2 за сферу; с 3-го уровня ещё и «находка»: обычная или необычная сфера становится эпической (+10)', max: 5, prices: [500, 1400, 3400, 7000, 13000],
-      values: [0, 2, 4, 6, 7, 8], jackpot: [0, 0, 0, 0.5, 0.75, 1], unit: '%' },
-    sense: { key: 'sense', name: 'Чутьё легенды', desc: 'Компас: стрелки к самым редким сферам и к событиям', max: 3, prices: [500, 1500, 4000], values: [0, 1, 2, 3], unit: '' },
-    skill: { key: 'skill', name: 'Мастер мини-игр', desc: 'Бонус к выигрышам в мини-играх', max: 3, prices: [300, 900, 2000], values: [0, 5, 10, 15], unit: '%' },
+    magnet: { key: 'magnet', name: 'Магнит', desc: 'Чуть больше радиус сбора сфер', max: 5, prices: [200, 600, 1500, 3500, 7000], values: [0, 4, 8, 12, 15, 18], unit: 'px' },
+    speed: { key: 'speed', name: 'Ускорение', desc: 'Чуть быстрее движение по арене', max: 5, prices: [250, 700, 1800, 4000, 8000], values: [0, 3, 5, 7, 9, 11], unit: '%' },
+    mult: { key: 'mult', name: 'Множитель сфер', desc: 'Каждая сфера приносит чуть больше (дробные части копятся)', max: 5, prices: [350, 900, 2200, 5000, 10000], values: [0, 3, 6, 9, 12, 15], unit: '%' },
+    luck: { key: 'luck', name: 'Удача', desc: 'Шанс ×2 за сферу; с 3-го уровня ещё и «находка»: обычная или необычная сфера становится эпической (+10)', max: 5, prices: [300, 800, 2000, 4500, 9000],
+      values: [0, 1, 2, 3, 4, 5], jackpot: [0, 0, 0, 0.25, 0.4, 0.55], unit: '%' },
+    sense: { key: 'sense', name: 'Чутьё легенды', desc: 'Компас: стрелки к самым редким сферам и к событиям', max: 3, prices: [400, 1200, 3000], values: [0, 1, 2, 3], unit: '' },
+    skill: { key: 'skill', name: 'Мастер мини-игр', desc: 'Бонус к выигрышам в мини-играх', max: 3, prices: [200, 600, 1400], values: [0, 3, 6, 9], unit: '%' },
+  };
+  // Prices players actually paid before the soft-reset (used once to refund → then upgrades reset to 0)
+  const UPGRADE_REFUND_PRICES = {
+    magnet: [300, 900, 2400, 5500, 11000], speed: [400, 1100, 2800, 6000, 12000], mult: [600, 1600, 3800, 8000, 15000],
+    luck: [500, 1400, 3400, 7000, 13000], sense: [500, 1500, 4000], skill: [300, 900, 2000],
   };
   const UPGRADE_KEYS = Object.keys(UPGRADES);
   const SENSE_TEXT = ['нет', 'стрелки к легендарной и мифической сферам', '+ стрелка к ближайшей эпической, расстояния', '+ сигнал за 15 с до легендарной и стрелки к целям событий'];
@@ -365,8 +382,8 @@
   }
 
   const api = {
-    WORLD, PLAYER_R, BASE_SPEED, TICK_MS, STEP_DT, ORB_TYPES, ORB_RANK, ORB_LEGEND, POOL_WEIGHTS, RAIN_WEIGHTS, rollOrbType, expectedOrbValue, CATEGORIES, INV_CATEGORIES, RARITIES, ITEMS, ITEM_BY_ID, INV_SLOTS, INV_CAP, BUY_MAX_QTY, PAINTS,
-    DEFAULT_EQUIPPED, DEFAULT_OWNED, UPGRADES, UPGRADE_KEYS, upLevel, upValue, jackpotChance, upgradeText, orbReward, skillPrize, compassTargets, SENSE_EPIC_RANGE, RADAR, radarBlips, PUSH, separatePlayers,
+    WORLD, ZONE_W, ZONE_H, DOOR, DOOR_COST, ZONE2_WEIGHTS, zoneOf, zoneGate, PLAYER_R, BASE_SPEED, TICK_MS, STEP_DT, ORB_TYPES, ORB_RANK, ORB_LEGEND, POOL_WEIGHTS, RAIN_WEIGHTS, rollOrbType, expectedOrbValue, CATEGORIES, INV_CATEGORIES, RARITIES, ITEMS, ITEM_BY_ID, INV_SLOTS, INV_CAP, BUY_MAX_QTY, PAINTS,
+    DEFAULT_EQUIPPED, DEFAULT_OWNED, UPGRADES, UPGRADE_KEYS, UPGRADE_REFUND_PRICES, upLevel, upValue, jackpotChance, upgradeText, orbReward, skillPrize, compassTargets, SENSE_EPIC_RANGE, RADAR, radarBlips, PUSH, separatePlayers,
     EVENTS, EVENT_KEYS, EVENT_SCHEDULE, SHARD_ID, SHARD_EXCHANGE,
     MINIGAMES, REACTION_PRIZES, rushPrize, memoryPrize, memoryShowMs, shellFinal, shellShuffleMs, throwPos, throwPoints, throwPrize, chainPrize, minigameMinMs, speedFor, pickupFor, applyInput,
   };

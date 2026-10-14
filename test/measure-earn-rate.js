@@ -21,7 +21,7 @@ async function bot(i) {
   while (Date.now() - t0 < SEC * 1000) {
     if (!target || !b.orbs.has(target.id) || Date.now() > retarget) {
       let best = null, bd = Infinity;
-      for (const [id, o] of b.orbs) { const d = Math.hypot(o.x - b.pos.x, o.y - b.pos.y) / G.ORB_TYPES[o.t].value ** 0.5; if (d < bd) { bd = d; best = { id, ...o }; } }
+      for (const [id, o] of b.orbs) { if ((o.x < G.ZONE_W) !== (b.pos.x < G.ZONE_W)) continue; const d = Math.hypot(o.x - b.pos.x, o.y - b.pos.y) / G.ORB_TYPES[o.t].value ** 0.5; if (d < bd) { bd = d; best = { id, ...o }; } }
       target = best; retarget = Date.now() + (human ? 600 : 0);
     }
     let dx = 0, dy = 0;

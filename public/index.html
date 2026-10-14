@@ -28,9 +28,10 @@
         <button type="button" class="auth-tab" data-mode="register" role="tab">Регистрация</button>
       </div>
       <form id="authForm" class="auth-form" novalidate>
-        <input id="nick" name="username" autocomplete="username" maxlength="20" placeholder="Ник" autocapitalize="none" inputmode="latin" autocorrect="off" spellcheck="false">
+        <input id="nick" name="username" autocomplete="username" maxlength="20" placeholder="Ник (латиница)" autocapitalize="none" enterkeyhint="next" autocorrect="off" spellcheck="false">
         <input id="pass" name="password" type="password" autocomplete="current-password" maxlength="72" placeholder="Пароль" autocapitalize="off" autocorrect="off" spellcheck="false">
         <input id="pass2" name="password2" type="password" autocomplete="new-password" maxlength="72" placeholder="Повторите пароль" autocapitalize="off" autocorrect="off" spellcheck="false" class="hidden">
+        <label class="show-pw"><input type="checkbox" id="showPw"> Показать пароль</label>
         <div id="authRules" class="rules hidden">Ник: 3–20 символов — английские буквы, цифры и не более одного «_» (не в начале и не в конце).<br>Пароль: от 6 до 72 символов.</div>
         <button type="submit" id="authSubmit" class="btn primary big">Войти</button>
       </form>
@@ -104,6 +105,7 @@
   </div>
   <div id="radar" class="radar"><canvas id="minimap" width="150" height="150" aria-label="Радар"></canvas><button id="radarToggle" class="radar-toggle" type="button" title="Свернуть / развернуть радар">–</button></div>
   <div class="zoom-btns"><button type="button" id="zoomIn" title="Приблизить (колесо мыши / два пальца)" aria-label="Приблизить">+</button><button type="button" id="zoomOut" title="Отдалить" aria-label="Отдалить">−</button></div>
+  <button type="button" id="doorBtn" class="door-btn btn primary hidden"></button>
   <button type="button" id="helpBtn" class="help-btn" title="Виды сфер (H)" aria-label="Виды сфер">?</button>
   <div id="orbHelp" class="orb-help hidden" role="dialog" aria-label="Виды сфер">
     <div class="oh-head"><b>Виды сфер</b><button type="button" id="orbHelpClose" class="close" aria-label="Закрыть">✕</button></div>

@@ -8,7 +8,8 @@ Stack: Node.js + Express 5 + Socket.IO (server-authoritative, 20 ticks/s), HTML5
 - Nickname: 3–20 characters, only `A–Z a–z 0–9 _`, at most one `_`, not at the start or end; unique case-insensitively (display case is kept); a small profanity / reserved-word filter applies.
 - Password: 6–72 characters (≤ 72 bytes), stored only as a bcrypt hash (cost 10).
 - After login the server issues a random 256-bit session token (only its SHA-256 is stored, 30-day sliding expiry) kept in `localStorage`; «Выйти» deletes it server-side. One game connection per account (a new login kicks the old tab).
-- Brute-force protection: 5 failed attempts → 1-minute lockout, per connection and per nickname.
+- Brute-force protection: 5 failed login attempts → 1-minute lockout, per connection and per nickname. Registration form errors (bad nickname, mismatched confirm) do **not** count toward the lockout; up to 5 registrations per connection.
+- Mobile-friendly registration: passwords are trimmed (stray keyboard spaces), «Показать пароль» toggle, specific messages for Cyrillic / spaces in the nickname and for a confirm mismatch, error scrolled into view, socket falls back to polling when websockets fail.
 - Balance, all-time total, inventory, equipped cosmetics, upgrades and stats persist per account.
 
 ## Profile screen
@@ -76,6 +77,14 @@ Global arena chat (logged-in players only), last 50 messages are sent on join, j
 
 Previously 380 orbs refilled instantly with 2 % legendaries regardless of player count; now the field scales with the player count and is evenly spread. `GET /api/health` shows `orbs` and `targetOrbs`.
 
+## World: two zones and a door
+- World **12000 × 6000** = two zones of **6000 × 6000** each (was a single 3000 × 3000 arena; each side ×2).
+- **Zone 1** (violet tint): the old orb mix (common-heavy). New players always spawn here.
+- **Door** in the middle of the right wall of zone 1 (340 px opening). Unlock once for **1000 orbs** (`door:unlock`, ≈10 min of base farming); stored as `stats.unlockedDoor2`. The wall blocks everyone else (server-side `G.zoneGate`, mirrored in client prediction). The HUD shows «🚪 Открыть дверь…» when you stand next to it.
+- **Zone 2** (blue tint): only rare+ orbs — weights `r 5200 · e 3500 · m 300` (mean ≈ 7.6 per orb vs 1.43 in zone 1), at ~35 % of zone-1's orb count (lower density).
+- Orb targets: zone 1 = clamp(280 + 60 × online, 360, 1000); zone 2 = 35 % of that.
+- Screenshots: `screenshot-zone1.png`, `screenshot-door.png`, `screenshot-zone2.png`.
+
 ## Orb rarities (`G.ORB_TYPES` in `public/shared.js`)
 | tier | value | spawn weight (of 10 000) | color | notes |
 |---|---|---|---|---|
@@ -94,6 +103,8 @@ Pool average ≈ 1.43 per orb. Each tier has its own look on the arena and minim
 **«Радар»** (bottom-right, collapsible with its button; 92 px on phones): a sonar view of ±900 px around you, where a wave every 3 s briefly lights up players and common/uncommon (faint: rare) orbs. Epic, legendary and mythic orbs, event treasures and the runner never appear (the compass handles those); the «Царь горы» zone is shown. It is drawn client-side from data the client already receives (`G.radarBlips`), and the server sends nothing extra. Screenshot: `screenshot-radar.png`.
 
 ## Arena events (server-authoritative, `G.EVENTS` / `eventTick` in `server.js`)
+**Currently OFF by default.** The code stays; turn the scheduler back on with `EVENTS_ENABLED=1` (random 6–10 min) or `EVENT_EVERY_MS=<ms>`. `/api/health` reports `eventsEnabled`.
+
 Scheduler: only while ≥ 1 player is online, one event every **6–10 min** (random), never the same kind twice in a row, never while a legendary orb is alive or imminent (the legendary waits until 20 s after the event). Each event is announced **25 s** ahead (banner with countdown and rules), then a HUD shows timer/progress, then everyone gets the results (top 5 names + scores + rewards and their own line). Rewards are paid by the server only to players online at the end; shards go through `grantItem(..., 'event')`. If everyone leaves, the event is cancelled.
 
 | event | duration | rules | rewards |
@@ -164,32 +175,19 @@ Shop prices (★ = new in this update):
 - Шапки: Шапка-бини 300 ★, Праздничный колпак 450 ★, Кепка 500, Заячьи ушки 500 ★, Кошачьи ушки 700 ★, Наушники 1 000 ★, Ковбойская шляпа 1 300 ★, Цилиндр 1 500, Рожки 2 000 ★, Шлем викинга 3 000 ★, Нимб 3 200, Кепка с пропеллером 3 900 ★, Шляпа волшебника 9 500 ★, Корона 20 000
 - Everything together: 235 600 (the 49 new items: 158 100). Existing item ids, prices and ownership are unchanged.
 
-## Upgrades
-Optional, server-authoritative (applied in `collectAround` / the movement step / mini-game payouts on the server; the client only displays them). Diminishing returns per level; first levels cost a few minutes of play, the last level of the main four ≈ 2.3–3.1 h at 80 orbs/min. Levels are capped server-side (`G.upLevel`), other players never see them.
+## Upgrades (soft curve, Oct 2026)
+All upgrades were **refunded once** (sum of the old prices of each owned level → orb balance, not the all-time total) and reset to 0; flag `stats.upgradeRefundV1` prevents a second refund.
 
-| upgrade | effect at level 1 / 2 / 3 / 4 / 5 | cost per level | total |
-|---|---|---|---|
-| Магнит | pickup radius +10 / +19 / +26 / +32 / +36 px (base 20 → 56 max) | 300 / 900 / 2 400 / 5 500 / 11 000 | 20 100 |
-| Ускорение | speed +6 / +10 / +13 / +16 / +18 % (230 → 271 px/s max) | 400 / 1 100 / 2 800 / 6 000 / 12 000 | 22 300 |
-| Множитель сфер | every orb ×1.05 / 1.10 / 1.15 / 1.20 / 1.25 (fractions are carried per player, so +5 % of a 1-orb pickup is never rounded away) | 600 / 1 600 / 3 800 / 8 000 / 15 000 | 29 000 |
-| Удача | 2 / 4 / 6 / 7 / 8 % chance that a collected orb counts twice (the client shows «×2!»); from level 3 also a «находка»: 0.5 / 0.75 / 1 % of common/uncommon pickups count as an epic (+10) | 500 / 1 400 / 3 400 / 7 000 / 13 000 | 25 300 |
-| Чутьё легенды (компас) | 1: arrows to the legendary and mythic orbs · 2: + arrow to the nearest epic within 1 500 px, distances · 3: + heads-up 15 s before a legendary and arrows to event targets (zone, treasures, runner) | 500 / 1 500 / 4 000 | 6 000 |
-| Мастер мини-игр | mini-game prizes +5 / +10 / +15 % (perfect play still nets < half of farming: ≤ 39 orbs/min in «Сферный шторм») | 300 / 900 / 2 000 | 3 200 |
+| Upgrade | Prices (lvl 1→max) | Effect at levels 1…max |
+|---|---|---|
+| Магнит | 200 / 600 / 1500 / 3500 / 7000 | pickup radius +4 / 8 / 12 / 15 / 18 px (base 20) |
+| Ускорение | 250 / 700 / 1800 / 4000 / 8000 | +3 / 5 / 7 / 9 / 11 % speed |
+| Множитель сфер | 350 / 900 / 2200 / 5000 / 10000 | +3 / 6 / 9 / 12 / 15 % |
+| Удача | 300 / 800 / 2000 / 4500 / 9000 | ×2 chance 1–5 %; «находка» 0.25 / 0.4 / 0.55 % from lvl 3 |
+| Чутьё легенды | 400 / 1200 / 3000 | compass (unchanged) |
+| Мастер мини-игр | 200 / 600 / 1400 | +3 / 6 / 9 % mini-game prizes |
 
-All six maxed cost 105 900. With orb rarities (Oct 2026, 6 + 6 runs, `test/measure-earn-rate.js`): **no upgrades ≈ 106 orbs/min (79–119), everything maxed ≈ 181 orbs/min (158–220) → ×1.71**; luck was retuned so the larger orb values don't inflate it. Previous measurement (greedy bot, `UPGRADES=max node test/measure-earn-rate.js 1 90 <url>` against fresh scratch servers with `OCS_TEST_HOOKS=1`, 12 runs each, one bot per server): **no upgrades 102 orbs/min (94–113), everything maxed 182 orbs/min (152–230) → ×1.79 on average (+79 %), median ×1.72 (+72 %)**; repeated batches with the same settings vary by roughly ±7 %, so treat it as ≈ +70–80 %. Multiplier × luck alone is ×1.40 (1.25 × 1.12); speed and magnet add the rest.
-- Existing players keep their levels: magnet and speed still have 5 levels and map 1:1 onto the new curves, the new upgrades start at 0. A stored level above a max (not possible today) would be clamped and refunded at that upgrade's last price.
-- Before: Магнит +14 px per level (up to +70 px), Ускорение +6 % per level (up to +30 %), 300…6 000 / 400…7 200.
-
-- Mini-games are for fun and pay **less than farming**:
-  - Память: fee 10, a growing sequence of 4 coloured orbs (12 rounds max); prize 3 per round after round 2, up to 30; cooldown 20 s. The server sends only the part of the sequence played so far, times each answer (faster than the sequence can be shown → rejected).
-  - Угадай чашу: fee 10, the orb is shown under one of 3 cups, 9 visible swaps; win 16, cooldown 15 s. The server picks the cup and the swaps (the animation replays exactly those), reveals the cup only in the result; picking before the shuffle ends is rejected. Blind guessing: EV 5.3 < fee.
-  - Точный бросок: fee 10, 3 throws; the marker position is a server-side function of time (RTT-compensated), points 10 / 7 / 4 / 1 by distance; prize 80 % of points, up to 24; cooldown 25 s. Stops < 250 ms are refused.
-  - Цепочка: fee 10, tap orbs 1…8 in order; prize < 3.5 s 18, < 4.5 s 14, < 6 s 10, < 8 s 6, < 10 s 3; cooldown 20 s. The server checks order, position and ≥ 120 ms between taps.
-  - Flawless back-to-back play incl. cooldowns with «Мастер мини-игр» 3 (tested in `npm test`): Реакция 29, Сферный шторм 39, Память 16, Угадай чашу 25, Точный бросок 38, Цепочка 30 orbs/min (farming ≈ 100). Screenshots: `screenshot-minigames-6.png`, `screenshot-minigame-shell.png`.
-
-**Trails by rarity** (client only, `trailFx` in `public/client.js`): every trail keeps its own look; a rarity layer adds common: soft fade · rare: glow + twinkling sparkles · epic: wide two-colour shimmering glow + drifting particles · legendary: long (1 s) pulsing luminous tail with a white-hot core, swirling double-helix particles and bursts from the head · exclusives: legendary + a signature effect (Хвост кометы: blazing coma + blue ion tails; Кристальный след: spinning prism halo + rainbow glints). Performance: ≤ 6 / 20 / 36 / 50 particles per player by tier, plain strokes/arcs only (no shadows, no per-frame gradients/arrays), off-screen trails skipped, quality drops automatically (half particles on phones, `screenshot-minigames-6.png`, `screenshot-minigame-shell.png`.gt; 10 trails on screen or `screenshot-minigames-6.png`, `screenshot-minigame-shell.png`.lt; 45 FPS; glow only with `screenshot-minigames-6.png`, `screenshot-minigame-shell.png`.gt; 22 trails or `screenshot-minigames-6.png`, `screenshot-minigame-shell.png`.lt; 30 FPS). Screenshot: `screenshot-trails-epic.png`.
-  - Реакция: fee 10, prize by reaction time < 250 ms 16, < 320 ms 12, < 400 ms 10, < 550 ms 6, < 750 ms 3; cooldown 15 s. Typical players roughly break even. (Before: 25 / 18 / 12 / 6, no cooldown.)
-  - Сферный шторм: fee 20 (was 15), payout 75 % of the score capped at 40 (was 100 %, uncapped), cooldown 20 s. A perfect run nets at most +20 per 40 s ≈ 30 orbs/min vs ≈ 80 when farming.
+Multiplier × luck at max ≈ ×1.25 per orb; with movement upgrades the target is ≤ ~1.4× of base income (was ≈ 1.7×).
 
 ## Security / privacy
 - Clients only ever receive public data: a random per-session public player id (not the socket id), nickname, cosmetics, position, public stats. No IPs, socket ids, tokens or hashes are sent, logged or stored.

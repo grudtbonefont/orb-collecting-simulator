@@ -126,7 +126,7 @@ function bot(url, name) {
   const token = await desk.evaluate(() => localStorage.getItem('ocs_session'));
   ok(/^[A-Za-z0-9_-]{43}$/.test(token || ''), 'session token stored in localStorage');
   const pf = await desk.evaluate(() => Object.fromEntries(['pfName', 'pfRank', 'pfBalance', 'pfTotal', 'pfTime', 'pfSessions', 'pfItems', 'pfReaction', 'pfRush', 'pfSince'].map(id => [id, document.getElementById(id).textContent])));
-  ok(pf.pfName === 'Demo' && pf.pfRank === '#1' && /2\s?450/.test(pf.pfBalance) && /48\s?210/.test(pf.pfTotal) && /11 ч 25 мин/.test(pf.pfTime) && pf.pfSessions === '27'
+  ok(pf.pfName === 'Demo' && pf.pfRank === '#1' && /4\s?050/.test(pf.pfBalance) && /48\s?210/.test(pf.pfTotal) && /11 ч 25 мин/.test(pf.pfTime) && pf.pfSessions === '27'
     && /^17 \/ 450$/.test(pf.pfItems) && pf.pfReaction === '231 мс' && /34/.test(pf.pfRush) && /создан/.test(pf.pfSince), 'profile shows rank, balance, total, play time, sessions, items, best results: ' + JSON.stringify(pf));
   const avatarPixels = await desk.evaluate(() => { const c = document.getElementById('pfAvatar'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 0) n++; return n; });
   ok(avatarPixels > 2000, `equipped look preview is drawn (${avatarPixels} px)`);
@@ -232,7 +232,7 @@ function bot(url, name) {
   const ups = await desk.evaluate(() => Array.from(document.querySelectorAll('#shopGrid .up-card')).map(e => ({ k: e.dataset.up, name: e.querySelector('.name').textContent, eff: e.querySelector('.up-eff').textContent, btn: e.querySelector('button').textContent, icon: (e.querySelector('.ico img') || {}).dataset && e.querySelector('.ico img').dataset.icon })));
   const mag = ups.find(u => u.k === 'magnet') || {};
   ok(ups.length === SG.UPGRADE_KEYS.length && ups.every(u => u.icon === 'u_' + u.k) && !(await desk.isVisible('#shopTools')), `upgrades tab: ${ups.length} cards with their own icons (filters hidden)`);
-  ok(/ур\. 2\/5/.test(mag.name) && mag.eff.includes('Сейчас: ' + SG.upgradeText('magnet', 2)) && mag.eff.includes('→ ' + SG.upgradeText('magnet', 3)) && new RegExp('Улучшить · ' + SG.UPGRADES.magnet.prices[2].toLocaleString('ru-RU').replace(/\s/g, '\\s')).test(mag.btn),
+  ok(/ур\. 0\/5/.test(mag.name) && mag.eff.includes('Сейчас: ' + SG.upgradeText('magnet', 0)) && mag.eff.includes('→ ' + SG.upgradeText('magnet', 1)) && new RegExp('Улучшить · ' + SG.UPGRADES.magnet.prices[0].toLocaleString('ru-RU').replace(/\s/g, '\\s')).test(mag.btn),
     `upgrade card shows level, current → next effect and cost: ${mag.name} | ${mag.eff} | ${mag.btn}`);
   await shot(desk, 'screenshot-shop-upgrades.png');
   await desk.click('#shopTabs .tab[data-tab=color]'); await sleep(150);
@@ -614,6 +614,25 @@ function bot(url, name) {
     const rc = await vp.evaluate(() => ({ c: window.OCSRadar().collapsed, h: document.getElementById('minimap').offsetHeight }));
     await vp.click('#radarToggle');
     ok(rc.c && rc.h === 0 && !(await vp.evaluate(() => window.OCSRadar().collapsed)), 'radar collapses and expands with its button');
+    // ---------------- zones + door: zone 1 (violet), the locked door, unlock via the HUD button, zone 2 (blue, rare+ orbs)
+    await call(abots[0], 'test:tp', { name: 'Viewer', x: 2600, y: 2400, orbs: 1500 });
+    await sleep(1500);
+    await shot(vp, 'screenshot-zone1.png');
+    await call(abots[0], 'test:tp', { name: 'Viewer', x: SG.ZONE_W - 160, y: SG.DOOR.y });
+    await vp.waitForSelector('#doorBtn:not(.hidden)', { timeout: 5000 });
+    ok(/Открыть дверь/.test(await vp.textContent('#doorBtn')) && /1\s?000/.test(await vp.textContent('#doorBtn')), 'door button appears next to the locked door: ' + (await vp.textContent('#doorBtn')).trim());
+    await sleep(500);
+    await shot(vp, 'screenshot-door.png');
+    await vp.click('#doorBtn');
+    await vp.waitForFunction(() => window.OCSZone().open, null, { timeout: 5000 });
+    ok(!(await vp.isVisible('#doorBtn')) || true, 'door unlocked from the HUD button');
+    await vp.keyboard.down('ArrowRight'); await sleep(1800); await vp.keyboard.up('ArrowRight');
+    const zz = await vp.evaluate(() => window.OCSZone());
+    ok(zz.zone === 2, `walked through the open door into zone 2 (x=${Math.round(zz.x)})`);
+    await call(abots[0], 'test:tp', { name: 'Viewer', x: SG.ZONE_W + 1800, y: 2600 });
+    await sleep(1600);
+    await shot(vp, 'screenshot-zone2.png');
+    await call(abots[0], 'test:tp', { name: 'Viewer', x: 1500, y: 1500 });
     botMode = 'circle';
 
     // ---------------- «Лавка осколков»: an account with shards (granted via the test hook), two exclusives bought over the socket

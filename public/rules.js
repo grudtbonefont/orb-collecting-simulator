@@ -44,7 +44,9 @@
   function nicknameError(name) {
     if (typeof name !== 'string' || !name.length) return 'Введите ник';
     if (name.length < NICK_MIN || name.length > NICK_MAX) return `Ник должен быть от ${NICK_MIN} до ${NICK_MAX} символов`;
-    if (!/^[A-Za-z0-9_]+$/.test(name)) return 'Ник может содержать только английские буквы (A–Z), цифры (0–9) и знак _';
+    if (/[\u0400-\u04FF]/.test(name)) return 'Ник пишется латиницей: переключите клавиатуру на английскую (например, Ivan, а не Иван)';
+    if (/\s/.test(name)) return 'В нике не может быть пробелов — используйте знак _ (например, Super_Max)';
+    if (!/^[A-Za-z0-9_]+$/.test(name)) return 'Ник может содержать только английские буквы (A–Z), цифры (0–9) и знак _ (без «-», «.» и других символов)';
     if ((name.match(/_/g) || []).length > 1) return 'В нике может быть только один знак _';
     if (name[0] === '_' || name[name.length - 1] === '_') return 'Ник не может начинаться или заканчиваться знаком _';
     if (isBadNickname(name)) return 'Этот ник недопустим. Пожалуйста, выберите другой.';

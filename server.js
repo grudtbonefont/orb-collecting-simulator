@@ -31,8 +31,9 @@ const envInt = (name, def) => { const v = parseInt(process.env[name], 10); retur
 // ---------------------------------------------------------------- orb spawning (all numbers documented in README)
 const legendEvery = parseInt(process.env.LEGENDARY_EVERY_MS, 10) || 0; // test override
 const SPAWN = {
-  cell: 300,                       // world is split into 10 x 10 cells of 300 px
-  base: 70, perPlayer: 30, min: 90, max: 320, // target orbs = clamp(base + perPlayer * online, min, max)
+  cell: 300,                       // world (2 zones of 6000×6000) is split into 40 x 20 cells of 300 px
+  base: 280, perPlayer: 60, min: 360, max: 1000, // zone-1 target = clamp(base + perPlayer * online, min, max) (4× the old area)
+  zone2Share: 0.35,                // zone 2 keeps ~35 % of zone-1's orb count (rarer, richer orbs, lower density)
   // orb tiers + weights: G.ORB_TYPES / G.POOL_WEIGHTS (common +1, uncommon +2, rare +5, epic +10, mythic +50; legendary +25 is timed)
   respawnMin: 3000, respawnMax: 9000, // a collected orb comes back 3-9 s later (somewhere else)
   fillSpread: 4000,                // extra orbs for newly joined players appear over ~4 s
@@ -115,13 +116,15 @@ function newPublicId() { let id; do { id = crypto.randomInt(1, 2 ** 31 - 1); } w
 const NX = Math.ceil(G.WORLD.w / SPAWN.cell), NY = Math.ceil(G.WORLD.h / SPAWN.cell);
 const cells = Array.from({ length: NX * NY }, () => new Set()); // orb ids per cell
 const cellOf = (x, y) => Math.min(NY - 1, Math.floor(y / SPAWN.cell)) * NX + Math.min(NX - 1, Math.floor(x / SPAWN.cell));
-let respawnQueue = [];      // due timestamps for normal orbs
+let respawnQueue = [];      // { due, z } respawns for normal (pool) orbs, per zone
 let legendaryAlive = 0, nextLegendAt = Date.now() + SPAWN.legendFirst, legendWarnedFor = 0;
 let mythicAlive = 0, evAlive = 0; // mythic orbs (pool, max 1), event orbs (rain / treasure, not part of the pool)
 const targetOrbs = () => Math.max(SPAWN.min, Math.min(SPAWN.max, SPAWN.base + SPAWN.perPlayer * players.size));
+const targetZone = z => (z === 1 ? targetOrbs() : Math.round(targetOrbs() * SPAWN.zone2Share));
+const zoneCount = { 1: 0, 2: 0 }; // normal (pool) orbs alive per zone
 // one normal pool spawn: weighted tier roll; a mythic only while none is alive and someone is playing (else epic)
-function rollPool() {
-  const t = G.rollOrbType(G.POOL_WEIGHTS);
+function rollPool(z = 1) {
+  const t = G.rollOrbType(z === 2 ? G.ZONE2_WEIGHTS : G.POOL_WEIGHTS);
   return t === 'm' && (mythicAlive >= G.ORB_TYPES.m.maxAlive || players.size === 0) ? 'e' : t;
 }
 
@@ -135,17 +138,19 @@ function spotIsFree(x, y) {
   return true;
 }
 // best-of-k emptiest cell, then a few rejection-sampled points inside it (Poisson-disc-ish)
-function pickSpot() {
+const ZCOLS = Math.round(G.ZONE_W / SPAWN.cell); // cell columns per zone
+function pickSpot(z = 1) {
   const m = 40;
   for (let attempt = 0; attempt < 4; attempt++) {
     let best = -1, bestN = Infinity;
     for (let k = 0; k < SPAWN.candidates; k++) {
-      const c = Math.floor(Math.random() * cells.length), n = cells[c].size + Math.random() * 0.5;
+      const col = (z === 2 ? ZCOLS : 0) + Math.floor(Math.random() * ZCOLS), c = Math.floor(Math.random() * NY) * NX + col, n = cells[c].size + Math.random() * 0.5;
       if (n < bestN) { bestN = n; best = c; }
     }
     const x0 = (best % NX) * SPAWN.cell, y0 = Math.floor(best / NX) * SPAWN.cell;
     for (let t = 0; t < 8; t++) {
-      const x = Math.round(Math.max(m, Math.min(G.WORLD.w - m, x0 + rand(15, SPAWN.cell - 15))));
+      const lo = z === 2 ? G.ZONE_W + 60 : m, hi = z === 2 ? G.WORLD.w - m : G.ZONE_W - 60;
+      const x = Math.round(Math.max(lo, Math.min(hi, x0 + rand(15, SPAWN.cell - 15))));
       const y = Math.round(Math.max(m, Math.min(G.WORLD.h - m, y0 + rand(15, SPAWN.cell - 15))));
       if (spotIsFree(x, y)) return { x, y };
     }
@@ -154,7 +159,8 @@ function pickSpot() {
 }
 // evKind: 'rain' | 'treasure' for event orbs (5th field = 1 so clients can animate them), undefined for pool orbs
 function addOrb(t, pos, evKind) {
-  const o = { id: nextOrbId++, x: pos.x, y: pos.y, t, cell: cellOf(pos.x, pos.y) };
+  const o = { id: nextOrbId++, x: pos.x, y: pos.y, t, cell: cellOf(pos.x, pos.y), z: G.zoneOf(pos.x) };
+  if (!evKind && t !== 'l') { o.pool = true; zoneCount[o.z]++; }
   if (t === 'l') { o.expires = Date.now() + SPAWN.legendLife; legendaryAlive++; }
   if (t === 'm') { o.expires = Date.now() + G.ORB_TYPES.m.lifeMs; mythicAlive++; }
   if (evKind) { o.ev = evKind; evAlive++; }
@@ -170,25 +176,28 @@ function removeOrb(o, byPlayerId) {
   if (o.t === 'l') legendaryAlive--;
   if (o.t === 'm') mythicAlive--;
   if (o.ev) evAlive--;
+  if (o.pool) zoneCount[o.z]--;
   pendingDels.push([o.id, byPlayerId || 0]);
 }
 function spawnTick(now) {
-  const target = targetOrbs();
-  const normal = orbs.size - legendaryAlive - evAlive;
-  for (let missing = target - normal - respawnQueue.length; missing > 0; missing--) respawnQueue.push(now + rand(0, SPAWN.fillSpread));
+  // per-zone targets; queue entries are { due, z }
+  for (const z of [1, 2]) {
+    const queued = respawnQueue.reduce((n, q) => n + (q.z === z ? 1 : 0), 0);
+    for (let missing = targetZone(z) - zoneCount[z] - queued; missing > 0; missing--) respawnQueue.push({ due: now + rand(0, SPAWN.fillSpread), z });
+  }
   let spawned = 0;
   const keep = [];
-  for (const due of respawnQueue) {
-    if (due > now || spawned >= SPAWN.maxPerTick) { keep.push(due); continue; }
-    if (orbs.size - legendaryAlive - evAlive >= target) continue; // target shrank (players left): drop the respawn
-    const pos = pickSpot();
-    if (!pos) { keep.push(now + 500); continue; }
-    addOrb(rollPool(), pos);
+  for (const q of respawnQueue) {
+    if (q.due > now || spawned >= SPAWN.maxPerTick * 2) { keep.push(q); continue; }
+    if (zoneCount[q.z] >= targetZone(q.z)) continue; // target shrank (players left): drop the respawn
+    const pos = pickSpot(q.z);
+    if (!pos) { keep.push({ due: now + 500, z: q.z }); continue; }
+    addOrb(rollPool(q.z), pos);
     spawned++;
   }
   respawnQueue = keep;
   // legendary: a timed event with cooldown, only while someone is playing
-  for (const o of orbs.values()) if (o.expires <= now) { removeOrb(o, 0); if (o.t === 'm') respawnQueue.push(now + rand(SPAWN.respawnMin, SPAWN.respawnMax)); }
+  for (const o of orbs.values()) if (o.expires <= now) { removeOrb(o, 0); }
   if (ev) nextLegendAt = Math.max(nextLegendAt, ev.endAt + EV_LEGEND_GAP); // never during an arena event
   if (now >= nextLegendAt - SPAWN.legendWarnMs && legendWarnedFor !== nextLegendAt && legendaryAlive < SPAWN.legendMaxAlive && players.size > 0) {
     legendWarnedFor = nextLegendAt;
@@ -207,7 +216,7 @@ function spawnTick(now) {
   }
 }
 // initial fill for an empty arena
-for (let i = 0; i < SPAWN.min; i++) { const p = pickSpot(); if (p) addOrb(rollPool(), p); }
+for (const z of [1, 2]) for (let i = 0, n = targetZone(z); i < n; i++) { const p = pickSpot(z); if (p) addOrb(rollPool(z), p); }
 pendingAdds = []; pendingDels = [];
 
 
@@ -215,14 +224,15 @@ pendingAdds = []; pendingDels = [];
 // ---------------------------------------------------------------- timed arena events (scheduler + rules; numbers in G.EVENTS)
 // EVENT_EVERY_MS: unset = random 6–10 min of online time, 0 = scheduler off (test hooks only), N = fixed gap.
 // EVENT_ANNOUNCE_MS (default 25 s countdown) and EVENT_DURATION_MS (override every duration) are for tests.
-const EV_EVERY = process.env.EVENT_EVERY_MS === undefined || process.env.EVENT_EVERY_MS === '' ? -1 : envInt('EVENT_EVERY_MS', 0);
+// Arena events are DISABLED by default (user request). Re-enable: EVENTS_ENABLED=1 (random 6–10 min) or EVENT_EVERY_MS=N.
+const EV_EVERY = process.env.EVENT_EVERY_MS !== undefined && process.env.EVENT_EVERY_MS !== '' ? envInt('EVENT_EVERY_MS', 0) : process.env.EVENTS_ENABLED === '1' ? -1 : 0;
 const EV_ANNOUNCE = envInt('EVENT_ANNOUNCE_MS', G.EVENT_SCHEDULE.announceMs);
 const EV_DURATION = envInt('EVENT_DURATION_MS', 0);
 const EV_LEGEND_GAP = 20000; // the legendary orb waits at least this long after an event
 let ev = null, evClock = 0, lastEvKind = null;
 const nextEventGap = () => (EV_EVERY > 0 ? EV_EVERY : rand(G.EVENT_SCHEDULE.minMs, G.EVENT_SCHEDULE.maxMs));
 let evGap = nextEventGap();
-const clampW = v => Math.max(60, Math.min(G.WORLD.w - 60, Math.round(Number(v))));
+const clampW = v => Math.max(60, Math.min(G.ZONE_W - 60, Math.round(Number(v))));
 // What clients may know about the running event: kind, phase, times (relative), zone / runner / treasures left. No ids.
 function publicEvent(now = Date.now()) {
   if (!ev) return null;
@@ -236,7 +246,7 @@ function publicEvent(now = Date.now()) {
 function farSpot(margin, avoid = []) {
   let best = null, bestD = -1;
   for (let i = 0; i < 80; i++) {
-    const x = rand(margin, G.WORLD.w - margin), y = rand(margin, G.WORLD.h - margin);
+    const x = rand(margin, G.ZONE_W - margin), y = rand(margin, G.ZONE_H - margin);
     let d = Infinity;
     for (const pl of players.values()) d = Math.min(d, Math.hypot(pl.x - x, pl.y - y));
     for (const a of avoid) d = Math.min(d, Math.hypot(a.x - x, a.y - y) * 1.5);
@@ -264,7 +274,7 @@ function announceEvent(kind, opts = {}) {
   const dur = opts.durationMs || EV_DURATION || def.durationMs;
   ev = { kind, phase: 'announce', startAt: now + ann, endAt: now + ann + dur, dur, scores: new Map(), opts, lastPush: 0 };
   if (kind === 'koth') {
-    const z = Number.isFinite(opts.x) ? { x: clampW(opts.x), y: clampW(opts.y) } : { x: Math.round(rand(550, G.WORLD.w - 550)), y: Math.round(rand(550, G.WORLD.h - 550)) };
+    const z = Number.isFinite(opts.x) ? { x: clampW(opts.x), y: clampW(opts.y) } : { x: Math.round(rand(550, G.ZONE_W - 550)), y: Math.round(rand(550, G.ZONE_H - 550)) };
     ev.zone = { x: z.x, y: z.y, r: def.radius };
   }
   nextLegendAt = Math.max(nextLegendAt, ev.endAt + EV_LEGEND_GAP);
@@ -290,7 +300,7 @@ function startEvent(now) {
   io.to('arena').emit('ev:start', publicEvent(now));
 }
 function moveRunner(dt) {
-  const R = ev.runner, def = G.EVENTS.runner, s = dt / 1000, W = G.WORLD.w, H = G.WORLD.h;
+  const R = ev.runner, def = G.EVENTS.runner, s = dt / 1000, W = G.ZONE_W, H = G.ZONE_H;
   let near = null, nd = def.fleeRange;
   for (const pl of players.values()) { const d = Math.hypot(pl.x - R.x, pl.y - R.y); if (d < nd) { nd = d; near = pl; } }
   let dx, dy, sp;
@@ -452,7 +462,7 @@ app.get('/api/leaderboard', async (req, res) => {
   try { res.json(await leaderboard(limit, req.query.name)); }
   catch (e) { console.error('leaderboard failed:', e.message); res.status(503).json({ error: 'unavailable' }); }
 });
-app.get('/api/health', (req, res) => res.json({ ok: true, online: players.size, orbs: orbs.size, targetOrbs: targetOrbs(), event: ev ? ev.kind + ':' + ev.phase : null,
+app.get('/api/health', (req, res) => res.json({ ok: true, online: players.size, orbs: orbs.size, targetOrbs: targetOrbs(), event: ev ? ev.kind + ':' + ev.phase : null, eventsEnabled: EV_EVERY !== 0, world: G.WORLD,
   storage: store.mode, version: VERSION, uptimeSec: Math.round(process.uptime()) }));
 app.get('/api/shop', (req, res) => res.json({ items: G.ITEMS, upgrades: G.UPGRADES, minigames: G.MINIGAMES, orbs: G.ORB_TYPES, events: G.EVENTS, shardExchange: G.SHARD_EXCHANGE }));
 app.use((req, res) => res.status(404).type('text').send('Not found'));
@@ -752,7 +762,7 @@ io.on('connection', socket => {
       removePlayer(existing, { silent: true });
       existing.socket.disconnect(true);
     }
-    const spawn = { x: 200 + Math.random() * (G.WORLD.w - 400), y: 200 + Math.random() * (G.WORLD.h - 400) };
+    const spawn = { x: 200 + Math.random() * (G.ZONE_W - 400), y: 200 + Math.random() * (G.ZONE_H - 400) }; // always zone 1
     pl = {
       id: newPublicId(), acc, socket, sessionHash, x: spawn.x, y: spawn.y,
       inputs: [], budget: 2, lastSeq: 0, session: 0, gained: 0, lucky: 0, jackpots: 0, frac: 0, evInside: false, rtt: 100, mg: null, joinedAt: Date.now(), chatTimes: [], lastChat: '',
@@ -796,20 +806,21 @@ io.on('connection', socket => {
       if (pre) return ack(pre);
       if (!isObj(data) || (data.mode !== 'login' && data.mode !== 'register')) return ack({ ok: false, error: 'Неверный запрос' });
       const name = typeof data.name === 'string' ? data.name.trim() : '';
-      const password = typeof data.password === 'string' ? data.password : '';
+      let password = typeof data.password === 'string' ? data.password : '';
+      if (data.mode === 'register') { password = password.trim(); if (typeof data.confirm === 'string') data.confirm = data.confirm.trim(); } // stray spaces from phone keyboards
       let acc;
       if (data.mode === 'register') {
         const nErr = R.nicknameError(name);
-        if (nErr) { failSock(now); return ack({ ok: false, error: nErr, field: 'name' }); }
+        if (nErr) { return ack({ ok: false, error: nErr, field: 'name' }); }
         const pErr = R.passwordError(password);
-        if (pErr) { failSock(now); return ack({ ok: false, error: pErr, field: 'password' }); }
-        if (data.confirm !== undefined && data.confirm !== password) { failSock(now); return ack({ ok: false, error: 'Пароли не совпадают', field: 'confirm' }); }
-        if (registrations >= 3) return ack({ ok: false, error: 'Слишком много регистраций. Обновите страницу позже.' });
+        if (pErr) { return ack({ ok: false, error: pErr, field: 'password' }); }
+        if (data.confirm !== undefined && data.confirm !== password) { return ack({ ok: false, error: 'Пароли не совпадают — введите пароль ещё раз во втором поле', field: 'confirm', code: 'confirm' }); }
+        if (registrations >= 5) return ack({ ok: false, error: 'Слишком много регистраций с этой страницы. Обновите страницу и попробуйте снова.', code: 'reg_limit' });
         const key = name.toLowerCase();
-        if (profiles.has(key) || await store.getAccount(key)) { failSock(now); return ack({ ok: false, error: 'Этот ник уже занят. Выберите другой.', field: 'name' }); }
+        if (profiles.has(key) || await store.getAccount(key)) { return ack({ ok: false, error: 'Этот ник уже занят. Выберите другой.', field: 'name' }); }
         const hash = await bcrypt.hash(password, BCRYPT_COST);
         acc = newAccount(name, hash);
-        if (!(await store.createAccount(acc))) { failSock(now); return ack({ ok: false, error: 'Этот ник уже занят. Выберите другой.', field: 'name' }); }
+        if (!(await store.createAccount(acc))) { return ack({ ok: false, error: 'Этот ник уже занят. Выберите другой.', field: 'name' }); }
         registrations++;
         profiles.set(acc.key, acc);
         console.log(`register: ${acc.name}`);
@@ -1074,6 +1085,21 @@ io.on('connection', socket => {
     } catch (e) { console.error('code:redeem failed:', e.message); ack({ ok: false, error: 'Ошибка сервера, попробуйте позже' }); }
     finally { a._redeeming = false; }
   });
+  // ---- zone-2 door: one-time orb payment, persisted in stats.unlockedDoor2 (balance only; the all-time total is untouched)
+  socket.on('door:unlock', async (data, ack) => {
+    if (typeof data === 'function') { ack = data; data = null; }
+    ack = safeAck(ack);
+    if (!acct) return ack({ ok: false, error: 'Сначала войдите в аккаунт' });
+    const a = acct.acc;
+    if (a.stats.unlockedDoor2 === true) return ack({ ok: false, error: 'Дверь уже открыта', code: 'owned' });
+    if (a.balance < G.DOOR_COST) return ack({ ok: false, error: `Нужно ${G.DOOR_COST} сфер, у вас ${a.balance}`, code: 'funds' });
+    a.balance -= G.DOOR_COST;
+    a.stats.unlockedDoor2 = true;
+    accountChanged(a);
+    try { await flush(); } catch (_) { /* retried later */ }
+    console.log(`door: ${a.name} unlocked zone 2`);
+    ack({ ok: true, profile: ownProfile(a) });
+  });
   socket.on('shard:exchange', async (qty, ack) => {
     ack = safeAck(ack);
     if (!acct) return ack({ ok: false, error: 'Сначала войдите в аккаунт' });
@@ -1130,8 +1156,10 @@ io.on('connection', socket => {
     // spawn one orb of each requested tier in a ring around the caller or {x,y} (screenshots / rarity tests)
     socket.on('test:tp', (d, ack) => { // move own player to a point (tests only)
       ack = safeAck(ack);
-      if (!pl || !isObj(d) || !Number.isFinite(d.x) || !Number.isFinite(d.y)) return ack({ ok: false });
-      pl.x = Math.min(G.WORLD.w - G.PLAYER_R, Math.max(G.PLAYER_R, d.x)); pl.y = Math.min(G.WORLD.h - G.PLAYER_R, Math.max(G.PLAYER_R, d.y)); pl.inputs.length = 0; pl.kx = pl.ky = 0;
+      const q = isObj(d) && typeof d.name === 'string' ? byKey.get(d.name.toLowerCase()) : pl; // {name}: move another online player (UI screenshots)
+      if (!q || !isObj(d) || !Number.isFinite(d.x) || !Number.isFinite(d.y)) return ack({ ok: false });
+      q.x = Math.min(G.WORLD.w - G.PLAYER_R, Math.max(G.PLAYER_R, d.x)); q.y = Math.min(G.WORLD.h - G.PLAYER_R, Math.max(G.PLAYER_R, d.y)); q.inputs.length = 0; q.kx = q.ky = 0;
+      if (typeof d.orbs === 'number' && d.orbs > 0 && d.orbs <= 1e6) { q.acc.balance += Math.floor(d.orbs); accountChanged(q.acc); }
       ack({ ok: true });
     });
     socket.on('test:spawn', (d, ack) => {
@@ -1217,8 +1245,8 @@ function collectAround(pl, radius, now) {
       const g = INV.grantItem(pl.acc, G.SHARD_ID, ot.shards, 'arena');
       pl.socket.emit('item', g.ok ? { id: G.SHARD_ID, qty: ot.shards, source: 'arena' } : { error: g.error });
       if (g.ok) emitProfile(pl);
-      if (o.t === 'm') { systemChat(`${pl.acc.name} поймал(а) мифическую сферу!`); respawnQueue.push(now + rand(SPAWN.respawnMin, SPAWN.respawnMax)); }
-    } else if (!o.ev) respawnQueue.push(now + rand(SPAWN.respawnMin, SPAWN.respawnMax));
+      if (o.t === 'm') { systemChat(`${pl.acc.name} поймал(а) мифическую сферу!`); respawnQueue.push({ due: now + rand(SPAWN.respawnMin, SPAWN.respawnMax), z: o.z }); }
+    } else if (o.pool) respawnQueue.push({ due: now + rand(SPAWN.respawnMin, SPAWN.respawnMax), z: o.z });
   }
 }
 
@@ -1235,7 +1263,9 @@ function tick() {
     while (pl.budget >= 1 && pl.inputs.length) {
       const inp = pl.inputs.shift();
       pl.budget -= 1;
+      const px = pl.x;
       G.applyInput(pl, inp.x, inp.y, speed);
+      G.zoneGate(pl, px, pl.acc.stats.unlockedDoor2 === true);
       pl.lastSeq = inp.s;
       collectAround(pl, radius, now);
     }
@@ -1251,6 +1281,7 @@ function tick() {
     const list = [];
     for (const pl of players.values()) { pl.mx = pl.x - pl.x0; pl.my = pl.y - pl.y0; pl.lvl = pl.acc.upgrades.speed || 0; list.push(pl); }
     G.separatePlayers(list);
+    for (const pl of list) G.zoneGate(pl, pl.x0, pl.acc.stats.unlockedDoor2 === true); // pushes never carry anyone through the wall
   }
   spawnTick(now);
   eventTick(now, dt);
