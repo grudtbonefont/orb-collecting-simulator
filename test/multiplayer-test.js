@@ -400,7 +400,7 @@ function tierEventRules() {
     E.treasure.reward.orbs * E.treasure.maxCount <= 4 * RATE * 1.5, `5 events (auto: treasure ×5, runner ×3, lucky ×1.25 orbs / ×2 rare+ for ${E.lucky.durationMs / 1000} s); every reward (orbs + shards at the exchange rate) ≤ 4 min of farming (top: ${E.koth.rewards[0].orbs} ◉ + ${E.koth.rewards[0].shards} 💎)`);
   const S = G.EVENT_SCHEDULE;
   ok(S.minMs === 120000 && S.maxMs === 360000 && S.announceMs >= 20000 && S.announceMs <= 30000, 'schedule: an event every 2–6 min of online time, announced 25 s ahead');
-  ok(OB0().maxAlive === 16 && OB0().everyMinMs === 6000 && OB0().everyMaxMs === 15000 && OB0().laserChance === 0.25, 'obstacles: a spawn every 6–15 s, up to 16 at once, 25 % lasers');
+  ok(OB0().maxAlive === 30 && OB0().everyMinMs === 6000 && OB0().everyMaxMs === 15000 && OB0().laserChance === 0.25, 'obstacles: a spawn every 6–15 s, up to 30 at once, 25 % lasers');
   const lw = G.luckyWeights(G.POOL_WEIGHTS), pw = G.POOL_WEIGHTS;
   ok(lw.c === pw.c && lw.u === pw.u && ['r', 'e', 'l', 'm'].every(t => lw[t] === pw[t] * 2), 'lucky weights: rare/epic/legendary/mythic ×2, common/uncommon unchanged');
   // obstacles: collision push-out + laser beam geometry + penalty
@@ -1224,6 +1224,9 @@ async function chatClearSuite(URL) {
   ok(f.ok && f.size === 100 && h.length === 100 && h[0].t === 'fill 6' && h[h.length - 1].t === 'самое новое', `history keeps the last 100 messages (oldest now «${h[0] && h[0].t}», newest «${h[h.length - 1] && h[h.length - 1].t}»)`);
   await sleep(3500);
   ok(clears === 0, 'no periodic chat:clear any more');
+  { const t0 = Date.now(); let made = 0; for (let i = 0; i < 30; i++) { const q = await C.call('test:obstacle', { lifeMs: 60000 }); if (q.ok) made = q.obstacles.length; }
+    const ms = Date.now() - t0; await C.call('test:obstacle', { clear: true });
+    ok(made >= 28 && ms < 5000, `30 obstacles can be placed with the spacing rules (${made} placed in ${ms} ms, bounded 40 tries each)`); }
   C.close(); E.close(); F.close();
 }
 async function chatRestartSuite() {

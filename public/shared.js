@@ -337,7 +337,7 @@
 
   // ---------------------------------------------------------------- temporary obstacles (server spawns, everyone collides)
   // kinds: 'wall' (long thin rect), 'block' (square-ish rect), 'rock' (circle), 'laser' (solid pylon + spinning beam)
-  const OBSTACLES = { maxAlive: 16, everyMinMs: 6000, everyMaxMs: 15000, lifeMinMs: 45000, lifeMaxMs: 90000, laserChance: 0.25,
+  const OBSTACLES = { maxAlive: 30, everyMinMs: 6000, everyMaxMs: 15000, lifeMinMs: 45000, lifeMaxMs: 90000, laserChance: 0.25,
     warnMs: 3000, playerClear: 380, doorClear: 650, gap: 450, pylonR: 26, beamMin: 240, beamMax: 340, spinMin: 0.8, spinMax: 1.3,
     penaltyPct: 0.07, penaltyMax: 150, invulnMs: 3000, dropMax: 10, dropLifeMs: 30000,
     // iron robot (own timer, separate from obstacles: 30 % roll every 45–90 s): rare solid player-shaped obstacle that shoots slow shots at players in range (shared immunity with lasers)
