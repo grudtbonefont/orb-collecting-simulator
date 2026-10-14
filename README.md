@@ -112,7 +112,7 @@ Scheduler: only while ≥ 1 player is online, one event every **6–10 min** (ra
 | Сферный дождь | 45 s | 40 + 25 per player (≤ 220) extra orbs (c/u/r/e mix) fall; leftovers vanish at the end | whatever you collect (paid on pickup) |
 | Царь горы | 60 s | stand in a zone (r = 230 px, shown on the arena + minimap); +1 point per second inside | 1st 200 ◉ + 2 💎, 2nd 120 ◉ + 1 💎, 3rd 80 ◉, others ≥ 10 points 20 ◉; alone: 100 ◉ + 1 💎; < 10 points: nothing |
 | Охота за сокровищем | 90 s | 3 treasure orbs (+1 per 4 players, ≤ 6) placed ≥ 900 px from players; the HUD says how many are left | each treasure 50 ◉ + 1 💎 |
-| Сфера-беглец | 60 s | a fast orb (175 px/s) flees from the closest player; position streamed to all | the catcher: 120 ◉ + 2 💎 |
+| Раннеры | 90 s | 3 fast orbs (175 px/s) at random places flee from the closest player, each in its own zone; positions streamed to all | each catch: 80 ◉ + 1 💎 |
 
 Rewards are worth ≈ 1–2.5 min of farming. Env: `EVENT_EVERY_MS` (unset = random 6–10 min, `0` = events off, `N` = fixed interval), `EVENT_ANNOUNCE_MS` (default 25 000), `EVENT_DURATION_MS` (override all durations, for testing). Stats: `eventsPlayed`, `eventWins` (added with default 0).
 

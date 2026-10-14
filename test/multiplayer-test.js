@@ -530,7 +530,7 @@ async function eventSuite(URL) {
   const r0 = rn[0] || [], rIds = new Set(rn.flat().map(q => q[0]));
   ok(r0.length === 3 && rIds.size === 3 && re && re.caught === 1 && re.total === 3 && re.outcome === 'partial' && rn.every(l => l.every(q => q.length === 3)), `3 runaway orbs spawned (${r0.map(q => q[0] + '@' + q[1] + ',' + q[2]).join(' ')}); caught ${re && re.caught}/${re && re.total} → outcome «${re && re.outcome}»`);
   ok(rn.length > 10 && re && re.kind === 'runner' && re.results[0].name === A.profile.name && JSON.stringify(re.you.reward) === JSON.stringify(G.EVENTS.runner.reward) &&
-    shards(A) - sA1 === G.EVENTS.runner.reward.shards && A.profile.balance - bA1 >= G.EVENTS.runner.reward.orbs, `«Сфера-беглец»: A caught it (+${G.EVENTS.runner.reward.orbs} ◉ + ${G.EVENTS.runner.reward.shards} 💎), position streamed while active`);
+    shards(A) - sA1 === G.EVENTS.runner.reward.shards && A.profile.balance - bA1 >= G.EVENTS.runner.reward.orbs, `«Раннеры»: A caught one (+${G.EVENTS.runner.reward.orbs} ◉ + ${G.EVENTS.runner.reward.shards} 💎), position streamed while active`);
   ok(rb && rb.kind === 'runner' && rb.you === null && rb.caught === 1, 'others learn how many runners were caught');
   const st = A.profile.stats;
   ok(st.eventsPlayed >= 3 && st.eventWins >= 2, `event stats counted (played ${st.eventsPlayed}, won ${st.eventWins})`);
@@ -551,6 +551,7 @@ async function luckyObstacleSuite(URL) {
   // lucky: twice as many orbs on the map while it runs, score = orbs collected
   await sleep(1500); const n0 = pool();
   let r = await A.emit('test:event', { kind: 'lucky', announceMs: 100, durationMs: 14000 });
+  await sleep(1500); // wait past the announcement so the wave is active
   const tgt = (await (await fetch(URL + '/api/health')).json()).targetOrbs * 2; // both zones, normal target
   const n1 = await waitFor(() => { const n = pool(); return n >= tgt * 1.25 * 0.97 ? n : 0; }, 11000) || pool();
   const h = await (await fetch(URL + '/api/health')).json();

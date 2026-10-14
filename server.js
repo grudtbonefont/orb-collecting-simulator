@@ -1437,7 +1437,7 @@ function tick() {
   const p = [];
   for (const pl of players.values()) p.push([pl.id, Math.round(pl.x * 100) / 100, Math.round(pl.y * 100) / 100, pl.lastSeq]);
   const st = { t: now, p, oa: pendingAdds, od: pendingDels };
-  if (ev && ev.runners && ev.phase === 'active') st.rn = ev.runners.filter(r => !r.caught).map(r => [r.id, Math.round(r.x), Math.round(r.y)]); // «Сферы-беглецы» positions
+  if (ev && ev.runners && ev.phase === 'active') st.rn = ev.runners.filter(r => !r.caught).map(r => [r.id, Math.round(r.x), Math.round(r.y)]); // «Раннеры» positions
   const rb = obstacles.filter(o => o.k === 'robot');
   if (rb.length) st.rb = rb.map(o => [o.id, +o.face.toFixed(3), o.aim ? 1 : 0, o.aim ? Math.round(o.aim.x) : 0, o.aim ? Math.round(o.aim.y) : 0]); // robots: facing, aiming (telegraph)
   if (shots.length) st.pj = shots.map(b => [b.id, Math.round(b.x), Math.round(b.y), Math.round(b.vx), Math.round(b.vy)]);

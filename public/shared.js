@@ -323,8 +323,8 @@
       rewards: [{ orbs: 200, shards: 2 }, { orbs: 120, shards: 1 }, { orbs: 80, shards: 0 }], solo: { orbs: 100, shards: 1 }, participation: { orbs: 20, shards: 0 } },
     treasure: { key: 'treasure', name: 'Охота за сокровищем', icon: '💰', durationMs: 120000, count: 5, maxCount: 5, minDist: 900,
       desc: 'По всей карте в случайных местах спрятаны 5 сфер-сокровищ. Кто первым схватит — получит награду!', reward: { orbs: 50, shards: 1 } },
-    runner: { key: 'runner', name: 'Сферы-беглецы', icon: '💨', durationMs: 90000, count: 3, speed: 175, wander: 90, r: 14, fleeRange: 700,
-      desc: 'По карте носятся 3 сферы, которые убегают от игроков. Каждая пойманная — награда!', reward: { orbs: 80, shards: 1 } },
+    runner: { key: 'runner', name: 'Раннеры', icon: '💨', durationMs: 90000, count: 3, speed: 175, wander: 90, r: 14, fleeRange: 700,
+      desc: 'По карте носятся 3 Раннера — они убегают от игроков. Каждый пойманный Раннер — награда!', reward: { orbs: 80, shards: 1 } },
     lucky: { key: 'lucky', name: 'Волна удачи', icon: '🍀', durationMs: 75000, spawnMult: 1.25, rareMult: 2,
       desc: '75 секунд на карте на 25 % больше сфер, а шанс редких, эпических, легендарных и мифических сфер удвоен (×2)!' },
   };

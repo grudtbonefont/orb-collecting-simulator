@@ -1479,7 +1479,7 @@
 
   // ------------------------------------------------------------ timed arena events (server-run; the client only shows them)
   let evState = null, kothInfo = null, evResultTimer = null;
-  const runners = new Map(); // «Сферы-беглецы»: id -> {x,y,px,py,at}
+  const runners = new Map(); // «Раннеры»: id -> {x,y,px,py,at}
   const EV_UNITS = { rain: 'сфер', koth: 'очк.', treasure: 'сокр.', runner: 'шт.', lucky: 'сфер' };
   function syncRunners(list, now) {
     const seen = new Set();
@@ -1536,7 +1536,7 @@
       info = (k && k.inside ? '✅ Вы в зоне' : '⚠️ Вы вне зоны — идите к золотому кругу') + ` · ваши очки: ${k ? k.you : 0}`;
       if (k && k.top && k.top.length) info += ' · лидер: ' + k.top[0][0] + ' (' + k.top[0][1] + ')';
     } else if (e.kind === 'treasure') info = `Осталось сокровищ: ${e.remaining != null ? e.remaining : '?'} из ${e.total != null ? e.total : '?'} — ищите световые столбы и золотые точки на карте`;
-    else if (e.kind === 'runner') { const nr = nearestRunner(now); info = nr ? `Беглецов осталось: ${runners.size} из ${e.total || G.EVENTS.runner.count} · ближайший в ${Math.round(nr.d / 10)} м` : 'Сферы-беглецы где-то на карте…'; }
+    else if (e.kind === 'runner') { const nr = nearestRunner(now); info = nr ? `Осталось ${runners.size} из ${e.total || G.EVENTS.runner.count} Раннеров · ближайший в ${Math.round(nr.d / 10)} м` : 'Раннеры где-то на карте…'; }
     else if (e.kind === 'lucky') info = '🍀 Сфер на карте ×1.25, шанс редких и более ценных сфер ×2!';
     $('evHInfo').textContent = info; $('evChipInfo').textContent = info;
   }
@@ -1567,7 +1567,7 @@
     head.append(h, x); box.appendChild(head);
     const you = document.createElement('div'); you.className = 'evr-you';
     let sub = '';
-    if (d.kind === 'runner') sub = d.caught ? `Поймано беглецов: ${d.caught} из ${d.total}` : 'Все сферы-беглецы ускользнули…';
+    if (d.kind === 'runner') sub = d.caught ? `Поймано ${d.caught} из ${d.total} Раннеров` : 'Все Раннеры ускользнули…';
     if (d.kind === 'lucky') sub = 'Волна удачи закончилась — спавн сфер вернулся к обычному.';
     if (d.kind === 'treasure') sub = `Найдено сокровищ: ${(d.total || 0) - (d.remaining || 0)} из ${d.total || 0}`;
     if (d.you) {
@@ -1601,7 +1601,7 @@
   });
   socket.on('ev:runner', d => {
     if (!evState || !d) return;
-    toast(`💨 ${d.name} поймал(а) сферу-беглеца!${d.left ? ' Осталось: ' + d.left : ''}`);
+    toast(`💨 ${d.name} поймал(а) Раннера!${d.left ? ' Осталось: ' + d.left : ''}`);
   });
   socket.on('ev:end', d => {
     if (!d) return;
