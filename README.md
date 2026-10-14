@@ -60,7 +60,7 @@ Live gameplay state is in memory; changed accounts are flushed in batches every 
 
 ## Chat
 Global arena chat (logged-in players only), last 50 messages are sent on join, join/leave system lines.
-- **Silent auto-clear every 15 minutes** on a fixed wall-clock cycle (:00, :15, :30, :45 server time): the server wipes the history and broadcasts an empty `chat:clear`; clients simply empty the log. Players are never shown the schedule or a «cleared» notice, and the next-clear time is not sent to clients. Interval configurable with `CHAT_CLEAR_MS` (tests use 3–4 s).
+- **Rolling history of the last 100 messages**, kept in memory only (never saved; a server restart starts with an empty chat). When message 101 arrives the oldest one drops out, on the server and in every client's log.
 - Desktop: compact panel bottom-left. **Enter** or **T** focuses it, **Enter** sends, **Esc** leaves. While typing, movement keys and hotkeys are ignored.
 - Phones / touch / narrow screens (≤ 760 px or coarse pointer): a 💬 button with an unread badge; tap opens a full-screen sheet (sized to the visual viewport so the on-screen keyboard doesn't hide the input), ✕ returns to the game. New messages flash as a small toast at the top.
 - Moderation (server-side): 120 chars max, 1 message / 1.5 s and 5 / 10 s, no duplicates, control / invisible / bidi characters stripped, links, domains, e-mails, IP addresses and phone-like numbers → `***`, basic RU/EN profanity → `***`, repeated-character spam collapsed. Rendered with `textContent` only.
@@ -103,9 +103,9 @@ Pool average ≈ 1.43 per orb. Each tier has its own look on the arena and minim
 **«Радар»** (bottom-right, collapsible with its button; 92 px on phones): a sonar view of ±900 px around you, where a wave every 3 s briefly lights up players and common/uncommon (faint: rare) orbs. Epic, legendary and mythic orbs, event treasures and the runner never appear (the compass handles those); the «Царь горы» zone is shown. It is drawn client-side from data the client already receives (`G.radarBlips`), and the server sends nothing extra. Screenshot: `screenshot-radar.png`.
 
 ## Arena events (server-authoritative, `G.EVENTS` / `eventTick` in `server.js`)
-**Currently OFF by default.** The code stays; turn the scheduler back on with `EVENTS_ENABLED=1` (random 6–10 min) or `EVENT_EVERY_MS=<ms>`. `/api/health` reports `eventsEnabled`.
+**ON by default** (only treasure / Раннеры / Волна удачи are auto-picked); `EVENTS_ENABLED=0` turns the scheduler off, `EVENT_EVERY_MS=<ms>` sets a fixed gap. `/api/health` reports `eventsEnabled`.
 
-Scheduler: only while ≥ 1 player is online, one event every **6–10 min** (random), never the same kind twice in a row, never while a legendary orb is alive or imminent (the legendary waits until 20 s after the event). Each event is announced **25 s** ahead (banner with countdown and rules), then a HUD shows timer/progress, then everyone gets the results (top 5 names + scores + rewards and their own line). Rewards are paid by the server only to players online at the end; shards go through `grantItem(..., 'event')`. If everyone leaves, the event is cancelled.
+Scheduler: only while ≥ 1 player is online, one event every **2–6 min** (random), never the same kind twice in a row, never while a legendary orb is alive or imminent (the legendary waits until 20 s after the event). Each event is announced **25 s** ahead (banner with countdown and rules), then a HUD shows timer/progress, then everyone gets the results (top 5 names + scores + rewards and their own line). Rewards are paid by the server only to players online at the end; shards go through `grantItem(..., 'event')`. If everyone leaves, the event is cancelled.
 
 | event | duration | rules | rewards |
 |---|---|---|---|
@@ -114,7 +114,7 @@ Scheduler: only while ≥ 1 player is online, one event every **6–10 min** (ra
 | Охота за сокровищем | 90 s | 3 treasure orbs (+1 per 4 players, ≤ 6) placed ≥ 900 px from players; the HUD says how many are left | each treasure 50 ◉ + 1 💎 |
 | Раннеры | 90 s | 3 fast orbs (175 px/s) at random places flee from the closest player, each in its own zone; positions streamed to all | each catch: 80 ◉ + 1 💎 |
 
-Rewards are worth ≈ 1–2.5 min of farming. Env: `EVENT_EVERY_MS` (unset = random 6–10 min, `0` = events off, `N` = fixed interval), `EVENT_ANNOUNCE_MS` (default 25 000), `EVENT_DURATION_MS` (override all durations, for testing). Stats: `eventsPlayed`, `eventWins` (added with default 0).
+Rewards are worth ≈ 1–2.5 min of farming. Env: `EVENT_EVERY_MS` (unset = random 2–6 min, `0` = events off, `N` = fixed interval), `EVENT_ANNOUNCE_MS` (default 25 000), `EVENT_DURATION_MS` (override all durations, for testing). Stats: `eventsPlayed`, `eventWins` (added with default 0).
 
 ## «Лавка осколков» (shard shop)
 Exclusive cosmetics that **cannot be bought with orbs**, only with «Легендарный осколок» (shards are taken with `removeItem(..., 'shard_shop')`; all-or-nothing if the inventory is full). They have their own icons, arena rendering and an «Эксклюзив» badge in the inventory/shop.

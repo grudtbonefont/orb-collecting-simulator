@@ -330,14 +330,14 @@
   };
   const EVENT_KEYS = Object.keys(EVENTS);
   const AUTO_EVENT_KEYS = ['treasure', 'runner', 'lucky']; // the scheduler only picks these (rain / koth stay off)
-  const EVENT_SCHEDULE = { minMs: 4 * 60000, maxMs: 8 * 60000, announceMs: 25000 }; // counted only while ≥ 1 player is online
+  const EVENT_SCHEDULE = { minMs: 2 * 60000, maxMs: 6 * 60000, announceMs: 25000 }; // counted only while ≥ 1 player is online
 
   // «Волна удачи»: rare+ tiers (r, e, l, m) weigh ×rareMult
   const luckyWeights = (w, k = EVENTS.lucky.rareMult) => { const o = {}; for (const t in w) o[t] = 'relm'.includes(t) ? w[t] * k : w[t]; return o; };
 
   // ---------------------------------------------------------------- temporary obstacles (server spawns, everyone collides)
   // kinds: 'wall' (long thin rect), 'block' (square-ish rect), 'rock' (circle), 'laser' (solid pylon + spinning beam)
-  const OBSTACLES = { maxAlive: 8, everyMinMs: 12000, everyMaxMs: 30000, lifeMinMs: 45000, lifeMaxMs: 90000, laserChance: 0.25,
+  const OBSTACLES = { maxAlive: 16, everyMinMs: 6000, everyMaxMs: 15000, lifeMinMs: 45000, lifeMaxMs: 90000, laserChance: 0.25,
     warnMs: 3000, playerClear: 380, doorClear: 650, gap: 450, pylonR: 26, beamMin: 240, beamMax: 340, spinMin: 0.8, spinMax: 1.3,
     penaltyPct: 0.07, penaltyMax: 150, invulnMs: 3000, dropMax: 10, dropLifeMs: 30000,
     // iron robot (own timer, separate from obstacles: 30 % roll every 45–90 s): rare solid player-shaped obstacle that shoots slow shots at players in range (shared immunity with lasers)

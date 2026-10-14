@@ -2554,7 +2554,7 @@
     if (!m || typeof m !== 'object') return;
     const atBottom = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 40;
     chatLog.appendChild(chatLine(m));
-    while (chatLog.childElementCount > 80) chatLog.firstElementChild.remove();
+    while (chatLog.childElementCount > 100) chatLog.firstElementChild.remove();
     if (atBottom || m.notice || (m.n && m.n === myName)) chatLog.scrollTop = chatLog.scrollHeight;
     if (live && joined && mobileUI() && !chatOpen && m.n && m.n !== myName) { unread++; updateBadge(); showChatToast(m); }
   }

@@ -16,8 +16,7 @@ const SESSION_TTL_MS = 30 * 24 * 3600 * 1000;
 const FLUSH_MS = 3000;
 const BCRYPT_COST = 10;
 const AUTH_MAX_FAILS = 5, AUTH_LOCK_MS = 60 * 1000;
-const CHAT_HISTORY = 50, CHAT_MIN_GAP_MS = 1500, CHAT_WINDOW_MS = 10000, CHAT_WINDOW_MAX = 5;
-const CHAT_CLEAR_MS = Math.max(1000, parseInt(process.env.CHAT_CLEAR_MS, 10) || 15 * 60 * 1000); // fixed wall-clock cycle
+const CHAT_HISTORY = 100, CHAT_MIN_GAP_MS = 1500, CHAT_WINDOW_MS = 10000, CHAT_WINDOW_MAX = 5;
 const TEST_HOOKS = process.env.OCS_TEST_HOOKS === '1'; // test-only socket events (grant items / orbs); never set in production
 const VERSION = (process.env.RENDER_GIT_COMMIT || '').slice(0, 7) || 'dev';
 const has = (obj, k) => typeof k === 'string' && Object.prototype.hasOwnProperty.call(obj, k);
@@ -331,9 +330,9 @@ function obstacleTick(now) {
 }
 
 // ---------------------------------------------------------------- timed arena events (scheduler + rules; numbers in G.EVENTS)
-// EVENT_EVERY_MS: unset = random 4–8 min of online time, 0 = scheduler off (test hooks only), N = fixed gap.
+// EVENT_EVERY_MS: unset = random 2–6 min of online time, 0 = scheduler off (test hooks only), N = fixed gap.
 // EVENT_ANNOUNCE_MS (default 25 s countdown) and EVENT_DURATION_MS (override every duration) are for tests.
-// Since the «Волна удачи» update events are ON by default again (random 4–8 min, only G.AUTO_EVENT_KEYS); EVENTS_ENABLED=0 turns them off.
+// Since the «Волна удачи» update events are ON by default again (random 2–6 min, only G.AUTO_EVENT_KEYS); EVENTS_ENABLED=0 turns them off.
 const EV_EVERY = process.env.EVENT_EVERY_MS !== undefined && process.env.EVENT_EVERY_MS !== '' ? envInt('EVENT_EVERY_MS', 0) : process.env.EVENTS_ENABLED === '0' ? 0 : -1;
 const EV_ANNOUNCE = envInt('EVENT_ANNOUNCE_MS', G.EVENT_SCHEDULE.announceMs);
 const EV_DURATION = envInt('EVENT_DURATION_MS', 0);
@@ -531,25 +530,15 @@ function accountChanged(acc, opts = {}) {
 }
 function nameColorOf(acc) { const it = G.ITEM_BY_ID[acc.equipped.nameColor]; return it ? it.value : '#ffffff'; }
 
-// ---------------------------------------------------------------- chat (history wiped on a fixed 15-minute cycle)
+// ---------------------------------------------------------------- chat (in memory only: rolling last CHAT_HISTORY messages, gone after a restart)
 let chatHistory = [];
 let chatSeq = 0;
-const nextChatClear = (now = Date.now()) => Math.floor(now / CHAT_CLEAR_MS) * CHAT_CLEAR_MS + CHAT_CLEAR_MS;
-let chatClearAt = nextChatClear();
 function pushChat(msg, keep) {
   msg.id = ++chatSeq; msg.ts = Date.now();
   if (keep) { chatHistory.push(msg); while (chatHistory.length > CHAT_HISTORY) chatHistory.shift(); }
   io.to('arena').emit('chat', msg);
 }
 function systemChat(text) { pushChat({ sys: true, t: text }, false); }
-function scheduleChatClear() {
-  setTimeout(() => {
-    chatHistory = [];
-    chatClearAt = nextChatClear(Date.now() + 50);
-    io.to('arena').emit('chat:clear'); // silent: clients just empty the log (the schedule is not shown to players)
-    scheduleChatClear();
-  }, Math.max(10, chatClearAt - Date.now()));
-}
 
 // ---------------------------------------------------------------- http
 const app = express();
@@ -1286,6 +1275,13 @@ io.on('connection', socket => {
       announceEvent(d.kind, { announceMs: num(d.announceMs), durationMs: num(d.durationMs), x: num(d.x), y: num(d.y), speed: num(d.speed), count: num(d.count), at: Array.isArray(d.at) ? d.at.slice(0, 6) : undefined });
       ack({ ok: true, event: publicEvent() });
     });
+    // fill the chat history with n player-like messages (rolling-limit tests)
+    socket.on('test:chatfill', (n, ack) => {
+      ack = safeAck(ack);
+      if (!acct || !Number.isInteger(n) || n < 1 || n > 500) return ack({ ok: false });
+      for (let i = 0; i < n; i++) pushChat({ n: acct.acc.name, c: '#ffffff', t: 'fill ' + i }, true);
+      ack({ ok: true, size: chatHistory.length });
+    });
     // spawn an obstacle now: {kind: 'wall'|'block'|'rock'|'laser', x, y, lifeMs} (tests / screenshots)
     socket.on('test:obstacle', (d, ack) => {
       ack = safeAck(ack);
@@ -1484,6 +1480,5 @@ process.on('unhandledRejection', e => console.error('Unhandled rejection:', e &&
   setInterval(everySecond, 1000);
   setInterval(flush, FLUSH_MS);
   setInterval(() => store.purgeExpiredSessions(Date.now()).catch(e => console.error('purge failed:', e.message)), 3600 * 1000);
-  scheduleChatClear();
   server.listen(PORT, () => console.log(`Orb Collecting Simulator on http://localhost:${PORT} (version ${VERSION})`));
 })().catch(e => { console.error('Startup failed:', e.message); process.exit(1); });

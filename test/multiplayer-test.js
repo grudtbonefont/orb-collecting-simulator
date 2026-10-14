@@ -359,6 +359,7 @@ async function zoneSuite(URL) {
   Q.close();
 }
 // ------------------------------------------------------------------ orb tiers, compass, events, exclusives: pure rules
+const OB0 = () => G.OBSTACLES;
 function tierEventRules() {
   console.log('--- orb tiers / compass / events / «Лавка осколков» (rules)');
   const T = G.ORB_TYPES, keys = ['c', 'u', 'r', 'e', 'l', 'm'];
@@ -398,7 +399,8 @@ function tierEventRules() {
   ok(G.EVENT_KEYS.join(',') === 'rain,koth,treasure,runner,lucky' && G.AUTO_EVENT_KEYS.join(',') === 'treasure,runner,lucky' && E.treasure.count === 5 && E.runner.count === 3 && E.lucky.spawnMult === 1.25 && E.lucky.rareMult === 2 && E.lucky.durationMs >= 60000 && E.lucky.durationMs <= 90000 && E.rain.durationMs === 45000 && rewards.every(r => r.orbs + r.shards * G.SHARD_EXCHANGE.orbs <= 4 * RATE && r.shards <= 2) &&
     E.treasure.reward.orbs * E.treasure.maxCount <= 4 * RATE * 1.5, `5 events (auto: treasure ×5, runner ×3, lucky ×1.25 orbs / ×2 rare+ for ${E.lucky.durationMs / 1000} s); every reward (orbs + shards at the exchange rate) ≤ 4 min of farming (top: ${E.koth.rewards[0].orbs} ◉ + ${E.koth.rewards[0].shards} 💎)`);
   const S = G.EVENT_SCHEDULE;
-  ok(S.minMs === 240000 && S.maxMs === 480000 && S.announceMs >= 20000 && S.announceMs <= 30000, 'schedule: an event every 4–8 min of online time, announced 25 s ahead');
+  ok(S.minMs === 120000 && S.maxMs === 360000 && S.announceMs >= 20000 && S.announceMs <= 30000, 'schedule: an event every 2–6 min of online time, announced 25 s ahead');
+  ok(OB0().maxAlive === 16 && OB0().everyMinMs === 6000 && OB0().everyMaxMs === 15000 && OB0().laserChance === 0.25, 'obstacles: a spawn every 6–15 s, up to 16 at once, 25 % lasers');
   const lw = G.luckyWeights(G.POOL_WEIGHTS), pw = G.POOL_WEIGHTS;
   ok(lw.c === pw.c && lw.u === pw.u && ['r', 'e', 'l', 'm'].every(t => lw[t] === pw[t] * 2), 'lucky weights: rare/epic/legendary/mythic ×2, common/uncommon unchanged');
   // obstacles: collision push-out + laser beam geometry + penalty
@@ -1209,23 +1211,33 @@ async function gameplaySuite(URL) {
 }
 
 // ------------------------------------------------------------------ chat clear cycle + spawn (dedicated server with short timers)
-async function chatClearSuite(URL, period) {
-  console.log('--- chat clear cycle (silent)');
+async function chatClearSuite(URL) {
+  console.log('--- chat: rolling last 100 messages (no periodic clear)');
   const C = makeClient(URL), E = makeClient(URL);
-  const clears = [];
-  E.s.on('chat:clear', (...args) => clears.push({ at: Date.now(), args }));
-  const rc = await C.register('Clr' + rnd()); await E.register('Clr' + rnd());
-  ok(rc.ok && !('chatNextClear' in rc), 'join payload carries no clear schedule');
-  await C.call('chat', 'сообщение до стирания');
-  await waitFor(() => clears.length >= 2, period * 2 + 2000);
-  const gap = clears.length >= 2 ? clears[1].at - clears[0].at : -1;
-  ok(clears.length >= 2 && Math.abs(gap - period) < 400 && clears.every(c => c.args.length === 0), `chat:clear still fires on a fixed ${period} ms cycle (gap ${gap} ms) with no payload`);
-  const sysAfter = E.chat.filter(m => m.ts >= clears[0].at);
-  ok(!E.chat.some(m => /очищ|очист|cleared/i.test(m.t || '')) && sysAfter.length === 0, 'no system message announces the clear');
-  const F = makeClient(URL);
-  const rf = await F.register('Clr' + rnd());
-  ok(rf.ok && !rf.chat.some(m => /до стирания/.test(m.t)), `history wiped by the clear (new player sees ${rf.chat.length} old messages)`);
+  let clears = 0; E.s.on('chat:clear', () => clears++);
+  await C.register('Roll' + rnd()); await E.register('Roll' + rnd());
+  const f = await C.call('test:chatfill', 105);
+  await C.call('chat', 'самое новое');
+  await sleep(400);
+  const F = makeClient(URL); const rf = await F.register('Roll' + rnd());
+  const h = rf.chat.filter(m => !m.sys);
+  ok(f.ok && f.size === 100 && h.length === 100 && h[0].t === 'fill 6' && h[h.length - 1].t === 'самое новое', `history keeps the last 100 messages (oldest now «${h[0] && h[0].t}», newest «${h[h.length - 1] && h[h.length - 1].t}»)`);
+  await sleep(3500);
+  ok(clears === 0, 'no periodic chat:clear any more');
   C.close(); E.close(); F.close();
+}
+async function chatRestartSuite() {
+  console.log('--- chat is not kept across restarts');
+  const tmp = path.join(os.tmpdir(), `ocs-chatr-${process.pid}.json`);
+  let srv = await startServer(3112, { DATA_FILE: tmp, OCS_TEST_HOOKS: '1' });
+  const A = makeClient(srv.url); const name = 'Rst' + rnd(); await A.register(name);
+  await A.call('chat', 'до перезапуска'); await sleep(300); A.close(); await sleep(200);
+  await srv.stop();
+  const disk = fs.existsSync(tmp) ? fs.readFileSync(tmp, 'utf8') : '';
+  srv = await startServer(3112, { DATA_FILE: tmp, OCS_TEST_HOOKS: '1' });
+  const B = makeClient(srv.url); const rb = await B.login(name);
+  ok(rb && rb.ok && !rb.chat.some(m => /до перезапуска/.test(m.t || '')) && !/до перезапуска/.test(disk), `after a restart the chat starts empty (${rb && rb.chat.length} messages) and nothing was written to disk`);
+  B.close(); await srv.stop(); fs.rmSync(tmp, { force: true });
 }
 
 async function spawnSuite(URL) {
@@ -1493,9 +1505,9 @@ async function runMode(label, env, opts) {
 async function runCycleMode() {
   console.log('\n===== chat cycle / spawn / legendary (short timers) =====');
   const tmp = path.join(os.tmpdir(), `ocs-cycle-${process.pid}.json`);
-  const srv = await startServer(3104, { DATA_FILE: tmp, OCS_TEST_HOOKS: '1', CHAT_CLEAR_MS: '3000' });
+  const srv = await startServer(3104, { DATA_FILE: tmp, OCS_TEST_HOOKS: '1' });
   await spawnSuite(srv.url);
-  await chatClearSuite(srv.url, 3000);
+  await chatClearSuite(srv.url);
   await legendarySuite(srv.url);
   await srv.stop();
   fs.rmSync(tmp, { force: true });
@@ -1526,6 +1538,13 @@ async function runCycleMode() {
     await codesSuite(srv.url); await luckyObstacleSuite(srv.url); await robotSuite(srv.url);
     await srv.stop(); fs.rmSync(tmp, { force: true });
     await weekendSuite();
+  } else if (process.env.OCS_TEST_ONLY === 'update3') {
+    tierEventRules();
+    const tmp = path.join(os.tmpdir(), `ocs-u3-${process.pid}.json`);
+    const srv = await startServer(3104, { DATA_FILE: tmp, OCS_TEST_HOOKS: '1' });
+    await chatClearSuite(srv.url);
+    await srv.stop(); fs.rmSync(tmp, { force: true });
+    await chatRestartSuite();
   } else if (process.env.OCS_TEST_ONLY === 'codes') {
     const tmp = path.join(os.tmpdir(), `ocs-codes-${process.pid}.json`);
     const srv = await startServer(3101, { DATA_FILE: tmp, OCS_TEST_HOOKS: '1' });
