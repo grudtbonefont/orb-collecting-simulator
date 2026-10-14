@@ -395,8 +395,8 @@ function tierEventRules() {
     `«Радар» filter: ${rt} (epic/legendary/mythic/treasure and out-of-range orbs dropped, rare faint)`);
   // events: rewards are a bonus of a few minutes of farming, timings, schedule
   const RATE = 100, E = G.EVENTS, rewards = [].concat(E.koth.rewards, [E.koth.solo, E.koth.participation, E.runner.reward]);
-  ok(G.EVENT_KEYS.join(',') === 'rain,koth,treasure,runner,lucky' && G.AUTO_EVENT_KEYS.join(',') === 'treasure,runner,lucky' && E.treasure.count === 5 && E.runner.count === 3 && E.lucky.spawnMult === 2 && E.lucky.rareMult === 2 && E.lucky.durationMs >= 60000 && E.lucky.durationMs <= 90000 && E.rain.durationMs === 45000 && rewards.every(r => r.orbs + r.shards * G.SHARD_EXCHANGE.orbs <= 4 * RATE && r.shards <= 2) &&
-    E.treasure.reward.orbs * E.treasure.maxCount <= 4 * RATE * 1.5, `5 events (auto: treasure ×5, runner ×3, lucky ×2 for ${E.lucky.durationMs / 1000} s); every reward (orbs + shards at the exchange rate) ≤ 4 min of farming (top: ${E.koth.rewards[0].orbs} ◉ + ${E.koth.rewards[0].shards} 💎)`);
+  ok(G.EVENT_KEYS.join(',') === 'rain,koth,treasure,runner,lucky' && G.AUTO_EVENT_KEYS.join(',') === 'treasure,runner,lucky' && E.treasure.count === 5 && E.runner.count === 3 && E.lucky.spawnMult === 1.25 && E.lucky.rareMult === 2 && E.lucky.durationMs >= 60000 && E.lucky.durationMs <= 90000 && E.rain.durationMs === 45000 && rewards.every(r => r.orbs + r.shards * G.SHARD_EXCHANGE.orbs <= 4 * RATE && r.shards <= 2) &&
+    E.treasure.reward.orbs * E.treasure.maxCount <= 4 * RATE * 1.5, `5 events (auto: treasure ×5, runner ×3, lucky ×1.25 orbs / ×2 rare+ for ${E.lucky.durationMs / 1000} s); every reward (orbs + shards at the exchange rate) ≤ 4 min of farming (top: ${E.koth.rewards[0].orbs} ◉ + ${E.koth.rewards[0].shards} 💎)`);
   const S = G.EVENT_SCHEDULE;
   ok(S.minMs === 240000 && S.maxMs === 480000 && S.announceMs >= 20000 && S.announceMs <= 30000, 'schedule: an event every 4–8 min of online time, announced 25 s ahead');
   const lw = G.luckyWeights(G.POOL_WEIGHTS), pw = G.POOL_WEIGHTS;
@@ -552,12 +552,12 @@ async function luckyObstacleSuite(URL) {
   await sleep(1500); const n0 = pool();
   let r = await A.emit('test:event', { kind: 'lucky', announceMs: 100, durationMs: 14000 });
   const tgt = (await (await fetch(URL + '/api/health')).json()).targetOrbs * 2; // both zones, normal target
-  const n1 = await waitFor(() => { const n = pool(); return n >= tgt * 2 * 0.97 ? n : 0; }, 11000) || pool();
+  const n1 = await waitFor(() => { const n = pool(); return n >= tgt * 1.25 * 0.97 ? n : 0; }, 11000) || pool();
   const h = await (await fetch(URL + '/api/health')).json();
   await A.farm(A.profile.balance + 30, 1500);
   await waitFor(() => ends.some(e => e.kind === 'lucky'), 15000);
   const le = ends.find(e => e.kind === 'lucky');
-  ok(r.ok && h.event === 'lucky:active' && n1 >= tgt * 2 * 0.97, `«Волна удачи»: orbs on the map ${n0} → ${n1} (normal target ${tgt}, ×${(n1 / tgt).toFixed(2)}) while active`);
+  ok(r.ok && h.event === 'lucky:active' && n1 >= tgt * 1.25 * 0.97 && n1 <= tgt * 1.25 * 1.05 + 40, `«Волна удачи»: orbs on the map ${n0} → ${n1} (normal target ${tgt}, ×${(n1 / tgt).toFixed(2)}) while active`);
   ok(le && !le.cancelled && le.you && le.you.score > 0, `lucky results: A collected ${le && le.you && le.you.score} worth during the wave`);
   // obstacles: solid, never spawned on a player, expire
   await A.emit('test:tp', { x: 2000, y: 2000, orbs: 2000 }); await sleep(300);
@@ -639,7 +639,70 @@ async function codesSuite(URL) {
   const rs = [];
   for (let i = 0; i < 5; i++) rs.push(await C.emit('code:redeem', 'BRUTE' + i));
   ok(rs.slice(0, 4).every(x => x.code === 'invalid') && rs[4].code === 'rate', 'rate limit: the 6th attempt within a minute is refused (' + rs[4].error + ')');
+  // production codes (one use per account, case-insensitive)
+  const D = makeClient(URL); await D.register('CodeD' + rnd());
+  const L = require('../lib/codes.js'), want = { SPOOKYMONTH: [666, 0], BRIMSTONEBASEMENT: [125, 0], SHARDY: [0, 2], SECRETCODE: [123, 1], TREASURE: [50, 0], PATCH1: [111, 0], OSHIOTASHNIEIAICHA: [67, 1] };
+  ok(Object.entries(want).every(([k, [o, sh]]) => { const c = L.findCode(k.toLowerCase()); return c && (c.rewards.orbs || 0) === o && (c.rewards.shards || 0) === sh && !c.expiresAt && c.maxUses == null; }), '7 new promo codes defined with the right rewards, no expiry, no global limit');
+  const d0 = D.profile.balance, s0 = units(D, G.SHARD_ID);
+  const c1 = await D.emit('code:redeem', 'spookyMonth'), c2 = await D.emit('code:redeem', 'SPOOKYMONTH'), c3 = await D.emit('code:redeem', ' secretcode ');
+  ok(c1.ok && !c2.ok && c3.ok && D.profile.balance === d0 + 666 + 123 && units(D, G.SHARD_ID) === s0 + 1, `SPOOKYMONTH (+666, any case, once) and SECRETCODE (+123 + 1 💎) redeemed`);
+  D.close();
   A.close(); B.close(); C.close();
+}
+async function robotSuite(URL) {
+  console.log('--- iron robot');
+  const A = makeClient(URL); await A.register('Robo' + rnd());
+  const zaps = [], pj = [], rbs = [];
+  A.s.on('zap', z => zaps.push([Date.now(), z])); A.s.on('s', st => { if (st.pj) pj.push(st.pj); if (st.rb) rbs.push(st.rb); });
+  await A.emit('test:tp', { x: 3000, y: 1500, orbs: 1000 }); await sleep(300);
+  const bal0 = A.profile.balance;
+  let r = await A.emit('test:obstacle', { kind: 'robot', x: 3350, y: 1500, lifeMs: 15000 });
+  const R = r.obstacles && r.obstacles.find(o => o.k === 'robot');
+  await waitFor(() => zaps.length >= 1, 8000);
+  const z = zaps[0];
+  ok(R && rbs.some(l => l.some(q => q[2] === 1)) && pj.length > 3 && pj.flat().every(b => b.length === 5), `robot spawned, telegraphs its aim (rb aim flag) and fires slow shots (${pj.length} snapshots)`);
+  ok(z && z[1].src === 'robot' && z[1].loss === G.robotPenalty(bal0) && z[1].loss === 50 && A.profile.balance <= bal0 - 50 + 30, `shot hit: −${z && z[1].loss} of ${bal0} (5 %, cap ${G.OBSTACLES.robotCap})`);
+  await waitFor(() => zaps.length >= 3, 9000);
+  const gaps = zaps.slice(1).map((q, i) => q[0] - zaps[i][0]);
+  ok(zaps.length >= 2 && gaps.every(g => g >= G.OBSTACLES.invulnMs - 120), `shared immunity between hits (gaps ${gaps.join('/')} ms)`);
+  await A.emit('test:obstacle', { clear: true });
+  // out of range: no shots
+  await A.emit('test:tp', { x: 1000, y: 1000 }); pj.length = 0; zaps.length = 0;
+  await A.emit('test:obstacle', { kind: 'robot', x: 1000 + G.OBSTACLES.robotRange + 150, y: 1000, lifeMs: 5000 });
+  await sleep(3000);
+  ok(pj.length === 0 && zaps.length === 0, 'a player out of range is not shot at');
+  // random robot spawns keep away from players
+  await A.emit('test:obstacle', { clear: true });
+  const far = []; for (let i = 0; i < 2; i++) { const q = await A.emit('test:obstacle', { kind: 'robot', lifeMs: 3000 }); if (q.ok) far.push(q.obstacles[q.obstacles.length - 1]); }
+  ok(far.length >= 1 && far.every(o => Math.hypot(o.x - A.pos.x, o.y - A.pos.y) > G.OBSTACLES.robotRange && Math.hypot(o.x - G.DOOR.x, o.y - G.DOOR.y) > G.OBSTACLES.doorClear), 'random robots spawn out of range of players and away from the door');
+  const O = G.OBSTACLES;
+  ok(O.robotChance === 0.3 && O.robotEveryMinMs === 45000 && O.robotEveryMaxMs === 90000 && O.robotMax === 2 && G.robotPenalty(1e6) === 100 && G.robotPenalty(0) === 0, 'robot: own timer (30 % roll every 45–90 s), max 2 alive, penalty 5 % capped at 100');
+  const kinds = []; for (let i = 0; i < 12; i++) { const q = await A.emit('test:obstacle', { lifeMs: 2000 }); if (q.ok) kinds.push(q.obstacles[q.obstacles.length - 1].k); await A.emit('test:obstacle', { clear: true }); }
+  ok(kinds.length >= 8 && !kinds.includes('robot'), `normal obstacle spawns never turn into robots (${kinds.join(',')})`);
+  await A.emit('test:obstacle', { clear: true });
+  A.close();
+}
+async function weekendSuite() {
+  console.log('--- weekend bonus');
+  const W = G.weekendInfo, at = s => Date.parse(s);
+  ok(W(at('2026-10-16T23:59:00+03:00')).on === false && W(at('2026-10-17T00:00:00+03:00')).left === 48 * 3600000 && W(at('2026-10-18T23:00:00+03:00')).left === 3600000 && W(at('2026-10-19T00:00:00+03:00')).on === false && W(at('2026-10-17T22:30:00Z')).on === true,
+    'weekend = Saturday + Sunday Moscow time, time left until Monday 00:00 MSK');
+  const tmp = path.join(os.tmpdir(), `ocs-wk-${process.pid}.json`);
+  const srv = await startServer(3110, { DATA_FILE: tmp, OCS_TEST_HOOKS: '1', OCS_WEEKEND: 'on' });
+  const A = makeClient(srv.url), r = await A.register('Wkd' + rnd());
+  const h = await (await fetch(srv.url + '/api/health')).json();
+  const types = new Map(Array.from(A.orbs.values(), o => [o.id, o.t])); let base = 0;
+  A.s.on('s', st => { for (const a of st.oa) types.set(a[0], a[3]); for (const [id, pid] of st.od) if (pid === A.id) base += (G.ORB_TYPES[types.get(id)] || { value: 0 }).value; });
+  const b0 = A.profile.balance;
+  await A.farm(b0 + 60, 15000); await sleep(300);
+  const gain = A.profile.balance - b0;
+  ok(h.weekend === true && r.weekend > 0, `weekend flag in health + join payload (${Math.round(r.weekend / 3600000)} h left)`);
+  ok(base > 0 ? Math.abs(gain - base * 1.5) <= 1.01 : gain >= 60, `orbs ×1.5 on the weekend: collected base ${base} → +${gain}`);
+  A.close(); await srv.stop(); fs.rmSync(tmp, { force: true });
+  const srv2 = await startServer(3110, { DATA_FILE: tmp, OCS_WEEKEND: 'off' });
+  const h2 = await (await fetch(srv2.url + '/api/health')).json();
+  ok(h2.weekend === false, 'no weekend bonus on weekdays (forced off)');
+  await srv2.stop(); fs.rmSync(tmp, { force: true });
 }
 async function shardShopSuite(URL) {
   console.log('--- «Лавка осколков»');
@@ -1378,7 +1441,7 @@ async function startServer(port, env) {
   try { await fetch(`http://localhost:${port}/api/health`); throw new Error(`port ${port} is already in use by another server`); }
   catch (e) { if (/already in use/.test(e.message)) throw e; } // connection refused = port free
   return new Promise((resolve, reject) => {
-    const proc = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: Object.assign({}, process.env, { PORT: String(port), DATABASE_URL: '', DATA_FILE: '', EVENT_EVERY_MS: '0', OBSTACLES: '0' }, env), stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: Object.assign({}, process.env, { PORT: String(port), DATABASE_URL: '', DATA_FILE: '', EVENT_EVERY_MS: '0', OBSTACLES: '0', OCS_WEEKEND: 'off' }, env), stdio: ['ignore', 'pipe', 'pipe'] });
     const srv = { proc, logs: '', url: `http://localhost:${port}` };
     proc.stdout.on('data', d => { srv.logs += d; });
     proc.stderr.on('data', d => { srv.logs += d; });
@@ -1405,7 +1468,7 @@ async function runMode(label, env, opts) {
   if (opts.legacy) await migrationSuite(srv.url, opts.legacy, label);
   await authSuite(srv.url);
   await profileSuite(srv.url);
-  if (opts.full) { await chatSuite(srv.url); await gameplaySuite(srv.url); await minigameSuite(srv.url); await newGamesSuite(srv.url); await upgradeSuite(srv.url); await newItemsSuite(srv.url); await tiersSuite(srv.url); await eventSuite(srv.url); await luckyObstacleSuite(srv.url); await pushSuite(srv.url); }
+  if (opts.full) { await chatSuite(srv.url); await gameplaySuite(srv.url); await minigameSuite(srv.url); await newGamesSuite(srv.url); await upgradeSuite(srv.url); await newItemsSuite(srv.url); await tiersSuite(srv.url); await eventSuite(srv.url); await luckyObstacleSuite(srv.url); await robotSuite(srv.url); await pushSuite(srv.url); }
   await shardShopSuite(srv.url);
   await zoneSuite(srv.url);
   await codesSuite(srv.url);
@@ -1455,6 +1518,13 @@ async function runCycleMode() {
     await tiersSuite(srv.url); await eventSuite(srv.url); await luckyObstacleSuite(srv.url);
     await srv.stop(); fs.rmSync(tmp, { force: true });
     privacyAudit(await schedulerSuite());
+  } else if (process.env.OCS_TEST_ONLY === 'update2') {
+    tierEventRules();
+    const tmp = path.join(os.tmpdir(), `ocs-u2-${process.pid}.json`);
+    const srv = await startServer(3101, { DATA_FILE: tmp, OCS_TEST_HOOKS: '1' });
+    await codesSuite(srv.url); await luckyObstacleSuite(srv.url); await robotSuite(srv.url);
+    await srv.stop(); fs.rmSync(tmp, { force: true });
+    await weekendSuite();
   } else if (process.env.OCS_TEST_ONLY === 'codes') {
     const tmp = path.join(os.tmpdir(), `ocs-codes-${process.pid}.json`);
     const srv = await startServer(3101, { DATA_FILE: tmp, OCS_TEST_HOOKS: '1' });

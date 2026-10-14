@@ -325,8 +325,8 @@
       desc: 'По всей карте в случайных местах спрятаны 5 сфер-сокровищ. Кто первым схватит — получит награду!', reward: { orbs: 50, shards: 1 } },
     runner: { key: 'runner', name: 'Сферы-беглецы', icon: '💨', durationMs: 90000, count: 3, speed: 175, wander: 90, r: 14, fleeRange: 700,
       desc: 'По карте носятся 3 сферы, которые убегают от игроков. Каждая пойманная — награда!', reward: { orbs: 80, shards: 1 } },
-    lucky: { key: 'lucky', name: 'Волна удачи', icon: '🍀', durationMs: 75000, spawnMult: 2, rareMult: 2,
-      desc: '75 секунд на карте вдвое больше сфер, а шанс редких, эпических, легендарных и мифических сфер удвоен (×2)!' },
+    lucky: { key: 'lucky', name: 'Волна удачи', icon: '🍀', durationMs: 75000, spawnMult: 1.25, rareMult: 2,
+      desc: '75 секунд на карте на 25 % больше сфер, а шанс редких, эпических, легендарных и мифических сфер удвоен (×2)!' },
   };
   const EVENT_KEYS = Object.keys(EVENTS);
   const AUTO_EVENT_KEYS = ['treasure', 'runner', 'lucky']; // the scheduler only picks these (rain / koth stay off)
@@ -339,7 +339,19 @@
   // kinds: 'wall' (long thin rect), 'block' (square-ish rect), 'rock' (circle), 'laser' (solid pylon + spinning beam)
   const OBSTACLES = { maxAlive: 8, everyMinMs: 12000, everyMaxMs: 30000, lifeMinMs: 45000, lifeMaxMs: 90000, laserChance: 0.25,
     warnMs: 3000, playerClear: 380, doorClear: 650, gap: 450, pylonR: 26, beamMin: 240, beamMax: 340, spinMin: 0.8, spinMax: 1.3,
-    penaltyPct: 0.07, penaltyMax: 150, invulnMs: 3000, dropMax: 10, dropLifeMs: 30000 };
+    penaltyPct: 0.07, penaltyMax: 150, invulnMs: 3000, dropMax: 10, dropLifeMs: 30000,
+    // iron robot (own timer, separate from obstacles: 30 % roll every 45–90 s): rare solid player-shaped obstacle that shoots slow shots at players in range (shared immunity with lasers)
+    robotChance: 0.3, robotEveryMinMs: 45000, robotEveryMaxMs: 90000, robotMax: 2, robotR: 30, robotRange: 500, aimMs: 700, shotEveryMin: 1500, shotEveryMax: 2000,
+    shotSpeed: 260, shotR: 9, shotLifeMs: 2600, robotPct: 0.05, robotCap: 100 };
+  const robotPenalty = balance => (balance >= 1 ? Math.min(OBSTACLES.robotCap, Math.max(1, Math.round(balance * OBSTACLES.robotPct))) : 0);
+  // weekend bonus: Saturday + Sunday in Europe/Moscow (UTC+3, no DST) → orbs from collecting ×1.5
+  const WEEKEND = { mult: 1.5, offsetMs: 3 * 3600000, name: 'Выходные', icon: '🎉', desc: 'Выходные: x1.5 орбов' };
+  function weekendInfo(now = Date.now()) {
+    const t = now + WEEKEND.offsetMs, day = new Date(t).getUTCDay(); // 0 = Sunday, 6 = Saturday (Moscow local)
+    if (day !== 0 && day !== 6) return { on: false, left: 0 };
+    const midnight = Math.floor(t / 86400000) * 86400000, end = midnight + (day === 6 ? 2 : 1) * 86400000; // Monday 00:00 MSK
+    return { on: true, left: end - t };
+  }
   const laserAngle = (o, now) => o.a0 + o.w * (now - o.t0) / 1000;
   // pushes a player circle out of every solid obstacle (rects axis-aligned; lasers: only the pylon is solid)
   function resolveObstacles(pos, list) {
@@ -425,7 +437,7 @@
   const api = {
     WORLD, ZONE_W, ZONE_H, DOOR, DOOR_COST, ZONE2_WEIGHTS, zoneOf, zoneGate, PLAYER_R, BASE_SPEED, TICK_MS, STEP_DT, ORB_TYPES, ORB_RANK, ORB_LEGEND, POOL_WEIGHTS, RAIN_WEIGHTS, rollOrbType, expectedOrbValue, CATEGORIES, INV_CATEGORIES, RARITIES, ITEMS, ITEM_BY_ID, INV_SLOTS, INV_CAP, BUY_MAX_QTY, PAINTS,
     DEFAULT_EQUIPPED, DEFAULT_OWNED, UPGRADES, UPGRADE_KEYS, UPGRADE_REFUND_PRICES, upLevel, upValue, jackpotChance, upgradeText, orbReward, skillPrize, compassTargets, SENSE_EPIC_RANGE, RADAR, radarBlips, PUSH, separatePlayers,
-    EVENTS, EVENT_KEYS, AUTO_EVENT_KEYS, EVENT_SCHEDULE, luckyWeights, OBSTACLES, laserAngle, resolveObstacles, laserHits, laserPenalty, SHARD_ID, SHARD_EXCHANGE,
+    EVENTS, EVENT_KEYS, AUTO_EVENT_KEYS, EVENT_SCHEDULE, luckyWeights, OBSTACLES, laserAngle, resolveObstacles, laserHits, laserPenalty, robotPenalty, WEEKEND, weekendInfo, SHARD_ID, SHARD_EXCHANGE,
     MINIGAMES, REACTION_PRIZES, rushPrize, memoryPrize, memoryShowMs, shellFinal, shellShuffleMs, throwPos, throwPoints, throwPrize, chainPrize, minigameMinMs, speedFor, pickupFor, applyInput,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

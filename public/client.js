@@ -173,12 +173,12 @@
     $('chat').classList.remove('hidden'); $('chatBtn').classList.remove('hidden');
     $('hudName').textContent = '👤 ' + myName;
     resetChat(res.chat || []);
-    runners.clear(); evResultHide(); setEvent(res.event || null); setObstacles(res.obstacles || []);
+    runners.clear(); evResultHide(); setEvent(res.event || null); setObstacles(res.obstacles || []); setWeekend(res.weekend || 0);
     updateHud();
     if (!reconnect) toast(`Добро пожаловать, ${myName}! Собирайте сферы.`, 'ok');
   }
   function hideGameUi() {
-    joined = false; evState = null; runners.clear(); obstacles = [];
+    joined = false; evState = null; runners.clear(); obstacles = []; wkEnd = 0; updateWeekendChip();
     $('hud').classList.add('hidden'); $('chat').classList.add('hidden'); $('chatBtn').classList.add('hidden'); closeChat();
     closeModals();
   }
@@ -237,7 +237,21 @@
   socket.on('sping', v => socket.emit('spong', v));
   socket.on('announce', a => toast('✨ ' + a.text));
   // ------------------------------------------------------------ temporary obstacles + rotating lasers (server-run)
-  let obstacles = [], zapFlash = 0;
+  let obstacles = [], zapFlash = 0, robotState = new Map(), shotsNow = [];
+  // «Выходные» chip: ms left until Monday 00:00 MSK, counted down locally between server updates
+  let wkEnd = 0;
+  function setWeekend(left) { wkEnd = left > 0 ? performance.now() + left : 0; updateWeekendChip(); }
+  function updateWeekendChip() {
+    const chip = $('wkChip'); if (!chip) return;
+    const left = wkEnd ? wkEnd - performance.now() : 0;
+    if (!joined || left <= 0) { chip.classList.add('hidden'); chip.classList.remove('open'); return; }
+    chip.classList.remove('hidden');
+    const m = Math.ceil(left / 60000), d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60), mm = m % 60;
+    const txt = d ? `${d} д ${h} ч` : h ? `${h}:${String(mm).padStart(2, '0')}` : `${mm} мин`;
+    $('wkChipTime').textContent = txt;
+    $('wkChipPhase').textContent = `До понедельника 00:00 МСК: ${d ? d + ' д ' : ''}${h} ч ${mm} мин`;
+  }
+  setInterval(updateWeekendChip, 1000);
   function setObstacles(list) {
     const now = performance.now(), old = new Map(obstacles.map(o => [o.id, o]));
     obstacles = (list || []).map(d => {
@@ -249,9 +263,46 @@
   socket.on('obs', list => setObstacles(list));
   socket.on('zap', z => {
     if (!z) return; zapFlash = performance.now();
-    floaters.push({ x: me.x, y: me.y - 26, text: '⚡ −' + z.loss, color: '#ff4d5e', start: performance.now(), big: true });
-    toast(`⚡ Лазер! Потеряно ${fmt(z.loss)} сфер — часть рассыпалась рядом. ${Math.round(z.inv / 1000)} с неуязвимости.`, 'err');
+    floaters.push({ x: me.x, y: me.y - 26, text: (z.src === 'robot' ? '💥 −' : '⚡ −') + z.loss, color: '#ff4d5e', start: performance.now(), big: true });
+    toast(`${z.src === 'robot' ? '🤖 Робот попал в вас!' : '⚡ Лазер!'} Потеряно ${fmt(z.loss)} сфер — часть рассыпалась рядом. ${Math.round(z.inv / 1000)} с неуязвимости.`, 'err');
   });
+  function drawRobot(o, t, now) {
+    const st = robotState.get(o.id) || { face: 0, aim: 0 }, r = o.r, a = st.face;
+    if (st.aim) { // telegraph: blinking red aim line to the target
+      const fl = 0.5 + 0.5 * Math.sin(now / 45);
+      ctx.save(); ctx.strokeStyle = `rgba(255,60,60,${0.35 + 0.5 * fl})`; ctx.lineWidth = 2; ctx.setLineDash([10, 8]); ctx.lineDashOffset = -now / 20;
+      ctx.beginPath(); ctx.moveTo(o.x + Math.cos(a) * (r + 12), o.y + Math.sin(a) * (r + 12)); ctx.lineTo(st.ax, st.ay); ctx.stroke(); ctx.setLineDash([]);
+      ctx.beginPath(); ctx.arc(st.ax, st.ay, 18 + 4 * fl, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+    }
+    ctx.strokeStyle = 'rgba(255,90,90,0.10)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(o.x, o.y, G.OBSTACLES.robotRange, 0, Math.PI * 2); ctx.stroke(); // range
+    const metal = (x0, y0, x1, y1) => { const g = ctx.createLinearGradient(x0, y0, x1, y1); g.addColorStop(0, '#e8edf5'); g.addColorStop(0.35, '#9aa3b4'); g.addColorStop(0.6, '#5d6576'); g.addColorStop(1, '#c3cad6'); return g; };
+    ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 14; ctx.shadowOffsetY = 6;
+    ctx.fillStyle = metal(o.x - r, o.y - r, o.x + r, o.y + r); ctx.beginPath(); ctx.arc(o.x, o.y, r, 0, Math.PI * 2); ctx.fill(); // body (player-like round)
+    ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+    ctx.strokeStyle = '#3a404d'; ctx.lineWidth = 3; ctx.stroke();
+    ctx.strokeStyle = 'rgba(40,46,58,0.6)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(o.x - r * 0.8, o.y + r * 0.35); ctx.lineTo(o.x + r * 0.8, o.y + r * 0.35); ctx.stroke(); // panel seam
+    for (const [dx, dy] of [[-0.6, 0.55], [0.6, 0.55], [-0.6, -0.55], [0.6, -0.55]]) { ctx.fillStyle = '#4a515f'; ctx.beginPath(); ctx.arc(o.x + dx * r, o.y + dy * r, 2.2, 0, Math.PI * 2); ctx.fill(); } // rivets
+    ctx.fillStyle = '#7d8696'; ctx.fillRect(o.x - 2, o.y - r - 14, 4, 14); ctx.fillStyle = st.aim ? '#ff3030' : '#ffb347'; ctx.beginPath(); ctx.arc(o.x, o.y - r - 15, 4.5, 0, Math.PI * 2); ctx.fill(); // antenna
+    ctx.save(); ctx.translate(o.x, o.y); ctx.rotate(a); // arm cannon pointing at the target
+    ctx.fillStyle = metal(0, -8, 0, 8); ctx.fillRect(r - 6, -7, 22, 14); ctx.strokeStyle = '#3a404d'; ctx.lineWidth = 2; ctx.strokeRect(r - 6, -7, 22, 14);
+    ctx.fillStyle = st.aim ? '#ff4040' : '#222'; ctx.fillRect(r + 14, -4, 4, 8); ctx.restore();
+    const ex = Math.cos(a) * 7, ey = Math.sin(a) * 7; // visor + glowing eyes looking at the target
+    ctx.fillStyle = '#1b1f29'; ctx.beginPath(); ctx.ellipse(o.x + ex * 0.6, o.y - 6 + ey * 0.4, r * 0.62, r * 0.28, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ff3b3b'; ctx.shadowColor = '#ff2020'; ctx.shadowBlur = st.aim ? 16 : 8;
+    for (const sx of [-1, 1]) { ctx.beginPath(); ctx.arc(o.x + sx * 8 + ex * 0.6, o.y - 6 + ey * 0.4, 3.6, 0, Math.PI * 2); ctx.fill(); }
+    ctx.shadowBlur = 0;
+    ctx.font = '800 12px Segoe UI, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,0.65)'; ctx.fillStyle = '#d6dce8';
+    ctx.strokeText('🤖 Железный робот', o.x, o.y + r + 20); ctx.fillText('🤖 Железный робот', o.x, o.y + r + 20);
+  }
+  function drawShots(now) {
+    for (const b of shotsNow) {
+      const k = Math.min(0.25, (now - b.at) / 1000), x = b.x + b.vx * k, y = b.y + b.vy * k, l = Math.hypot(b.vx, b.vy) || 1;
+      ctx.save(); ctx.strokeStyle = 'rgba(255,140,40,0.45)'; ctx.lineWidth = 8; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(x - b.vx / l * 26, y - b.vy / l * 26); ctx.lineTo(x, y); ctx.stroke();
+      ctx.fillStyle = '#ffd27a'; ctx.shadowColor = '#ff7a1a'; ctx.shadowBlur = 18; ctx.beginPath(); ctx.arc(x, y, G.OBSTACLES.shotR, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.shadowBlur = 0; ctx.beginPath(); ctx.arc(x, y, 3.5, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+    }
+  }
   function drawObstacles(t, now) {
     for (const o of obstacles) {
       const reach = o.k === 'laser' ? o.len + 30 : o.k === 'rect' ? Math.max(o.w, o.h) : o.r + 10;
@@ -259,6 +310,7 @@
       const fadeIn = Math.min(1, (now - o.born) / 600), left = o.endAt - now, fadeOut = Math.max(0, Math.min(1, left / 1500));
       const blinkOut = left < 5000 ? 0.65 + 0.35 * Math.sin(now / 90) : 1; // flickers before it vanishes
       ctx.save(); ctx.globalAlpha = fadeIn * fadeOut * blinkOut;
+      if (o.k === 'robot') { drawRobot(o, t, now); ctx.restore(); continue; }
       if (o.k === 'laser') {
         const a = G.laserAngle(o, now), armed = now >= o.armAt, ex = o.x + Math.cos(a) * o.len, ey = o.y + Math.sin(a) * o.len;
         if (!armed) { // warning: dashed sweep circle + flashing pylon
@@ -316,6 +368,8 @@
     while (snapshots.length > 40) snapshots.shift();
     for (const [id, x, y, t, e] of st.oa) orbs.set(id, { x, y, t, born: now, fall: e && t !== 't' ? 1 : 0 }); // e: event orb (rain falls in)
     if (st.rn) syncRunners(st.rn, now); else runners.clear();
+    robotState = new Map((st.rb || []).map(r => [r[0], { face: r[1], aim: r[2], ax: r[3], ay: r[4] }]));
+    shotsNow = (st.pj || []).map(b => ({ x: b[1], y: b[2], vx: b[3], vy: b[4], at: now }));
     for (const [id, pid] of st.od) {
       const o = orbs.get(id);
       if (!o) continue;
@@ -367,6 +421,7 @@
     if (!$('profile').classList.contains('hidden')) renderProfile();
   }
   socket.on('top', d => {
+    if (d.wk != null) setWeekend(d.wk);
     $('hudOnline').textContent = d.online;
     const ol = $('hudTop'); ol.textContent = '';
     for (const [id, name, s] of d.top) {
@@ -1232,6 +1287,7 @@
 
     drawEventZone(t, now);
     drawObstacles(t, now);
+    drawShots(now);
     // orbs
     const pad = 60;
     for (const [id, o] of orbs) {
@@ -1395,11 +1451,13 @@
     }
     for (const o of obstacles) { // obstacles + lasers are always shown (they are public map features)
       const [ox, oy] = px(o.x, o.y);
+      if (o.k === 'robot') { mctx.fillStyle = '#c3cad6'; mctx.strokeStyle = '#ff4040'; mctx.lineWidth = 1.5; mctx.fillRect(ox - 3.5, oy - 3.5, 7, 7); mctx.strokeRect(ox - 3.5, oy - 3.5, 7, 7); continue; }
       if (o.k === 'laser') { const armed = now >= o.armAt; mctx.strokeStyle = armed ? 'rgba(255,60,70,0.9)' : `rgba(255,90,90,${0.4 + 0.4 * Math.sin(now / 90)})`; mctx.lineWidth = 1.5;
         mctx.beginPath(); mctx.arc(ox, oy, Math.max(3, o.len * k), 0, Math.PI * 2); mctx.stroke(); mctx.fillStyle = '#ff3b4e'; mctx.beginPath(); mctx.arc(ox, oy, 2.5, 0, Math.PI * 2); mctx.fill(); }
       else if (o.k === 'rect') { mctx.fillStyle = 'rgba(170,180,230,0.75)'; mctx.fillRect(ox - Math.max(1.5, o.w * k / 2), oy - Math.max(1.5, o.h * k / 2), Math.max(3, o.w * k), Math.max(3, o.h * k)); }
       else { mctx.fillStyle = 'rgba(170,180,230,0.75)'; mctx.beginPath(); mctx.arc(ox, oy, Math.max(2, o.r * k), 0, Math.PI * 2); mctx.fill(); }
     }
+    mctx.fillStyle = '#ff9a2e'; for (const b of shotsNow) { const [bx, by] = px(b.x, b.y); mctx.beginPath(); mctx.arc(bx, by, 1.8, 0, Math.PI * 2); mctx.fill(); }
     const blip = (b, r, col) => {
       const lit = (b.d / R.range) * R.sweepMs; if (age < lit) return; // the wave hasn't reached it yet
       const a = Math.max(0, 1 - (age - lit) / (R.periodMs - lit)) * (b.a || 1); if (a <= 0.02) return;
@@ -1479,7 +1537,7 @@
       if (k && k.top && k.top.length) info += ' · лидер: ' + k.top[0][0] + ' (' + k.top[0][1] + ')';
     } else if (e.kind === 'treasure') info = `Осталось сокровищ: ${e.remaining != null ? e.remaining : '?'} из ${e.total != null ? e.total : '?'} — ищите световые столбы и золотые точки на карте`;
     else if (e.kind === 'runner') { const nr = nearestRunner(now); info = nr ? `Беглецов осталось: ${runners.size} из ${e.total || G.EVENTS.runner.count} · ближайший в ${Math.round(nr.d / 10)} м` : 'Сферы-беглецы где-то на карте…'; }
-    else if (e.kind === 'lucky') info = '🍀 Сфер на карте ×2, шанс редких и более ценных сфер ×2!';
+    else if (e.kind === 'lucky') info = '🍀 Сфер на карте ×1.25, шанс редких и более ценных сфер ×2!';
     $('evHInfo').textContent = info; $('evChipInfo').textContent = info;
   }
   function updateEventChip(now, e, def) {
@@ -1493,9 +1551,11 @@
     $('evChipPhase').textContent = ann ? `Начнётся через ${sec} с` : `Идёт · осталось ${mmss}`;
     if (ann) $('evChipInfo').textContent = '';
   }
-  $('evChipBtn').addEventListener('click', ev => { ev.stopPropagation(); $('evChip').classList.toggle('open'); });
-  $('evChip').addEventListener('pointerdown', ev => ev.stopPropagation());
-  document.addEventListener('pointerdown', ev => { if (!$('evChip').contains(ev.target)) $('evChip').classList.remove('open'); });
+  for (const id of ['evChip', 'wkChip']) {
+    $(id + 'Btn').addEventListener('click', ev => { ev.stopPropagation(); for (const o of ['evChip', 'wkChip']) if (o !== id) $(o).classList.remove('open'); $(id).classList.toggle('open'); });
+    $(id).addEventListener('pointerdown', ev => ev.stopPropagation());
+  }
+  document.addEventListener('pointerdown', ev => { for (const id of ['evChip', 'wkChip']) if (!$(id).contains(ev.target)) $(id).classList.remove('open'); });
   setInterval(() => { if (joined && evState) updateEventUi(); }, 200);
   function evResultHide() { $('evResult').classList.add('hidden'); clearTimeout(evResultTimer); }
   function showEventResult(d) {

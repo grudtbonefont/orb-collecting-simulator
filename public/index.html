@@ -128,10 +128,17 @@
     <div id="evHInfo" class="ev-info"></div>
   </div>
   <!-- compact event chip: square icon + time left; hover (desktop) / tap (phone) shows the details -->
+  <div class="ev-chips">
   <div id="evChip" class="ev-chip hidden">
     <button type="button" id="evChipBtn" class="ev-chip-btn" aria-label="Событие"><span id="evChipIcon"></span></button>
     <div id="evChipTime" class="ev-chip-time"></div>
     <div id="evChipPop" class="ev-chip-pop" role="status"><b id="evChipName"></b><div id="evChipPhase" class="ev-chip-phase"></div><div id="evChipDesc" class="ev-chip-desc"></div><div id="evChipInfo" class="ev-chip-info"></div></div>
+  </div>
+  <div id="wkChip" class="ev-chip hidden" data-kind="weekend">
+    <button type="button" id="wkChipBtn" class="ev-chip-btn" aria-label="Выходные"><span>🎉</span></button>
+    <div id="wkChipTime" class="ev-chip-time"></div>
+    <div id="wkChipPop" class="ev-chip-pop" role="status"><b>Выходные: x1.5 орбов</b><div id="wkChipPhase" class="ev-chip-phase"></div><div class="ev-chip-desc">Каждую субботу и воскресенье (по Москве) все сферы приносят в 1,5 раза больше. Действует вместе с обычными событиями.</div></div>
+  </div>
   </div>
   <div id="evResult" class="ev-result hidden" role="status" aria-live="polite"></div>
 </div>

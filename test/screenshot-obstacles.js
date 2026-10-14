@@ -10,7 +10,7 @@ let fails = 0; const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); 
 const CHROME = process.env.CHROME || ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find(p => fs.existsSync(p));
 (async () => {
   const file = path.join(os.tmpdir(), `ocs-obs-shot-${process.pid}.json`);
-  const proc = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: Object.assign({}, process.env, { PORT: String(PORT), DATA_FILE: file, DATABASE_URL: '', EVENT_EVERY_MS: '0', OBSTACLES: '0', OCS_TEST_HOOKS: '1' }), stdio: 'ignore' });
+  const proc = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: Object.assign({}, process.env, { PORT: String(PORT), DATA_FILE: file, DATABASE_URL: '', EVENT_EVERY_MS: '0', OBSTACLES: '0', OCS_TEST_HOOKS: '1', OCS_WEEKEND: 'on' }), stdio: 'ignore' });
   process.on('exit', () => { try { proc.kill('SIGTERM'); fs.rmSync(file, { force: true }); } catch (_) {} });
   const URL = `http://localhost:${PORT}`;
   for (let i = 0; i < 100; i++) { try { if ((await fetch(URL + '/api/health')).ok) break; } catch (_) {} await sleep(200); }
@@ -41,6 +41,12 @@ const CHROME = process.env.CHROME || ['/usr/bin/google-chrome', '/usr/bin/chromi
   await sleep(2600); // lasers arm after the 3 s warning
   await vp.screenshot({ path: path.join(ROOT, 'screenshot-obstacles.png') });
   await call('test:obstacle', { clear: true });
+  ok((await call('test:obstacle', { kind: 'robot', x: C.x + 340, y: C.y - 60, lifeMs: 60000 })).ok, 'iron robot spawned next to the viewer');
+  await vp.waitForFunction(() => true); await sleep(2150);
+  await vp.screenshot({ path: path.join(ROOT, 'screenshot-robot.png') });
+  const wk = await vp.evaluate(() => ({ vis: !document.getElementById('wkChip').classList.contains('hidden'), t: document.getElementById('wkChipTime').textContent, pop: document.getElementById('wkChipPop').textContent }));
+  ok(wk.vis && /x1.5 орбов/.test(wk.pop) && wk.t.length > 0, `weekend chip 🎉 shown (${wk.t} left)`);
+  await call('test:obstacle', { clear: true });
   await call('test:obstacle', { kind: 'rock', x: C.x - 250, y: C.y + 220, lifeMs: 60000 }); await sleep(4500); // let the toasts fade
   const r = await call('test:event', { kind: 'lucky', announceMs: 100, durationMs: 30000 });
   ok(r.ok, 'lucky wave forced');
@@ -53,6 +59,9 @@ const CHROME = process.env.CHROME || ['/usr/bin/google-chrome', '/usr/bin/chromi
   const hud = await vp.evaluate(() => document.getElementById('evChipName').textContent + ' | ' + document.getElementById('evChipTime').textContent + ' | ' + document.getElementById('evChipInfo').textContent);
   ok(await vp.isVisible('#evChipPop') && /Волна удачи/.test(hud) && /×2/.test(hud) && /^.*\| 0:\d\d \|/.test(hud), 'hover opens the info popup: ' + hud);
   await vp.screenshot({ path: path.join(ROOT, 'screenshot-event-icons.png') });
+  await vp.hover('#wkChipBtn'); await sleep(300);
+  ok(await vp.isVisible('#wkChipPop') && !(await vp.isVisible('#evChipPop')), 'hovering the weekend chip shows «Выходные: x1.5 орбов»');
+  await vp.screenshot({ path: path.join(ROOT, 'screenshot-weekend.png') });
   await vp.mouse.move(400, 400); await sleep(200);
   ok(!(await vp.isVisible('#evChipPop')), 'popup closes when the mouse leaves');
   // phone: tap opens, tap elsewhere closes, joystick area untouched

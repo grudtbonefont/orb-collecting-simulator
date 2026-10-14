@@ -446,3 +446,9 @@ canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: blo
 .ev-chip.open .ev-chip-pop { display: block; }
 @media (hover: hover) and (pointer: fine) { .ev-chip:hover .ev-chip-pop { display: block; } }
 @media (max-width: 640px) { .ev-chip { top: calc(var(--ev-top, 126px) + 4px); right: 8px; } .ev-chip-btn { width: 44px; height: 44px; font-size: 23px; } .ev-chip-pop { width: min(220px, calc(100vw - 80px)); right: 52px; } }
+
+/* event chips stack in one column (active event + weekend bonus) */
+.ev-chips { position: absolute; right: 12px; top: 128px; z-index: 6; display: flex; flex-direction: column; gap: 10px; align-items: flex-end; pointer-events: none; }
+.ev-chips .ev-chip { position: relative; right: auto; top: auto; }
+.ev-chip[data-kind=weekend] .ev-chip-btn { border-color: #ff7ad9; box-shadow: 0 0 14px rgba(255,122,217,.5); }
+@media (max-width: 640px) { .ev-chips { top: calc(var(--ev-top, 126px) + 4px); right: 8px; } .ev-chips .ev-chip { top: auto; right: auto; } }

@@ -202,11 +202,20 @@ function spawnTick(now) {
 
 
 
+// ---------------------------------------------------------------- weekend bonus (Sat + Sun Moscow time); OCS_WEEKEND=on|off forces it (tests)
+const WK_FORCE = process.env.OCS_WEEKEND;
+function weekendState(now = Date.now()) {
+  if (WK_FORCE === 'off') return { on: false, left: 0 };
+  if (WK_FORCE === 'on') return { on: true, left: Math.max(60000, G.weekendInfo(now).left || 86400000) };
+  return G.weekendInfo(now);
+}
+const weekendOn = now => weekendState(now).on;
+
 // ---------------------------------------------------------------- temporary obstacles + rotating lasers (numbers in G.OBSTACLES)
 // OBSTACLES=0 turns them off (the test suite does, except the obstacle tests).
 const OBS_ON = process.env.OBSTACLES !== '0', OB = G.OBSTACLES;
-let obstacles = [], nextObsId = 1, obsDueAt = Date.now() + rand(OB.everyMinMs, OB.everyMaxMs);
-function obsReach(o) { return o.k === 'rect' ? Math.hypot(o.w, o.h) / 2 : o.k === 'laser' ? o.len : o.r; }
+let obstacles = [], nextObsId = 1, obsDueAt = Date.now() + rand(OB.everyMinMs, OB.everyMaxMs), robotDueAt = Date.now() + rand(OB.robotEveryMinMs, OB.robotEveryMaxMs);
+function obsReach(o) { return o.k === 'rect' ? Math.hypot(o.w, o.h) / 2 : o.k === 'laser' ? o.len : o.k === 'robot' ? OB.robotRange * 0.6 : o.r; }
 function inObstacle(x, y, pad = 0) {
   for (const o of obstacles) {
     if (o.k === 'rect') { if (Math.abs(x - o.x) <= o.w / 2 + pad && Math.abs(y - o.y) <= o.h / 2 + pad) return true; }
@@ -224,9 +233,11 @@ function publicObstacles(now = Date.now()) {
 const pushObstacles = () => io && io.to('arena').emit('obs', publicObstacles());
 // makes one obstacle (random kind / size unless forced); null if no free spot was found
 function spawnObstacle(now, f = {}) {
-  const laser = f.kind ? f.kind === 'laser' : Math.random() < OB.laserChance;
+  const robot = f.kind === 'robot'; // robots come only from their own timer (robotTimer), never instead of an obstacle
+  const laser = !robot && (f.kind ? f.kind === 'laser' : Math.random() < OB.laserChance);
   let o;
-  if (laser) o = { k: 'laser', r: OB.pylonR, len: Math.round(rand(OB.beamMin, OB.beamMax)), w: (Math.random() < 0.5 ? -1 : 1) * rand(OB.spinMin, OB.spinMax), a0: rand(0, Math.PI * 2), t0: now, armAt: now + OB.warnMs };
+  if (robot) o = { k: 'robot', r: OB.robotR, aim: null, nextShot: now + 1500, face: rand(0, Math.PI * 2) };
+  else if (laser) o = { k: 'laser', r: OB.pylonR, len: Math.round(rand(OB.beamMin, OB.beamMax)), w: (Math.random() < 0.5 ? -1 : 1) * rand(OB.spinMin, OB.spinMax), a0: rand(0, Math.PI * 2), t0: now, armAt: now + OB.warnMs };
   else {
     const kind = f.kind || ['wall', 'block', 'rock'][Math.floor(Math.random() * 3)];
     if (kind === 'rock') o = { k: 'circle', r: Math.round(rand(45, 95)) };
@@ -253,28 +264,66 @@ function spawnObstacle(now, f = {}) {
 }
 function inObstacleOne(o, x, y, pad) { return o.k === 'rect' ? Math.abs(x - o.x) <= o.w / 2 + pad && Math.abs(y - o.y) <= o.h / 2 + pad : Math.hypot(x - o.x, y - o.y) <= o.r + pad; }
 // a laser touch costs penaltyPct of the balance (capped), then invulnMs of immunity; up to dropMax of the lost orbs fall nearby
-function laserHit(pl, o, now) {
+function laserHit(pl, o, now, src = 'laser') {
   pl.zapUntil = now + OB.invulnMs;
-  const loss = G.laserPenalty(pl.acc.balance);
+  const loss = src === 'robot' ? G.robotPenalty(pl.acc.balance) : G.laserPenalty(pl.acc.balance);
   if (!loss) return;
   pl.acc.balance -= loss; markDirty(pl.acc);
-  const drops = Math.min(OB.dropMax, loss);
+  const drops = Math.min(OB.dropMax, src === 'robot' ? Math.ceil(loss / 2) : loss); // robot: about half of the loss drops
   for (let i = 0; i < drops; i++) {
     const a = rand(0, Math.PI * 2), d = rand(70, 160), x = Math.round(Math.max(30, Math.min(G.WORLD.w - 30, pl.x + Math.cos(a) * d))), y = Math.round(Math.max(30, Math.min(G.WORLD.h - 30, pl.y + Math.sin(a) * d)));
     if (G.zoneOf(x) !== G.zoneOf(pl.x) || inObstacle(x, y, 10)) continue;
     const b = addOrb('c', { x, y }, 'drop'); b.expires = now + OB.dropLifeMs;
   }
   pl.socket.emit('bal', { b: pl.acc.balance, t: pl.acc.total, s: pl.session });
-  pl.socket.emit('zap', { loss, inv: OB.invulnMs });
+  pl.socket.emit('zap', { loss, inv: OB.invulnMs, src });
+}
+// iron robots: pick the nearest player in range (same zone), aim for aimMs (telegraph), then fire a slow shot
+let shots = [], nextShotId = 1;
+function robotTick(now) {
+  const dt = G.TICK_MS / 1000;
+  for (const o of obstacles) {
+    if (o.k !== 'robot') continue;
+    if (o.aim) {
+      const pl = players.get(o.aim.pid);
+      if (pl) { o.aim.x = pl.x; o.aim.y = pl.y; o.face = Math.atan2(pl.y - o.y, pl.x - o.x); }
+      if (now >= o.aim.fireAt) {
+        const a = o.face, sx = o.x + Math.cos(a) * (o.r + 12), sy = o.y + Math.sin(a) * (o.r + 12);
+        shots.push({ id: nextShotId++, x: sx, y: sy, vx: Math.cos(a) * OB.shotSpeed, vy: Math.sin(a) * OB.shotSpeed, dieAt: now + OB.shotLifeMs, z: G.zoneOf(o.x) });
+        o.aim = null; o.nextShot = now + rand(OB.shotEveryMin, OB.shotEveryMax);
+      }
+    } else if (now >= o.nextShot) {
+      let best = null, bd = OB.robotRange;
+      for (const pl of players.values()) { const d = Math.hypot(pl.x - o.x, pl.y - o.y); if (d < bd && G.zoneOf(pl.x) === G.zoneOf(o.x)) { bd = d; best = pl; } }
+      if (best) o.aim = { pid: best.id, x: best.x, y: best.y, fireAt: now + OB.aimMs }; else o.nextShot = now + 400;
+    }
+  }
+  shots = shots.filter(b => {
+    b.x += b.vx * dt; b.y += b.vy * dt;
+    if (now >= b.dieAt || b.x < 0 || b.y < 0 || b.x > G.WORLD.w || b.y > G.WORLD.h || G.zoneOf(b.x) !== b.z) return false;
+    for (const o of obstacles) if (o.k !== 'robot' && inObstacleOne(o, b.x, b.y, 0)) return false; // walls / rocks / pylons block shots
+    for (const pl of players.values()) {
+      if (Math.hypot(pl.x - b.x, pl.y - b.y) > G.PLAYER_R + OB.shotR) continue;
+      if (!(pl.zapUntil > now)) laserHit(pl, null, now, 'robot');
+      return false;
+    }
+    return true;
+  });
 }
 function obstacleTick(now) {
   let changed = false;
   if (obstacles.some(o => o.expires <= now)) { obstacles = obstacles.filter(o => o.expires > now); changed = true; }
+  if (!obstacles.some(o => o.k === 'robot')) shots = [];
   if (changed) pushObstacles();
   if (OBS_ON && players.size && now >= obsDueAt) {
     obsDueAt = now + rand(OB.everyMinMs, OB.everyMaxMs);
-    if (obstacles.length < OB.maxAlive) spawnObstacle(now);
+    if (obstacles.filter(o => o.k !== 'robot').length < OB.maxAlive) spawnObstacle(now);
   }
+  if (OBS_ON && players.size && now >= robotDueAt) { // separate rare roll for the iron robot
+    robotDueAt = now + rand(OB.robotEveryMinMs, OB.robotEveryMaxMs);
+    if (obstacles.filter(o => o.k === 'robot').length < OB.robotMax && Math.random() < OB.robotChance) spawnObstacle(now, { kind: 'robot' });
+  }
+  robotTick(now);
   for (const o of obstacles) {
     if (o.k !== 'laser' || now < o.armAt) continue;
     for (const pl of players.values()) if (!(pl.zapUntil > now) && G.laserHits(o, pl.x, pl.y, now, G.PLAYER_R + 2)) laserHit(pl, o, now);
@@ -544,7 +593,7 @@ app.get('/api/leaderboard', async (req, res) => {
   try { res.json(await leaderboard(limit, req.query.name)); }
   catch (e) { console.error('leaderboard failed:', e.message); res.status(503).json({ error: 'unavailable' }); }
 });
-app.get('/api/health', (req, res) => res.json({ ok: true, online: players.size, orbs: orbs.size, targetOrbs: targetOrbs(), event: ev ? ev.kind + ':' + ev.phase : null, eventsEnabled: EV_EVERY !== 0, obstacles: obstacles.length, world: G.WORLD,
+app.get('/api/health', (req, res) => res.json({ ok: true, online: players.size, orbs: orbs.size, targetOrbs: targetOrbs(), event: ev ? ev.kind + ':' + ev.phase : null, eventsEnabled: EV_EVERY !== 0, weekend: weekendState().on, obstacles: obstacles.length, world: G.WORLD,
   storage: store.mode, version: VERSION, uptimeSec: Math.round(process.uptime()) }));
 app.get('/api/shop', (req, res) => res.json({ items: G.ITEMS, upgrades: G.UPGRADES, minigames: G.MINIGAMES, orbs: G.ORB_TYPES, events: G.EVENTS, shardExchange: G.SHARD_EXCHANGE }));
 app.use((req, res) => res.status(404).type('text').send('Not found'));
@@ -865,6 +914,7 @@ io.on('connection', socket => {
       chat: chatHistory,
       event: publicEvent(),
       obstacles: publicObstacles(),
+      weekend: weekendState().left,
     };
   }
 
@@ -1240,9 +1290,9 @@ io.on('connection', socket => {
     socket.on('test:obstacle', (d, ack) => {
       ack = safeAck(ack);
       if (!acct || !isObj(d)) return ack({ ok: false });
-      if (d.clear) { obstacles = []; pushObstacles(); return ack({ ok: true }); }
+      if (d.clear) { obstacles = []; shots = []; pushObstacles(); return ack({ ok: true }); }
       const n = v => (Number.isFinite(Number(v)) && v !== null && v !== '' ? Number(v) : undefined);
-      const o = spawnObstacle(Date.now(), { kind: ['wall', 'block', 'rock', 'laser'].includes(d.kind) ? d.kind : undefined, x: n(d.x), y: n(d.y), lifeMs: n(d.lifeMs) });
+      const o = spawnObstacle(Date.now(), { kind: ['wall', 'block', 'rock', 'laser', 'robot'].includes(d.kind) ? d.kind : undefined, x: n(d.x), y: n(d.y), lifeMs: n(d.lifeMs) });
       ack({ ok: !!o, obstacles: publicObstacles() });
     });
     // spawn one orb of each requested tier in a ring around the caller or {x,y} (screenshots / rarity tests)
@@ -1328,7 +1378,8 @@ function collectAround(pl, radius, now) {
       }
       continue;
     }
-    const rw = G.orbReward(ot.value, pl.acc.upgrades, pl, Math.random, o.t); // «находка», luck ×2, multiplier (fraction in pl.frac) — server-side only
+    const rw = G.orbReward(ot.value, pl.acc.upgrades, pl, Math.random, o.t);
+    if (weekendOn(now)) { const f = (pl.wkFrac || 0) + rw.value * (G.WEEKEND.mult - 1), whole = Math.floor(f + 1e-9); pl.wkFrac = f - whole; rw.value += whole; } // «Выходные»: ×1.5 (fraction carried) // «находка», luck ×2, multiplier (fraction in pl.frac) — server-side only
     if (rw.lucky) pl.lucky++;
     if (rw.jackpot) pl.jackpots++;
     pl.gained += rw.value;
@@ -1387,6 +1438,9 @@ function tick() {
   for (const pl of players.values()) p.push([pl.id, Math.round(pl.x * 100) / 100, Math.round(pl.y * 100) / 100, pl.lastSeq]);
   const st = { t: now, p, oa: pendingAdds, od: pendingDels };
   if (ev && ev.runners && ev.phase === 'active') st.rn = ev.runners.filter(r => !r.caught).map(r => [r.id, Math.round(r.x), Math.round(r.y)]); // «Сферы-беглецы» positions
+  const rb = obstacles.filter(o => o.k === 'robot');
+  if (rb.length) st.rb = rb.map(o => [o.id, +o.face.toFixed(3), o.aim ? 1 : 0, o.aim ? Math.round(o.aim.x) : 0, o.aim ? Math.round(o.aim.y) : 0]); // robots: facing, aiming (telegraph)
+  if (shots.length) st.pj = shots.map(b => [b.id, Math.round(b.x), Math.round(b.y), Math.round(b.vx), Math.round(b.vy)]);
   io.to('arena').emit('s', st);
   pendingAdds = []; pendingDels = [];
 }
@@ -1394,7 +1448,7 @@ function tick() {
 function everySecond() {
   const top = Array.from(players.values()).sort((a, b) => b.session - a.session || a.joinedAt - b.joinedAt).slice(0, 10)
     .map(pl => [pl.id, pl.acc.name, pl.session]);
-  io.to('arena').emit('top', { online: players.size, top });
+  io.to('arena').emit('top', { online: players.size, top, wk: weekendState().left }); // wk: ms until Monday 00:00 MSK (0 = no weekend bonus)
   const now = Date.now();
   for (const pl of players.values()) pl.socket.emit('sping', now);
 }
