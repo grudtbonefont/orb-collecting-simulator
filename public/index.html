@@ -11,6 +11,9 @@
 <canvas id="game"></canvas>
 
 <!-- Start screen -->
+<!-- menu music (start / login / registration / lobby); m4a (AAC) first, mp3 fallback -->
+<audio id="menuMusic" loop preload="auto" playsinline><source src="/audio/menu.m4a" type="audio/mp4"><source src="/audio/menu.mp3" type="audio/mpeg"></audio>
+<button type="button" id="musicBtn" class="music-btn" aria-label="Музыка: вкл/выкл" title="Музыка">🔊</button>
 <div id="start" class="overlay">
   <div class="start-card">
     <h1 class="logo">Orb Collecting <span>Simulator</span></h1>

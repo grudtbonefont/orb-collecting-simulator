@@ -157,7 +157,25 @@
       $('pfError').textContent = (res && res.error) || 'Не удалось войти в игру';
     });
   }
+  // ------------------------------------------------------------ menu music: loops on start / login / lobby screens, fades out in the arena
+  const music = (() => {
+    const el = $('menuMusic'), btn = $('musicBtn'), KEY = 'ocs_music', VOL = 0.5;
+    let muted = store.get(KEY) === '0', want = true, fadeT = null;
+    const paint = () => { btn.textContent = muted ? '🔇' : '🔊'; btn.setAttribute('aria-pressed', muted ? 'true' : 'false'); };
+    const tryPlay = () => { if (muted || !want || !el.paused) return; clearInterval(fadeT); el.volume = VOL; const p = el.play(); if (p && p.catch) p.catch(() => {}); };
+    const fadeOut = () => {
+      clearInterval(fadeT); if (el.paused) return;
+      fadeT = setInterval(() => { const v = el.volume - 0.05; if (v <= 0.01) { clearInterval(fadeT); el.pause(); el.volume = VOL; } else el.volume = v; }, 60); // iOS ignores volume: it simply pauses at the end
+    };
+    for (const ev of ['pointerdown', 'touchend', 'keydown', 'click']) document.addEventListener(ev, tryPlay, { capture: true, passive: true }); // autoplay blocked → first interaction
+    btn.addEventListener('click', e => { e.stopPropagation(); muted = !muted; store.set(KEY, muted ? '0' : '1'); paint(); if (muted) { clearInterval(fadeT); el.pause(); } else tryPlay(); });
+    paint();
+    return { menu() { want = true; document.body.classList.remove('in-game'); tryPlay(); }, game() { want = false; document.body.classList.add('in-game'); fadeOut(); }, el, get muted() { return muted; } };
+  })();
+  window.OCSMusic = () => ({ paused: music.el.paused, muted: music.muted, volume: music.el.volume, src: music.el.currentSrc });
+  music.menu(); // try autoplay on load
   function enterGame(res, reconnect) {
+    music.game();
     setErr(''); stage = 'game'; paused = false;
     myId = res.you; profile = res.profile; myName = profile.name; sessionScore = 0;
     store.set(NICK_KEY, myName); $('nick').value = myName;
@@ -183,18 +201,21 @@
     closeModals();
   }
   function showResume(text, buttons) {
+    music.menu();
     $('start').classList.remove('hidden'); $('profile').classList.add('hidden');
     $('resumeBox').classList.remove('hidden'); $('authBox').classList.add('hidden');
     $('resumeText').textContent = text;
     $('resumeBtn').classList.toggle('hidden', !buttons); $('resumeLogout').classList.toggle('hidden', !buttons);
   }
   function showStart() {
+    music.menu();
     stage = 'auth'; hideGameUi();
     $('start').classList.remove('hidden'); $('profile').classList.add('hidden');
     $('resumeBox').classList.add('hidden'); $('authBox').classList.remove('hidden');
     loadStartLb();
   }
   function showLobby(p) {
+    music.menu();
     stage = 'lobby'; paused = false; hideGameUi();
     summary = p; profile = p; myName = p.name;
     store.set(NICK_KEY, myName); $('nick').value = myName;

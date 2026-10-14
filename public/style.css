@@ -452,3 +452,7 @@ canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: blo
 .ev-chips .ev-chip { position: relative; right: auto; top: auto; }
 .ev-chip[data-kind=weekend] .ev-chip-btn { border-color: #ff7ad9; box-shadow: 0 0 14px rgba(255,122,217,.5); }
 @media (max-width: 640px) { .ev-chips { top: calc(var(--ev-top, 126px) + 4px); right: 8px; } .ev-chips .ev-chip { top: auto; right: auto; } }
+
+/* menu music toggle (only outside the arena) */
+.music-btn { position: fixed; left: calc(12px + env(safe-area-inset-left)); bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 60; width: 44px; height: 44px; border-radius: 50%; border: 1px solid rgba(160,140,255,.6); background: rgba(16,14,40,.85); font-size: 20px; line-height: 1; cursor: pointer; padding: 0; }
+body.in-game .music-btn { display: none; }
