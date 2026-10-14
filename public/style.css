@@ -427,3 +427,22 @@ canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: blo
 /* zone-2 door unlock button (appears near the door) */
 .door-btn { position: absolute; left: 50%; bottom: 74px; transform: translateX(-50%); pointer-events: auto; z-index: 6; white-space: nowrap; box-shadow: 0 0 22px rgba(255,204,51,.45); }
 @media (max-width: 640px) { .door-btn { bottom: calc(176px + env(safe-area-inset-bottom)); font-size: 13px; max-width: 92vw; } }
+
+/* events: compact square chip instead of the big banner / HUD (those stay in the DOM, hidden) */
+#evBanner, #evHud { display: none !important; }
+.ev-chip { position: absolute; right: 12px; top: 128px; z-index: 6; display: flex; flex-direction: column; align-items: center; gap: 3px; pointer-events: auto; }
+.ev-chip.hidden { display: none; }
+.ev-chip-btn { width: 50px; height: 50px; border-radius: 12px; border: 2px solid rgba(160,140,255,.7); background: rgba(16,14,40,.85); font-size: 27px; line-height: 1; padding: 0; cursor: pointer; box-shadow: 0 0 14px rgba(122,92,255,.45); display: flex; align-items: center; justify-content: center; }
+.ev-chip[data-phase=announce] .ev-chip-btn { animation: evChipPulse 1s infinite; border-style: dashed; }
+.ev-chip[data-kind=lucky] .ev-chip-btn { border-color: #5dff8f; box-shadow: 0 0 14px rgba(93,255,143,.5); }
+.ev-chip[data-kind=treasure] .ev-chip-btn { border-color: #ffcc33; box-shadow: 0 0 14px rgba(255,204,51,.5); }
+.ev-chip[data-kind=runner] .ev-chip-btn { border-color: #7dfcff; box-shadow: 0 0 14px rgba(125,252,255,.5); }
+@keyframes evChipPulse { 50% { transform: scale(1.08); } }
+.ev-chip-time { font: 800 12px Segoe UI, system-ui, sans-serif; color: #fff; background: rgba(0,0,0,.55); border-radius: 6px; padding: 1px 6px; white-space: nowrap; }
+.ev-chip-pop { display: none; position: absolute; right: 60px; top: 0; width: 230px; padding: 9px 11px; border-radius: 10px; background: rgba(16,14,40,.95); border: 1px solid rgba(160,140,255,.5); color: #dfe0ff; font-size: 12.5px; line-height: 1.35; text-align: left; }
+.ev-chip-pop b { display: block; font-size: 14px; color: #fff; margin-bottom: 3px; }
+.ev-chip-phase { color: #ffd76a; font-weight: 700; margin-bottom: 4px; }
+.ev-chip-info { margin-top: 5px; color: #9fffc8; }
+.ev-chip.open .ev-chip-pop { display: block; }
+@media (hover: hover) and (pointer: fine) { .ev-chip:hover .ev-chip-pop { display: block; } }
+@media (max-width: 640px) { .ev-chip { top: calc(var(--ev-top, 126px) + 4px); right: 8px; } .ev-chip-btn { width: 44px; height: 44px; font-size: 23px; } .ev-chip-pop { width: min(220px, calc(100vw - 80px)); right: 52px; } }

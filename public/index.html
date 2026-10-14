@@ -111,7 +111,7 @@
   <div id="orbHelp" class="orb-help hidden" role="dialog" aria-label="Виды сфер">
     <div class="oh-head"><b>Виды сфер</b><button type="button" id="orbHelpClose" class="close" aria-label="Закрыть">✕</button></div>
     <div id="orbHelpList"></div>
-    <p class="muted oh-foot"><i class="cur-shard" aria-hidden="true"></i> Осколки тратятся в «Лавке осколков» (магазин). Каждые 6–10 минут на арене проходит событие.</p>
+    <p class="muted oh-foot"><i class="cur-shard" aria-hidden="true"></i> Осколки тратятся в «Лавке осколков» (магазин). Каждые 4–8 минут на арене проходит событие (сокровища, беглецы или волна удачи); иногда появляются препятствия и вращающиеся лазеры — они отнимают часть сфер.</p>
   </div>
   <!-- timed arena events: announce banner, active HUD, results -->
   <div id="evBanner" class="ev-banner hidden" role="status" aria-live="polite">
@@ -126,6 +126,12 @@
     <div class="ev-head"><span id="evHIcon" class="ev-icon-sm"></span><b id="evHName"></b><span id="evHTime" class="ev-time"></span></div>
     <div class="ev-bar"><i id="evHBar"></i></div>
     <div id="evHInfo" class="ev-info"></div>
+  </div>
+  <!-- compact event chip: square icon + time left; hover (desktop) / tap (phone) shows the details -->
+  <div id="evChip" class="ev-chip hidden">
+    <button type="button" id="evChipBtn" class="ev-chip-btn" aria-label="Событие"><span id="evChipIcon"></span></button>
+    <div id="evChipTime" class="ev-chip-time"></div>
+    <div id="evChipPop" class="ev-chip-pop" role="status"><b id="evChipName"></b><div id="evChipPhase" class="ev-chip-phase"></div><div id="evChipDesc" class="ev-chip-desc"></div><div id="evChipInfo" class="ev-chip-info"></div></div>
   </div>
   <div id="evResult" class="ev-result hidden" role="status" aria-live="polite"></div>
 </div>

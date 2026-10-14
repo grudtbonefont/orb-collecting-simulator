@@ -173,12 +173,12 @@
     $('chat').classList.remove('hidden'); $('chatBtn').classList.remove('hidden');
     $('hudName').textContent = '👤 ' + myName;
     resetChat(res.chat || []);
-    evResultHide(); setEvent(res.event || null); runner = null;
+    runners.clear(); evResultHide(); setEvent(res.event || null); setObstacles(res.obstacles || []);
     updateHud();
     if (!reconnect) toast(`Добро пожаловать, ${myName}! Собирайте сферы.`, 'ok');
   }
   function hideGameUi() {
-    joined = false; evState = null; runner = null;
+    joined = false; evState = null; runners.clear(); obstacles = [];
     $('hud').classList.add('hidden'); $('chat').classList.add('hidden'); $('chatBtn').classList.add('hidden'); closeChat();
     closeModals();
   }
@@ -236,6 +236,73 @@
   socket.on('pmeta', p => { const pl = players.get(p.id); if (pl) { pl.eq = p.eq; pl.name = p.name; } });
   socket.on('sping', v => socket.emit('spong', v));
   socket.on('announce', a => toast('✨ ' + a.text));
+  // ------------------------------------------------------------ temporary obstacles + rotating lasers (server-run)
+  let obstacles = [], zapFlash = 0;
+  function setObstacles(list) {
+    const now = performance.now(), old = new Map(obstacles.map(o => [o.id, o]));
+    obstacles = (list || []).map(d => {
+      const o = Object.assign({}, d, { born: old.has(d.id) ? old.get(d.id).born : now, endAt: now + d.life });
+      if (d.k === 'laser') { o.a0 = d.a; o.t0 = now; o.armAt = now + d.arm; }
+      return o;
+    });
+  }
+  socket.on('obs', list => setObstacles(list));
+  socket.on('zap', z => {
+    if (!z) return; zapFlash = performance.now();
+    floaters.push({ x: me.x, y: me.y - 26, text: '⚡ −' + z.loss, color: '#ff4d5e', start: performance.now(), big: true });
+    toast(`⚡ Лазер! Потеряно ${fmt(z.loss)} сфер — часть рассыпалась рядом. ${Math.round(z.inv / 1000)} с неуязвимости.`, 'err');
+  });
+  function drawObstacles(t, now) {
+    for (const o of obstacles) {
+      const reach = o.k === 'laser' ? o.len + 30 : o.k === 'rect' ? Math.max(o.w, o.h) : o.r + 10;
+      if (o.x < cam.x - reach || o.x > cam.x + VW + reach || o.y < cam.y - reach || o.y > cam.y + VH + reach) continue;
+      const fadeIn = Math.min(1, (now - o.born) / 600), left = o.endAt - now, fadeOut = Math.max(0, Math.min(1, left / 1500));
+      const blinkOut = left < 5000 ? 0.65 + 0.35 * Math.sin(now / 90) : 1; // flickers before it vanishes
+      ctx.save(); ctx.globalAlpha = fadeIn * fadeOut * blinkOut;
+      if (o.k === 'laser') {
+        const a = G.laserAngle(o, now), armed = now >= o.armAt, ex = o.x + Math.cos(a) * o.len, ey = o.y + Math.sin(a) * o.len;
+        if (!armed) { // warning: dashed sweep circle + flashing pylon
+          const fl = 0.5 + 0.5 * Math.sin(now / 70);
+          ctx.strokeStyle = `rgba(255,70,70,${0.25 + 0.35 * fl})`; ctx.setLineDash([12, 10]); ctx.lineWidth = 3;
+          ctx.beginPath(); ctx.arc(o.x, o.y, o.len, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+          ctx.strokeStyle = `rgba(255,90,90,${0.35 + 0.4 * fl})`; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.moveTo(o.x, o.y); ctx.lineTo(ex, ey); ctx.stroke();
+          ctx.font = '800 18px Segoe UI, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = `rgba(255,120,120,${0.6 + 0.4 * fl})`;
+          ctx.fillText(`⚠ ЛАЗЕР через ${Math.max(1, Math.ceil((o.armAt - now) / 1000))}`, o.x, o.y - o.r - 18);
+        } else { // the beam: wide red glow + white-hot core
+          ctx.lineCap = 'round'; ctx.shadowColor = '#ff2030'; ctx.shadowBlur = 24;
+          ctx.strokeStyle = 'rgba(255,40,60,0.45)'; ctx.lineWidth = 16; ctx.beginPath(); ctx.moveTo(o.x, o.y); ctx.lineTo(ex, ey); ctx.stroke();
+          ctx.strokeStyle = '#ff3b4e'; ctx.lineWidth = 7; ctx.stroke();
+          ctx.shadowBlur = 0; ctx.strokeStyle = '#fff2f2'; ctx.lineWidth = 2.2; ctx.stroke();
+          ctx.fillStyle = 'rgba(255,80,80,0.9)'; ctx.beginPath(); ctx.arc(ex, ey, 6 + Math.sin(now / 60) * 1.5, 0, Math.PI * 2); ctx.fill();
+          ctx.strokeStyle = 'rgba(255,60,60,0.12)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(o.x, o.y, o.len, 0, Math.PI * 2); ctx.stroke();
+        }
+        const g = ctx.createRadialGradient(o.x - 6, o.y - 6, 2, o.x, o.y, o.r);
+        g.addColorStop(0, '#ffb3b3'); g.addColorStop(0.5, '#c0182a'); g.addColorStop(1, '#4a0610');
+        ctx.fillStyle = g; ctx.shadowColor = '#ff2030'; ctx.shadowBlur = armed ? 18 : 8;
+        ctx.beginPath(); ctx.arc(o.x, o.y, o.r, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
+        ctx.strokeStyle = '#ff6b78'; ctx.lineWidth = 3; ctx.stroke();
+      } else if (o.k === 'rect') {
+        const x0 = o.x - o.w / 2, y0 = o.y - o.h / 2;
+        const g = ctx.createLinearGradient(x0, y0, x0 + o.w, y0 + o.h); g.addColorStop(0, '#5a5f82'); g.addColorStop(1, '#2b2e48');
+        ctx.fillStyle = g; ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 16; ctx.shadowOffsetY = 6;
+        ctx.fillRect(x0, y0, o.w, o.h); ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+        ctx.strokeStyle = 'rgba(180,190,255,0.55)'; ctx.lineWidth = 3; ctx.strokeRect(x0 + 1.5, y0 + 1.5, o.w - 3, o.h - 3);
+        ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 2; ctx.beginPath();
+        for (let k = 24; k < o.w + o.h; k += 28) { ctx.moveTo(x0 + Math.min(k, o.w), y0 + Math.max(0, k - o.w)); ctx.lineTo(x0 + Math.max(0, k - o.h), y0 + Math.min(k, o.h)); }
+        ctx.stroke();
+      } else { // rock
+        const g = ctx.createRadialGradient(o.x - o.r * 0.35, o.y - o.r * 0.35, o.r * 0.1, o.x, o.y, o.r);
+        g.addColorStop(0, '#8a8aa6'); g.addColorStop(1, '#34344c');
+        ctx.fillStyle = g; ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 16; ctx.shadowOffsetY = 6;
+        ctx.beginPath();
+        for (let i = 0; i < 11; i++) { const a = i / 11 * Math.PI * 2, rr = o.r * (0.9 + 0.1 * Math.sin(o.id * 7 + i * 2.3)); i ? ctx.lineTo(o.x + Math.cos(a) * rr, o.y + Math.sin(a) * rr) : ctx.moveTo(o.x + Math.cos(a) * rr, o.y + Math.sin(a) * rr); }
+        ctx.closePath(); ctx.fill(); ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+        ctx.strokeStyle = 'rgba(200,200,255,0.35)'; ctx.lineWidth = 2.5; ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
 
   socket.on('s', st => {
     if (!joined) return;
@@ -248,10 +315,7 @@
     snapshots.push({ time: now, map });
     while (snapshots.length > 40) snapshots.shift();
     for (const [id, x, y, t, e] of st.oa) orbs.set(id, { x, y, t, born: now, fall: e && t !== 't' ? 1 : 0 }); // e: event orb (rain falls in)
-    if (st.rn) {
-      if (!runner) runner = { x: st.rn[0], y: st.rn[1], px: st.rn[0], py: st.rn[1], at: now };
-      else { runner.px = runnerX(now); runner.py = runnerY(now); runner.x = st.rn[0]; runner.y = st.rn[1]; runner.at = now; }
-    } else runner = null;
+    if (st.rn) syncRunners(st.rn, now); else runners.clear();
     for (const [id, pid] of st.od) {
       const o = orbs.get(id);
       if (!o) continue;
@@ -266,7 +330,7 @@
   function reconcile(x, y, ack) {
     pending = pending.filter(i => i.s > ack);
     const p = { x, y };
-    for (const i of pending) { const px = p.x; G.applyInput(p, i.x, i.y, mySpeed()); G.zoneGate(p, px, doorOpen()); }
+    for (const i of pending) { const px = p.x; G.applyInput(p, i.x, i.y, mySpeed()); G.zoneGate(p, px, doorOpen()); G.resolveObstacles(p, obstacles); }
     const ex = me.x - p.x, ey = me.y - p.y;
     if (Math.abs(ex) + Math.abs(ey) > 0.01) {
       if (Math.hypot(ex, ey) > 250) { corr.x = corr.y = 0; prevMe.x = p.x; prevMe.y = p.y; }
@@ -483,6 +547,7 @@
     prevMe.x = me.x; prevMe.y = me.y;
     G.applyInput(me, inp.x, inp.y, mySpeed());
     G.zoneGate(me, prevMe.x, doorOpen());
+    G.resolveObstacles(me, obstacles);
     pending.push(inp);
     updateDoorBtn();
     if (pending.length > 80) pending.shift();
@@ -1166,6 +1231,7 @@
     ctx.strokeRect(0, 0, G.WORLD.w, G.WORLD.h); ctx.shadowBlur = 0;
 
     drawEventZone(t, now);
+    drawObstacles(t, now);
     // orbs
     const pad = 60;
     for (const [id, o] of orbs) {
@@ -1226,6 +1292,11 @@
     }
     ctx.restore();
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0); // screen-space overlays (compass arrows) are not zoomed
+    if (now - zapFlash < 450) { const k = 1 - (now - zapFlash) / 450, g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.25, W / 2, H / 2, Math.max(W, H) * 0.7);
+      g.addColorStop(0, 'rgba(255,0,30,0)'); g.addColorStop(1, `rgba(255,20,40,${0.55 * k})`); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); }
+    if (evState && evState.kind === 'lucky' && evState.phase === 'active') { // «Волна удачи»: soft green glow at the screen edges
+      const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.75);
+      g.addColorStop(0, 'rgba(80,255,140,0)'); g.addColorStop(1, `rgba(80,255,140,${0.16 + 0.06 * Math.sin(t * 3)})`); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); }
     drawCompass(t, now);
     drawJoystick(t);
     if (frameNo % 2 === 0) drawMinimap(now);
@@ -1239,7 +1310,7 @@
   const COMPASS_COLORS = { l: '#ffcc33', m: '#ff3d6e', e: '#ff9a2e', event: '#7dffb0' };
   function drawCompass(t, now) {
     if (!profile || !profile.upgrades.sense) return;
-    const evc = evState ? { zone: evState.zone, runner: runner ? { x: runnerX(now), y: runnerY(now) } : null } : null;
+    const evc = evState ? { zone: evState.zone, runners: Array.from(runners.values(), r => ({ x: runnerX(r, now), y: runnerY(r, now) })) } : null;
     const list = G.compassTargets(profile.upgrades.sense, Array.from(orbs.values()), dispMe, evc);
     for (const tg of list) drawArrow(tg, t);
   }
@@ -1322,6 +1393,13 @@
       mctx.fillStyle = evState.phase === 'active' ? 'rgba(255,204,51,0.25)' : 'rgba(255,204,51,0.1)'; mctx.strokeStyle = 'rgba(255,204,51,0.8)';
       mctx.beginPath(); mctx.arc(zx, zy, Math.max(4, z.r * k), 0, Math.PI * 2); mctx.fill(); mctx.stroke();
     }
+    for (const o of obstacles) { // obstacles + lasers are always shown (they are public map features)
+      const [ox, oy] = px(o.x, o.y);
+      if (o.k === 'laser') { const armed = now >= o.armAt; mctx.strokeStyle = armed ? 'rgba(255,60,70,0.9)' : `rgba(255,90,90,${0.4 + 0.4 * Math.sin(now / 90)})`; mctx.lineWidth = 1.5;
+        mctx.beginPath(); mctx.arc(ox, oy, Math.max(3, o.len * k), 0, Math.PI * 2); mctx.stroke(); mctx.fillStyle = '#ff3b4e'; mctx.beginPath(); mctx.arc(ox, oy, 2.5, 0, Math.PI * 2); mctx.fill(); }
+      else if (o.k === 'rect') { mctx.fillStyle = 'rgba(170,180,230,0.75)'; mctx.fillRect(ox - Math.max(1.5, o.w * k / 2), oy - Math.max(1.5, o.h * k / 2), Math.max(3, o.w * k), Math.max(3, o.h * k)); }
+      else { mctx.fillStyle = 'rgba(170,180,230,0.75)'; mctx.beginPath(); mctx.arc(ox, oy, Math.max(2, o.r * k), 0, Math.PI * 2); mctx.fill(); }
+    }
     const blip = (b, r, col) => {
       const lit = (b.d / R.range) * R.sweepMs; if (age < lit) return; // the wave hasn't reached it yet
       const a = Math.max(0, 1 - (age - lit) / (R.periodMs - lit)) * (b.a || 1); if (a <= 0.02) return;
@@ -1342,19 +1420,30 @@
   }
 
   // ------------------------------------------------------------ timed arena events (server-run; the client only shows them)
-  let evState = null, kothInfo = null, runner = null, evResultTimer = null;
-  const EV_UNITS = { rain: 'сфер', koth: 'очк.', treasure: 'сокр.', runner: '' };
+  let evState = null, kothInfo = null, evResultTimer = null;
+  const runners = new Map(); // «Сферы-беглецы»: id -> {x,y,px,py,at}
+  const EV_UNITS = { rain: 'сфер', koth: 'очк.', treasure: 'сокр.', runner: 'шт.', lucky: 'сфер' };
+  function syncRunners(list, now) {
+    const seen = new Set();
+    for (const [id, x, y] of list) {
+      seen.add(id); const r = runners.get(id);
+      if (!r) runners.set(id, { x, y, px: x, py: y, at: now });
+      else { r.px = runnerX(r, now); r.py = runnerY(r, now); r.x = x; r.y = y; r.at = now; }
+    }
+    for (const id of Array.from(runners.keys())) if (!seen.has(id)) runners.delete(id);
+  }
+  function nearestRunner(now) { let b = null, bd = Infinity; for (const r of runners.values()) { const d = Math.hypot(runnerX(r, now) - dispMe.x, runnerY(r, now) - dispMe.y); if (d < bd) { bd = d; b = r; } } return b ? { r: b, d: bd } : null; }
   function setEvent(d) {
     if (!d) { evState = null; kothInfo = null; updateEventUi(); return; }
     const now = performance.now();
     evState = { kind: d.kind, phase: d.phase, startAt: now + (d.in || 0), endAt: now + (d.left || 0), dur: d.dur, zone: d.zone || null, remaining: d.remaining, total: d.total, annTotal: Math.max(1000, d.in || 0) };
-    if (d.runner && !runner) runner = { x: d.runner.x, y: d.runner.y, px: d.runner.x, py: d.runner.y, at: now };
+    if (d.runners) { evState.remaining = d.runners.length; if (!runners.size) syncRunners(d.runners, now); }
     if (d.phase === 'announce') kothInfo = null;
     updateEventUi();
   }
-  const runnerK = now => (runner ? Math.min(1, (now - runner.at) / G.TICK_MS) : 1);
-  const runnerX = now => (runner ? runner.px + (runner.x - runner.px) * runnerK(now) : 0);
-  const runnerY = now => (runner ? runner.py + (runner.y - runner.py) * runnerK(now) : 0);
+  const runnerK = (r, now) => Math.min(1, (now - r.at) / G.TICK_MS);
+  const runnerX = (r, now) => r.px + (r.x - r.px) * runnerK(r, now);
+  const runnerY = (r, now) => r.py + (r.y - r.py) * runnerK(r, now);
   function rewardText(r) {
     if (!r) return '';
     const parts = []; if (r.orbs) parts.push('+' + orbsH(r.orbs)); if (r.shards) parts.push('+' + shardsH(r.shards));
@@ -1365,6 +1454,7 @@
     const now = performance.now(), e = evState, def = e && G.EVENTS[e.kind];
     document.body.classList.toggle('ev-on', !!e);
     if (e && mobileUI()) { const b = Math.max($('hud').querySelector('.stats').getBoundingClientRect().bottom, $('hud').querySelector('.top').getBoundingClientRect().bottom); $('hud').style.setProperty('--ev-top', Math.round(b + 8) + 'px'); }
+    updateEventChip(now, e, def);
     if (!e || !def) { ban.classList.add('hidden'); hud.classList.add('hidden'); return; }
     if (e.phase === 'announce') {
       hud.classList.add('hidden'); ban.classList.remove('hidden'); ban.dataset.kind = e.kind;
@@ -1388,9 +1478,24 @@
       info = (k && k.inside ? '✅ Вы в зоне' : '⚠️ Вы вне зоны — идите к золотому кругу') + ` · ваши очки: ${k ? k.you : 0}`;
       if (k && k.top && k.top.length) info += ' · лидер: ' + k.top[0][0] + ' (' + k.top[0][1] + ')';
     } else if (e.kind === 'treasure') info = `Осталось сокровищ: ${e.remaining != null ? e.remaining : '?'} из ${e.total != null ? e.total : '?'} — ищите световые столбы и золотые точки на карте`;
-    else if (e.kind === 'runner') info = runner ? `Догоните сферу-беглеца! До неё ${Math.round(Math.hypot(runnerX(now) - dispMe.x, runnerY(now) - dispMe.y) / 10)} м` : 'Сфера-беглец где-то на арене…';
-    $('evHInfo').textContent = info;
+    else if (e.kind === 'runner') { const nr = nearestRunner(now); info = nr ? `Беглецов осталось: ${runners.size} из ${e.total || G.EVENTS.runner.count} · ближайший в ${Math.round(nr.d / 10)} м` : 'Сферы-беглецы где-то на карте…'; }
+    else if (e.kind === 'lucky') info = '🍀 Сфер на карте ×2, шанс редких и более ценных сфер ×2!';
+    $('evHInfo').textContent = info; $('evChipInfo').textContent = info;
   }
+  function updateEventChip(now, e, def) {
+    const chip = $('evChip');
+    if (!e || !def) { chip.classList.add('hidden'); chip.classList.remove('open'); return; }
+    chip.classList.remove('hidden'); chip.dataset.kind = e.kind; chip.dataset.phase = e.phase;
+    $('evChipIcon').textContent = def.icon; $('evChipName').textContent = def.name; $('evChipDesc').textContent = def.desc;
+    const ann = e.phase === 'announce', sec = Math.max(0, Math.ceil(((ann ? e.startAt : e.endAt) - now) / 1000));
+    const mmss = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+    $('evChipTime').textContent = ann ? 'через ' + mmss : mmss;
+    $('evChipPhase').textContent = ann ? `Начнётся через ${sec} с` : `Идёт · осталось ${mmss}`;
+    if (ann) $('evChipInfo').textContent = '';
+  }
+  $('evChipBtn').addEventListener('click', ev => { ev.stopPropagation(); $('evChip').classList.toggle('open'); });
+  $('evChip').addEventListener('pointerdown', ev => ev.stopPropagation());
+  document.addEventListener('pointerdown', ev => { if (!$('evChip').contains(ev.target)) $('evChip').classList.remove('open'); });
   setInterval(() => { if (joined && evState) updateEventUi(); }, 200);
   function evResultHide() { $('evResult').classList.add('hidden'); clearTimeout(evResultTimer); }
   function showEventResult(d) {
@@ -1402,7 +1507,8 @@
     head.append(h, x); box.appendChild(head);
     const you = document.createElement('div'); you.className = 'evr-you';
     let sub = '';
-    if (d.kind === 'runner') sub = d.outcome === 'caught' ? `Сферу поймал(а) ${d.results[0] ? d.results[0].name : 'кто-то'}!` : 'Сфера-беглец ускользнула…';
+    if (d.kind === 'runner') sub = d.caught ? `Поймано беглецов: ${d.caught} из ${d.total}` : 'Все сферы-беглецы ускользнули…';
+    if (d.kind === 'lucky') sub = 'Волна удачи закончилась — спавн сфер вернулся к обычному.';
     if (d.kind === 'treasure') sub = `Найдено сокровищ: ${(d.total || 0) - (d.remaining || 0)} из ${d.total || 0}`;
     if (d.you) {
       const unit = EV_UNITS[d.kind];
@@ -1433,9 +1539,13 @@
     toast(`💰 ${d.name} нашёл(ла) сокровище!${d.left ? ' Осталось: ' + d.left : ''}`);
     updateEventUi();
   });
+  socket.on('ev:runner', d => {
+    if (!evState || !d) return;
+    toast(`💨 ${d.name} поймал(а) сферу-беглеца!${d.left ? ' Осталось: ' + d.left : ''}`);
+  });
   socket.on('ev:end', d => {
     if (!d) return;
-    evState = null; kothInfo = null; runner = null; updateEventUi();
+    evState = null; kothInfo = null; runners.clear(); updateEventUi();
     if (!joined) return;
     if (d.cancelled) { toast('Событие отменено'); return; }
     showEventResult(d);
@@ -1467,9 +1577,9 @@
     ctx.strokeText(label, z.x, z.y + 22); ctx.fillText(label, z.x, z.y + 22);
     ctx.restore();
   }
-  function drawRunner(t, now) {
-    if (!runner) return;
-    const x = runnerX(now), y = runnerY(now);
+  function drawRunner(t, now) { for (const r of runners.values()) drawOneRunner(r, t, now); }
+  function drawOneRunner(runner, t, now) {
+    const x = runnerX(runner, now), y = runnerY(runner, now);
     if (x < cam.x - 80 || x > cam.x + VW + 80 || y < cam.y - 80 || y > cam.y + VH + 80) return;
     const dx = runner.x - runner.px, dy = runner.y - runner.py, l = Math.hypot(dx, dy);
     if (l > 0.5) { // speed lines

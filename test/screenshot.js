@@ -583,24 +583,22 @@ function bot(url, name) {
     const v0 = viewerPos();
     let r = await call(abots[0], 'test:event', { kind: 'koth', announceMs: 6000, durationMs: 13000, x: v0.x + 40, y: v0.y + 20 });
     ok(r && r.ok && r.event.phase === 'announce', 'test hook announces «Царь горы»');
-    await vp.waitForSelector('#evBanner:not(.hidden)', { timeout: 3000 });
+    await vp.waitForSelector('#evChip:not(.hidden)', { timeout: 3000 });
     await sleep(1200);
-    const ban = await vp.evaluate(() => ({ name: document.getElementById('evBName').textContent, count: document.getElementById('evBCount').textContent, desc: document.getElementById('evBDesc').textContent,
-      box: document.getElementById('evBanner').getBoundingClientRect().toJSON() }));
-    ok(/Царь горы/.test(ban.name) && /через [1-6] с/.test(ban.count) && ban.desc.length > 20, `announce banner with countdown: «${ban.name}» ${ban.count}`);
-    ok(ban.box.top < 120 && ban.box.left > 200 && ban.box.right < 1080, 'desktop banner sits top-centre between the HUD panels');
-    await shot(vp, 'screenshot-event-banner.png');
-    await vp.waitForSelector('#evHud:not(.hidden)', { timeout: 8000 });
-    ok(!(await vp.isVisible('#evBanner')), 'banner turns into the event HUD when the event starts');
+    const ban = await vp.evaluate(() => ({ name: document.getElementById('evChipName').textContent, count: document.getElementById('evChipTime').textContent, desc: document.getElementById('evChipDesc').textContent,
+      box: document.getElementById('evChipBtn').getBoundingClientRect().toJSON(), phase: document.getElementById('evChip').dataset.phase }));
+    ok(/Царь горы/.test(ban.name) && /через 0:0[1-6]/.test(ban.count) && ban.desc.length > 20 && ban.phase === 'announce', `event chip with countdown: «${ban.name}» ${ban.count}`);
+    ok(ban.box.width <= 56 && ban.box.right > 1180 && !(await vp.isVisible('#evBanner')), 'small square event chip at the right edge (no big banner)');
+    await vp.waitForFunction(() => document.getElementById('evChip').dataset.phase === 'active', null, { timeout: 8000 });
     await sleep(3500);
-    const hud = await vp.evaluate(() => ({ time: document.getElementById('evHTime').textContent, info: document.getElementById('evHInfo').textContent, bar: parseFloat(document.getElementById('evHBar').style.width) }));
-    ok(/^0:\d\d$/.test(hud.time) && /Вы в зоне/.test(hud.info) && /очки: [1-9]/.test(hud.info) && hud.bar > 20 && hud.bar < 95, `event HUD: timer ${hud.time}, progress ${Math.round(hud.bar)}%, «${hud.info}»`);
+    const hud = await vp.evaluate(() => ({ time: document.getElementById('evChipTime').textContent, info: document.getElementById('evChipInfo').textContent }));
+    ok(/^0:\d\d$/.test(hud.time) && /Вы в зоне/.test(hud.info) && /очки: [1-9]/.test(hud.info), `event chip: timer ${hud.time}, «${hud.info}»`);
     await shot(vp, 'screenshot-event-koth.png');
     await vp.waitForSelector('#evResult:not(.hidden)', { timeout: 15000 });
     await sleep(400);
     const res = await vp.textContent('#evResult');
     ok(/итоги/.test(res) && /Вы: 1-е место/.test(res) && /награда \+\d+/.test(res) && (await vp.$$('#evResult .cur-orb')).length > 0 && /Viewer/.test(res), 'results card: place, score and reward — ' + res.replace(/\s+/g, ' ').slice(0, 140));
-    ok(!(await vp.isVisible('#evHud')), 'event HUD hidden after the end');
+    ok(!(await vp.isVisible('#evChip')), 'event chip hidden after the end');
     await shot(vp, 'screenshot-event-results.png');
     await vp.click('#evResult .close');
     ok(!(await vp.isVisible('#evResult')), 'results card can be closed');

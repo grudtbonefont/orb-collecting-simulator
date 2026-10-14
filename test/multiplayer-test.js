@@ -395,10 +395,23 @@ function tierEventRules() {
     `«Радар» filter: ${rt} (epic/legendary/mythic/treasure and out-of-range orbs dropped, rare faint)`);
   // events: rewards are a bonus of a few minutes of farming, timings, schedule
   const RATE = 100, E = G.EVENTS, rewards = [].concat(E.koth.rewards, [E.koth.solo, E.koth.participation, E.runner.reward]);
-  ok(G.EVENT_KEYS.join(',') === 'rain,koth,treasure,runner' && E.rain.durationMs === 45000 && rewards.every(r => r.orbs + r.shards * G.SHARD_EXCHANGE.orbs <= 4 * RATE && r.shards <= 2) &&
-    E.treasure.reward.orbs * E.treasure.maxCount <= 4 * RATE * 1.5, `4 events; every reward (orbs + shards at the exchange rate) ≤ 4 min of farming (top: ${E.koth.rewards[0].orbs} ◉ + ${E.koth.rewards[0].shards} 💎)`);
+  ok(G.EVENT_KEYS.join(',') === 'rain,koth,treasure,runner,lucky' && G.AUTO_EVENT_KEYS.join(',') === 'treasure,runner,lucky' && E.treasure.count === 5 && E.runner.count === 3 && E.lucky.spawnMult === 2 && E.lucky.rareMult === 2 && E.lucky.durationMs >= 60000 && E.lucky.durationMs <= 90000 && E.rain.durationMs === 45000 && rewards.every(r => r.orbs + r.shards * G.SHARD_EXCHANGE.orbs <= 4 * RATE && r.shards <= 2) &&
+    E.treasure.reward.orbs * E.treasure.maxCount <= 4 * RATE * 1.5, `5 events (auto: treasure ×5, runner ×3, lucky ×2 for ${E.lucky.durationMs / 1000} s); every reward (orbs + shards at the exchange rate) ≤ 4 min of farming (top: ${E.koth.rewards[0].orbs} ◉ + ${E.koth.rewards[0].shards} 💎)`);
   const S = G.EVENT_SCHEDULE;
-  ok(S.minMs === 360000 && S.maxMs === 600000 && S.announceMs >= 20000 && S.announceMs <= 30000, 'schedule: an event every 6–10 min of online time, announced 25 s ahead');
+  ok(S.minMs === 240000 && S.maxMs === 480000 && S.announceMs >= 20000 && S.announceMs <= 30000, 'schedule: an event every 4–8 min of online time, announced 25 s ahead');
+  const lw = G.luckyWeights(G.POOL_WEIGHTS), pw = G.POOL_WEIGHTS;
+  ok(lw.c === pw.c && lw.u === pw.u && ['r', 'e', 'l', 'm'].every(t => lw[t] === pw[t] * 2), 'lucky weights: rare/epic/legendary/mythic ×2, common/uncommon unchanged');
+  // obstacles: collision push-out + laser beam geometry + penalty
+  const OB = G.OBSTACLES, R = G.PLAYER_R;
+  const p1 = { x: 100, y: 100 }; G.resolveObstacles(p1, [{ k: 'rect', x: 100, y: 100, w: 200, h: 40 }]);
+  const p2 = { x: 130, y: 100 }; G.resolveObstacles(p2, [{ k: 'circle', x: 100, y: 100, r: 50 }]);
+  const p3 = { x: 300, y: 200 }; G.resolveObstacles(p3, [{ k: 'laser', x: 0, y: 0, r: 26, len: 300, w: 1 }]);
+  ok(Math.abs(p1.y - 100) >= 20 + R - 0.01 && Math.abs(p2.x - 100 - (50 + R)) < 0.01 && p3.x === 300 && p3.y === 200, 'obstacles: players are pushed out of walls / rocks; laser beams are not solid');
+  const L = { k: 'laser', x: 0, y: 0, len: 300, w: Math.PI / 2, a0: 0, t0: 0, armAt: 1000 };
+  ok(!G.laserHits(L, 200, 0, 0) && G.laserHits(L, 0, 200, 1000) && !G.laserHits(L, 200, 0, 1000) && !G.laserHits(L, 0, 400, 1000),
+    'laser: harmless during the warning, beam sweeps (90°/s here), length-limited');
+  ok(G.laserPenalty(0) === 0 && G.laserPenalty(10) === 1 && G.laserPenalty(1000) === 70 && G.laserPenalty(1e6) === OB.penaltyMax && OB.invulnMs >= 2000 && OB.laserChance > 0 && OB.laserChance < 0.5 && OB.lifeMinMs === 45000 && OB.lifeMaxMs === 90000,
+    `laser penalty ${OB.penaltyPct * 100}% of the balance, capped at ${OB.penaltyMax}, ${OB.invulnMs / 1000} s immunity; ${OB.laserChance * 100}% of obstacles are lasers; obstacles live 45–90 s`);
   // exclusives
   const X = G.ITEMS.filter(i => i.exclusive);
   ok(X.length >= 6 && X.length <= 10 && new Set(X.map(i => i.cat)).size >= 4 && X.every(i => i.price == null && i.shardPrice > 0 && !i.sources.includes('shop') && i.sources.includes('shard_shop')),
@@ -494,32 +507,86 @@ async function eventSuite(URL) {
   ok(te && te.you && te.you.score === 1 && te.remaining === 1 && te.total === 2 && shards(A) - sA0 === 1 && A.profile.balance - bA0 >= G.EVENTS.treasure.reward.orbs && !A.orbs.has(tr.find(o => o !== near).id),
     `treasure reward ${G.EVENTS.treasure.reward.orbs} ◉ + 1 💎 (fixed), unfound treasure removed at the end`);
   // random treasure spots are far from players
-  r = await A.emit('test:event', { kind: 'treasure', announceMs: 100, durationMs: 8000, count: 3 });
+  r = await A.emit('test:event', { kind: 'treasure', announceMs: 100, durationMs: 8000 });
   await waitEv('A', 'ev:start', 4, 2000); await sleep(200);
   const spots = Array.from(A.orbs.values()).filter(o => o.t === 't');
-  const pls = [A.pos, B.pos, C.pos], minD = Math.min(...spots.map(o => Math.min(...pls.map(p => Math.hypot(p.x - o.x, p.y - o.y)))));
-  ok(spots.length === 3 && minD >= 600, `treasures spawn far from every player (closest ${Math.round(minD)} px)`);
+  let minPair = Infinity; for (const a of spots) for (const b of spots) if (a !== b) minPair = Math.min(minPair, Math.hypot(a.x - b.x, a.y - b.y));
+  ok(spots.length === 5 && minPair >= G.EVENTS.treasure.minDist && spots.every(o => o.x > 0 && o.x < G.WORLD.w && o.y > 0 && o.y < G.WORLD.h && Math.abs(o.x - G.ZONE_W) > 100),
+    `5 treasures at random places on the whole map (closest pair ${Math.round(minPair)} px; zones ${spots.map(o => G.zoneOf(o.x)).join('')})`);
   // runner (slowed down by the hook so the bot can catch it)
   const sA1 = shards(A), bA1 = A.profile.balance; rn.length = 0;
-  r = await A.emit('test:event', { kind: 'runner', announceMs: 200, durationMs: 12000, x: A.pos.x > 1500 ? A.pos.x - 260 : A.pos.x + 260, y: A.pos.y, speed: 50 });
+  r = await A.emit('test:event', { kind: 'runner', announceMs: 200, durationMs: 8000, x: A.pos.x > 1500 ? A.pos.x - 260 : A.pos.x + 260, y: A.pos.y, speed: 50 });
   const cancelled = await waitFor(() => log.A.some(x => x[0] === 'ev:end' && x[1].cancelled && x[1].kind === 'treasure'), 1000); await sleep(250);
   ok(cancelled && Array.from(A.orbs.values()).every(o => o.t !== 't'), 'forcing a new event cancels the running one (its treasures vanish)');
   await waitEv('A', 'ev:start', 5, 2000);
   const t0 = Date.now();
-  while (!log.A.some(x => x[0] === 'ev:end' && x[1].kind === 'runner') && Date.now() - t0 < 11000) {
-    const p = rn[rn.length - 1]; if (p) { const dx = p[0] - A.pos.x, dy = p[1] - A.pos.y, l = Math.hypot(dx, dy) || 1; A.s.emit('input', { s: ++A.seq, x: dx / l, y: dy / l }); }
+  while (!log.A.some(x => x[0] === 'ev:end' && x[1].kind === 'runner') && Date.now() - t0 < 10000) {
+    const p = rn.length && rn[rn.length - 1].find(q => q[0] === 1);
+    if (p) { const dx = p[1] - A.pos.x, dy = p[2] - A.pos.y, l = Math.hypot(dx, dy) || 1; A.s.emit('input', { s: ++A.seq, x: dx / l, y: dy / l }); }
     await sleep(50);
   }
   await sleep(300);
   const re = last('A', 'ev:end'), rb = last('B', 'ev:end');
-  ok(rn.length > 10 && re && re.kind === 'runner' && re.outcome === 'caught' && re.results[0].name === A.profile.name && JSON.stringify(re.you.reward) === JSON.stringify(G.EVENTS.runner.reward) &&
+  const r0 = rn[0] || [], rIds = new Set(rn.flat().map(q => q[0]));
+  ok(r0.length === 3 && rIds.size === 3 && re && re.caught === 1 && re.total === 3 && re.outcome === 'partial' && rn.every(l => l.every(q => q.length === 3)), `3 runaway orbs spawned (${r0.map(q => q[0] + '@' + q[1] + ',' + q[2]).join(' ')}); caught ${re && re.caught}/${re && re.total} → outcome «${re && re.outcome}»`);
+  ok(rn.length > 10 && re && re.kind === 'runner' && re.results[0].name === A.profile.name && JSON.stringify(re.you.reward) === JSON.stringify(G.EVENTS.runner.reward) &&
     shards(A) - sA1 === G.EVENTS.runner.reward.shards && A.profile.balance - bA1 >= G.EVENTS.runner.reward.orbs, `«Сфера-беглец»: A caught it (+${G.EVENTS.runner.reward.orbs} ◉ + ${G.EVENTS.runner.reward.shards} 💎), position streamed while active`);
-  ok(rb && rb.kind === 'runner' && rb.you === null && rb.outcome === 'caught', 'others learn the runner was caught');
+  ok(rb && rb.kind === 'runner' && rb.you === null && rb.caught === 1, 'others learn how many runners were caught');
   const st = A.profile.stats;
   ok(st.eventsPlayed >= 3 && st.eventWins >= 2, `event stats counted (played ${st.eventsPlayed}, won ${st.eventWins})`);
   const allEv = received.filter(x => /^ev:/.test(x)).join('\n');
   ok(!/"id"|"pid"|token|hash|"ip"/i.test(allEv), 'event payloads carry nicknames and scores only (no ids, tokens or private data)');
   A.close(); B.close(); C.close();
+}
+
+
+// «Волна удачи» + temporary obstacles + rotating lasers (needs hooks; the server runs with OBSTACLES=0, the hook spawns them)
+async function luckyObstacleSuite(URL) {
+  console.log('--- lucky wave, obstacles, lasers');
+  const A = makeClient(URL); await A.register('Obs' + rnd());
+  const obsLog = [], zaps = [], ends = [], drops = new Set();
+  A.s.on('obs', l => obsLog.push([Date.now(), l])); A.s.on('zap', z => zaps.push([Date.now(), z])); A.s.on('ev:end', d => ends.push(d));
+  A.s.on('s', st => { for (const a of st.oa) if (a[4] && a[3] === 'c') drops.add(a[0]); });
+  const pool = () => Array.from(A.orbs.values()).filter(o => o.t !== 't').length;
+  // lucky: twice as many orbs on the map while it runs, score = orbs collected
+  await sleep(1500); const n0 = pool();
+  let r = await A.emit('test:event', { kind: 'lucky', announceMs: 100, durationMs: 14000 });
+  const tgt = (await (await fetch(URL + '/api/health')).json()).targetOrbs * 2; // both zones, normal target
+  const n1 = await waitFor(() => { const n = pool(); return n >= tgt * 2 * 0.97 ? n : 0; }, 11000) || pool();
+  const h = await (await fetch(URL + '/api/health')).json();
+  await A.farm(A.profile.balance + 30, 1500);
+  await waitFor(() => ends.some(e => e.kind === 'lucky'), 15000);
+  const le = ends.find(e => e.kind === 'lucky');
+  ok(r.ok && h.event === 'lucky:active' && n1 >= tgt * 2 * 0.97, `«Волна удачи»: orbs on the map ${n0} → ${n1} (normal target ${tgt}, ×${(n1 / tgt).toFixed(2)}) while active`);
+  ok(le && !le.cancelled && le.you && le.you.score > 0, `lucky results: A collected ${le && le.you && le.you.score} worth during the wave`);
+  // obstacles: solid, never spawned on a player, expire
+  await A.emit('test:tp', { x: 2000, y: 2000, orbs: 2000 }); await sleep(300);
+  r = await A.emit('test:obstacle', { kind: 'rock', x: 2200, y: 2000, lifeMs: 2500 });
+  const rock = r.obstacles && r.obstacles.find(o => o.k === 'circle');
+  let minD = Infinity;
+  for (let i = 0; i < 30; i++) { A.s.emit('input', { s: ++A.seq, x: 1, y: 0 }); await sleep(50); minD = Math.min(minD, Math.hypot(A.pos.x - 2200, A.pos.y - 2000)); }
+  ok(rock && minD >= rock.r + G.PLAYER_R - 1.5 && A.pos.x < 2200, `walking into a rock (r ${rock && rock.r}) stops at its edge (closest ${minD.toFixed(1)} px)`);
+  const random = []; for (let i = 0; i < 4; i++) { const q = await A.emit('test:obstacle', { lifeMs: 2500 }); if (q.ok) random.push(q.obstacles[q.obstacles.length - 1]); }
+  ok(random.length >= 2 && random.every(o => Math.hypot(o.x - A.pos.x, o.y - A.pos.y) > G.OBSTACLES.playerClear && Math.hypot(o.x - G.DOOR.x, o.y - G.DOOR.y) > G.OBSTACLES.doorClear),
+    `random obstacles (${random.map(o => o.k).join(', ')}) spawn away from players and the door`);
+  await sleep(3200);
+  const lastObs = obsLog[obsLog.length - 1];
+  ok(lastObs && lastObs[1].length === 0, 'obstacles disappear when their time is up (clients get the new list)');
+  // laser: warning first, then the sweeping beam takes a share of the balance, with immunity in between
+  await A.emit('test:tp', { x: 2000, y: 2000 }); await sleep(200);
+  const bal0 = A.profile.balance, t0 = Date.now(); zaps.length = 0;
+  r = await A.emit('test:obstacle', { kind: 'laser', x: 2150, y: 2000, lifeMs: 14000 });
+  const L = r.obstacles && r.obstacles.find(o => o.k === 'laser');
+  await waitFor(() => zaps.length >= 1, 13000);
+  const z0 = zaps[0];
+  await sleep(200);
+  ok(L && L.arm >= 2900 && L.len >= 240 && z0 && z0[0] - t0 >= G.OBSTACLES.warnMs - 100, `laser (beam ${L && L.len} px, ${L && L.w.toFixed(2)} rad/s) is harmless for the ${G.OBSTACLES.warnMs / 1000} s warning, first hit after ${z0 && z0[0] - t0} ms`);
+  ok(z0 && z0[1].loss === G.laserPenalty(bal0) && A.profile.balance <= bal0 - z0[1].loss + 40 && drops.size > 0, `laser hit: −${z0 && z0[1].loss} of ${bal0} (7 %), ${drops.size} lost orbs dropped nearby`);
+  await waitFor(() => zaps.length >= 3, 9000);
+  const gaps = zaps.slice(1).map((z, i) => z[0] - zaps[i][0]);
+  ok(gaps.every(g => g >= G.OBSTACLES.invulnMs - 120), `immunity between hits (gaps ${gaps.join('/')} ms ≥ ${G.OBSTACLES.invulnMs})`);
+  await A.emit('test:obstacle', { clear: true });
+  A.s.close();
 }
 
 // «Лавка осколков»: exclusives for shards only (needs hooks)
@@ -637,13 +704,13 @@ async function schedulerSuite() {
   ok(evs.length === 0, 'no event is announced while a legendary orb is on the field');
   const lo = Array.from(P.orbs.values()).find(o => o.t === 'l');
   for (let i = 0; i < 60 && lo && P.orbs.has(lo.id); i++) { const dx = lo.x - P.pos.x, dy = lo.y - P.pos.y, l = Math.hypot(dx, dy) || 1; P.s.emit('input', { s: ++P.seq, x: dx / l, y: dy / l }); await sleep(50); }
-  await waitFor(() => evs.filter(x => x.e === 'ev:end').length >= 3, 22000);
+  await waitFor(() => evs.filter(x => x.e === 'ev:end').length >= 3, 120000); // a legendary from «Волна удачи» may delay the next one
   const seq = evs.map(x => x.e.slice(3)[0]).join('');
   const kinds = evs.filter(x => x.e === 'ev:announce').map(x => x.kind);
   const firstAnn = evs[0] && evs[0].d;
   ok(/^(ase){3}/.test(seq) && kinds.every((k, i) => !i || k !== kinds[i - 1]), `scheduler runs events back to back: ${kinds.join(' → ')} (announce → start → end, never the same kind twice in a row)`);
   ok(firstAnn && firstAnn.in >= 900 && firstAnn.in <= 1000 && firstAnn.dur === 2500, `announcement comes ${firstAnn && firstAnn.in} ms ahead; durations from EVENT_DURATION_MS`);
-  ok(legends.length === 0 || legends.every(t => !evs.some((x, i) => x.e === 'ev:announce' && t >= x.at && t <= ((evs.slice(i).find(y => y.e === 'ev:end') || {}).at || Infinity))), 'no legendary orb spawns during an event');
+  ok(legends.length === 0 || legends.every(t => !evs.some((x, i) => x.e === 'ev:announce' && x.kind !== 'lucky' && t >= x.at && t <= ((evs.slice(i).find(y => y.e === 'ev:end') || {}).at || Infinity))), 'no legendary orb spawns during an event (except «Волна удачи»)');
   P.close();
   await sleep(1500);
   const h1 = await (await fetch(srv.url + '/api/health')).json();
@@ -1311,7 +1378,7 @@ async function startServer(port, env) {
   try { await fetch(`http://localhost:${port}/api/health`); throw new Error(`port ${port} is already in use by another server`); }
   catch (e) { if (/already in use/.test(e.message)) throw e; } // connection refused = port free
   return new Promise((resolve, reject) => {
-    const proc = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: Object.assign({}, process.env, { PORT: String(port), DATABASE_URL: '', DATA_FILE: '', EVENT_EVERY_MS: '0' }, env), stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: Object.assign({}, process.env, { PORT: String(port), DATABASE_URL: '', DATA_FILE: '', EVENT_EVERY_MS: '0', OBSTACLES: '0' }, env), stdio: ['ignore', 'pipe', 'pipe'] });
     const srv = { proc, logs: '', url: `http://localhost:${port}` };
     proc.stdout.on('data', d => { srv.logs += d; });
     proc.stderr.on('data', d => { srv.logs += d; });
@@ -1338,7 +1405,7 @@ async function runMode(label, env, opts) {
   if (opts.legacy) await migrationSuite(srv.url, opts.legacy, label);
   await authSuite(srv.url);
   await profileSuite(srv.url);
-  if (opts.full) { await chatSuite(srv.url); await gameplaySuite(srv.url); await minigameSuite(srv.url); await newGamesSuite(srv.url); await upgradeSuite(srv.url); await newItemsSuite(srv.url); await tiersSuite(srv.url); await eventSuite(srv.url); await pushSuite(srv.url); }
+  if (opts.full) { await chatSuite(srv.url); await gameplaySuite(srv.url); await minigameSuite(srv.url); await newGamesSuite(srv.url); await upgradeSuite(srv.url); await newItemsSuite(srv.url); await tiersSuite(srv.url); await eventSuite(srv.url); await luckyObstacleSuite(srv.url); await pushSuite(srv.url); }
   await shardShopSuite(srv.url);
   await zoneSuite(srv.url);
   await codesSuite(srv.url);
@@ -1385,7 +1452,7 @@ async function runCycleMode() {
     tierEventRules();
     const tmp = path.join(os.tmpdir(), `ocs-ev-${process.pid}.json`);
     const srv = await startServer(3101, { DATA_FILE: tmp, OCS_TEST_HOOKS: '1' });
-    await tiersSuite(srv.url); await eventSuite(srv.url); await pushSuite(srv.url); await shardShopSuite(srv.url);
+    await tiersSuite(srv.url); await eventSuite(srv.url); await luckyObstacleSuite(srv.url);
     await srv.stop(); fs.rmSync(tmp, { force: true });
     privacyAudit(await schedulerSuite());
   } else if (process.env.OCS_TEST_ONLY === 'codes') {
@@ -1419,7 +1486,7 @@ async function runCycleMode() {
     logs += await schedulerSuite();
     { const tmpE = path.join(os.tmpdir(), `ocs-evoff-${process.pid}.json`); const srvE = await startServer(3108, { DATA_FILE: tmpE, EVENT_EVERY_MS: '' });
       const hE = await (await fetch(srvE.url + '/api/health')).json();
-      ok(hE.eventsEnabled === false && hE.event === null, 'arena events are OFF by default (EVENTS_ENABLED=1 or EVENT_EVERY_MS=N turns them back on)');
+      ok(hE.eventsEnabled === true && hE.event === null, 'arena events are ON by default again (EVENTS_ENABLED=0 turns them off)');
       await srvE.stop(); fs.rmSync(tmpE, { force: true }); }
     if (process.env.TEST_DATABASE_URL) {
       const L2 = legacyAccount();

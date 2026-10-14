@@ -117,16 +117,18 @@ let respawnQueue = [];      // { due, z } respawns for normal (pool) orbs, per z
 let legendaryAlive = 0;
 let mythicAlive = 0, evAlive = 0; // mythic orbs (pool, max 1), event orbs (rain / treasure, not part of the pool)
 const targetOrbs = () => Math.max(SPAWN.min, Math.min(SPAWN.max, SPAWN.base + SPAWN.perPlayer * players.size));
-const targetZone = z => (z === 1 ? targetOrbs() : Math.round(targetOrbs() * SPAWN.zone2Share));
+const luckyOn = () => !!(ev && ev.kind === 'lucky' && ev.phase === 'active');
+const targetZone = z => (z === 1 ? targetOrbs() : Math.round(targetOrbs() * SPAWN.zone2Share)) * (luckyOn() ? G.EVENTS.lucky.spawnMult : 1);
 const zoneCount = { 1: 0, 2: 0 }; // normal (pool) orbs alive per zone
 // one normal pool spawn: weighted tier roll; a mythic only while none is alive and someone is playing (else epic)
 function rollPool(z = 1) {
-  const t = G.rollOrbType(z === 2 ? G.ZONE2_WEIGHTS : G.POOL_WEIGHTS);
-  if (t === 'l') return legendaryAlive >= G.ORB_TYPES.l.maxAlive || players.size === 0 || ev ? 'e' : 'l'; // never during an arena event
+  const w = z === 2 ? G.ZONE2_WEIGHTS : G.POOL_WEIGHTS, t = G.rollOrbType(luckyOn() ? G.luckyWeights(w) : w); // «Волна удачи»: rare+ ×2
+  if (t === 'l') return legendaryAlive >= G.ORB_TYPES.l.maxAlive || players.size === 0 || (ev && ev.kind !== 'lucky') ? 'e' : 'l'; // never during an arena event (except «Волна удачи»)
   return t === 'm' && (mythicAlive >= G.ORB_TYPES.m.maxAlive || players.size === 0) ? 'e' : t;
 }
 
 function spotIsFree(x, y) {
+  if (inObstacle(x, y, 20)) return false;
   for (const pl of players.values()) { const dx = pl.x - x, dy = pl.y - y; if (dx * dx + dy * dy < SPAWN.playerClear ** 2) return false; }
   const cx = Math.floor(x / SPAWN.cell), cy = Math.floor(y / SPAWN.cell);
   for (let j = cy - 1; j <= cy + 1; j++) for (let i = cx - 1; i <= cx + 1; i++) {
@@ -187,7 +189,7 @@ function spawnTick(now) {
   let spawned = 0;
   const keep = [];
   for (const q of respawnQueue) {
-    if (q.due > now || spawned >= SPAWN.maxPerTick * 2) { keep.push(q); continue; }
+    if (q.due > now || spawned >= SPAWN.maxPerTick * (luckyOn() ? 6 : 2)) { keep.push(q); continue; } // «Волна удачи» fills the ×2 field in a few seconds
     if (zoneCount[q.z] >= targetZone(q.z)) continue; // target shrank (players left): drop the respawn
     const pos = pickSpot(q.z);
     if (!pos) { keep.push({ due: now + 500, z: q.z }); continue; }
@@ -197,17 +199,93 @@ function spawnTick(now) {
   respawnQueue = keep;
   for (const o of orbs.values()) if (o.expires <= now) { removeOrb(o, 0); } // legendary / mythic lifetime
 }
-// initial fill for an empty arena
-for (const z of [1, 2]) for (let i = 0, n = targetZone(z); i < n; i++) { const p = pickSpot(z); if (p) addOrb(rollPool(z), p); }
-pendingAdds = []; pendingDels = [];
 
 
+
+// ---------------------------------------------------------------- temporary obstacles + rotating lasers (numbers in G.OBSTACLES)
+// OBSTACLES=0 turns them off (the test suite does, except the obstacle tests).
+const OBS_ON = process.env.OBSTACLES !== '0', OB = G.OBSTACLES;
+let obstacles = [], nextObsId = 1, obsDueAt = Date.now() + rand(OB.everyMinMs, OB.everyMaxMs);
+function obsReach(o) { return o.k === 'rect' ? Math.hypot(o.w, o.h) / 2 : o.k === 'laser' ? o.len : o.r; }
+function inObstacle(x, y, pad = 0) {
+  for (const o of obstacles) {
+    if (o.k === 'rect') { if (Math.abs(x - o.x) <= o.w / 2 + pad && Math.abs(y - o.y) <= o.h / 2 + pad) return true; }
+    else if (Math.hypot(x - o.x, y - o.y) <= o.r + pad) return true;
+  }
+  return false;
+}
+// the public shape (times relative to now so clients don't need a synced clock)
+function publicObstacles(now = Date.now()) {
+  return obstacles.map(o => { const d = { id: o.id, k: o.k, x: o.x, y: o.y, life: o.expires - now };
+    if (o.k === 'rect') { d.w = o.w; d.h = o.h; } else d.r = o.r;
+    if (o.k === 'laser') { d.len = o.len; d.w = o.w; d.a = +G.laserAngle(o, now).toFixed(4); d.arm = Math.max(0, o.armAt - now); }
+    return d; });
+}
+const pushObstacles = () => io && io.to('arena').emit('obs', publicObstacles());
+// makes one obstacle (random kind / size unless forced); null if no free spot was found
+function spawnObstacle(now, f = {}) {
+  const laser = f.kind ? f.kind === 'laser' : Math.random() < OB.laserChance;
+  let o;
+  if (laser) o = { k: 'laser', r: OB.pylonR, len: Math.round(rand(OB.beamMin, OB.beamMax)), w: (Math.random() < 0.5 ? -1 : 1) * rand(OB.spinMin, OB.spinMax), a0: rand(0, Math.PI * 2), t0: now, armAt: now + OB.warnMs };
+  else {
+    const kind = f.kind || ['wall', 'block', 'rock'][Math.floor(Math.random() * 3)];
+    if (kind === 'rock') o = { k: 'circle', r: Math.round(rand(45, 95)) };
+    else if (kind === 'block') o = { k: 'rect', w: Math.round(rand(90, 170)), h: Math.round(rand(90, 170)) };
+    else { const L = Math.round(rand(260, 480)), T = Math.round(rand(34, 50)); o = Math.random() < 0.5 ? { k: 'rect', w: L, h: T } : { k: 'rect', w: T, h: L }; }
+  }
+  const reach = obsReach(o) + 30;
+  let at = null;
+  for (let i = 0; i < 40 && !at; i++) {
+    const x = Number.isFinite(f.x) ? f.x : Math.round(rand(reach + 100, G.WORLD.w - reach - 100)), y = Number.isFinite(f.y) ? f.y : Math.round(rand(reach + 100, G.WORLD.h - reach - 100));
+    const ok = Number.isFinite(f.x) || (Math.abs(x - G.ZONE_W) > reach + 80 && Math.hypot(x - G.DOOR.x, y - G.DOOR.y) > OB.doorClear + reach &&
+      Array.from(players.values()).every(pl => Math.hypot(pl.x - x, pl.y - y) > OB.playerClear + reach) &&
+      obstacles.every(b => Math.hypot(b.x - x, b.y - y) > obsReach(b) + reach + OB.gap));
+    if (ok) at = { x, y };
+  }
+  if (!at) return null;
+  Object.assign(o, { id: nextObsId++, x: at.x, y: at.y, expires: now + (f.lifeMs || rand(OB.lifeMinMs, OB.lifeMaxMs)) });
+  obstacles.push(o);
+  for (const b of Array.from(orbs.values())) if (b.pool && inObstacle(b.x, b.y, 12) && inObstacleOne(o, b.x, b.y, 12)) { // orbs under it move elsewhere
+    removeOrb(b, 0); respawnQueue.push({ due: now + 300, z: b.z });
+  }
+  pushObstacles();
+  return o;
+}
+function inObstacleOne(o, x, y, pad) { return o.k === 'rect' ? Math.abs(x - o.x) <= o.w / 2 + pad && Math.abs(y - o.y) <= o.h / 2 + pad : Math.hypot(x - o.x, y - o.y) <= o.r + pad; }
+// a laser touch costs penaltyPct of the balance (capped), then invulnMs of immunity; up to dropMax of the lost orbs fall nearby
+function laserHit(pl, o, now) {
+  pl.zapUntil = now + OB.invulnMs;
+  const loss = G.laserPenalty(pl.acc.balance);
+  if (!loss) return;
+  pl.acc.balance -= loss; markDirty(pl.acc);
+  const drops = Math.min(OB.dropMax, loss);
+  for (let i = 0; i < drops; i++) {
+    const a = rand(0, Math.PI * 2), d = rand(70, 160), x = Math.round(Math.max(30, Math.min(G.WORLD.w - 30, pl.x + Math.cos(a) * d))), y = Math.round(Math.max(30, Math.min(G.WORLD.h - 30, pl.y + Math.sin(a) * d)));
+    if (G.zoneOf(x) !== G.zoneOf(pl.x) || inObstacle(x, y, 10)) continue;
+    const b = addOrb('c', { x, y }, 'drop'); b.expires = now + OB.dropLifeMs;
+  }
+  pl.socket.emit('bal', { b: pl.acc.balance, t: pl.acc.total, s: pl.session });
+  pl.socket.emit('zap', { loss, inv: OB.invulnMs });
+}
+function obstacleTick(now) {
+  let changed = false;
+  if (obstacles.some(o => o.expires <= now)) { obstacles = obstacles.filter(o => o.expires > now); changed = true; }
+  if (changed) pushObstacles();
+  if (OBS_ON && players.size && now >= obsDueAt) {
+    obsDueAt = now + rand(OB.everyMinMs, OB.everyMaxMs);
+    if (obstacles.length < OB.maxAlive) spawnObstacle(now);
+  }
+  for (const o of obstacles) {
+    if (o.k !== 'laser' || now < o.armAt) continue;
+    for (const pl of players.values()) if (!(pl.zapUntil > now) && G.laserHits(o, pl.x, pl.y, now, G.PLAYER_R + 2)) laserHit(pl, o, now);
+  }
+}
 
 // ---------------------------------------------------------------- timed arena events (scheduler + rules; numbers in G.EVENTS)
-// EVENT_EVERY_MS: unset = random 6–10 min of online time, 0 = scheduler off (test hooks only), N = fixed gap.
+// EVENT_EVERY_MS: unset = random 4–8 min of online time, 0 = scheduler off (test hooks only), N = fixed gap.
 // EVENT_ANNOUNCE_MS (default 25 s countdown) and EVENT_DURATION_MS (override every duration) are for tests.
-// Arena events are DISABLED by default (user request). Re-enable: EVENTS_ENABLED=1 (random 6–10 min) or EVENT_EVERY_MS=N.
-const EV_EVERY = process.env.EVENT_EVERY_MS !== undefined && process.env.EVENT_EVERY_MS !== '' ? envInt('EVENT_EVERY_MS', 0) : process.env.EVENTS_ENABLED === '1' ? -1 : 0;
+// Since the «Волна удачи» update events are ON by default again (random 4–8 min, only G.AUTO_EVENT_KEYS); EVENTS_ENABLED=0 turns them off.
+const EV_EVERY = process.env.EVENT_EVERY_MS !== undefined && process.env.EVENT_EVERY_MS !== '' ? envInt('EVENT_EVERY_MS', 0) : process.env.EVENTS_ENABLED === '0' ? 0 : -1;
 const EV_ANNOUNCE = envInt('EVENT_ANNOUNCE_MS', G.EVENT_SCHEDULE.announceMs);
 const EV_DURATION = envInt('EVENT_DURATION_MS', 0);
 let ev = null, evClock = 0, lastEvKind = null;
@@ -220,7 +298,7 @@ function publicEvent(now = Date.now()) {
   const d = { kind: ev.kind, phase: ev.phase, in: Math.max(0, Math.round(ev.startAt - now)), left: Math.max(0, Math.round(ev.endAt - now)), dur: ev.dur };
   if (ev.zone) d.zone = ev.zone;
   if (ev.kind === 'treasure' && ev.phase === 'active') { d.remaining = ev.treasureLeft; d.total = ev.treasureTotal; }
-  if (ev.runner) d.runner = { x: Math.round(ev.runner.x), y: Math.round(ev.runner.y) };
+  if (ev.runners) { d.runners = ev.runners.filter(r => !r.caught).map(r => [r.id, Math.round(r.x), Math.round(r.y)]); d.caught = ev.runners.length - d.runners.length; d.total = ev.runners.length; }
   return d;
 }
 // far from every player (and from the other spots already chosen): best of 80 random candidates
@@ -235,6 +313,18 @@ function farSpot(margin, avoid = []) {
   }
   return best;
 }
+// a random spot anywhere on the map (either zone), away from the zone wall, obstacles and the other picks
+function randomSpot(margin, avoid = [], minDist = 0) {
+  let p = null;
+  for (let i = 0; i < 60; i++) {
+    const x = Math.round(rand(margin, G.WORLD.w - margin)), y = Math.round(rand(margin, G.WORLD.h - margin));
+    if (Math.abs(x - G.ZONE_W) < margin + 40 || inObstacle(x, y, 40)) continue;
+    p = { x, y };
+    if (avoid.every(a => Math.hypot(a.x - x, a.y - y) >= minDist)) return p;
+  }
+  return p || { x: Math.round(rand(margin, G.ZONE_W - margin)), y: Math.round(rand(margin, G.WORLD.h - margin)) };
+}
+const clampWorld = (v, hi) => Math.max(60, Math.min(hi - 60, Math.round(Number(v))));
 function evScore(pl) { let s = ev.scores.get(pl.id); if (!s) { s = { pl, score: 0, reward: null }; ev.scores.set(pl.id, s); } return s; }
 const addReward = (a, b) => ({ orbs: ((a && a.orbs) || 0) + b.orbs, shards: ((a && a.shards) || 0) + b.shards });
 // pays an event reward: orbs (balance + all-time total) and shards via grantItem(source 'event');
@@ -266,21 +356,26 @@ function startEvent(now) {
   const def = G.EVENTS[ev.kind], o = ev.opts;
   ev.phase = 'active';
   if (ev.kind === 'rain') { ev.rainTarget = Math.min(def.extraMax, def.extraBase + def.extraPerPlayer * players.size); ev.rainAlive = 0; }
-  else if (ev.kind === 'treasure') {
-    const n = o.count || Math.min(def.maxCount, def.count + Math.floor(players.size / def.perPlayers)), placed = [];
+  else if (ev.kind === 'treasure') { // 5 treasures at random places all over the map
+    const n = o.count || def.count, placed = [];
     for (let i = 0; i < n; i++) {
-      const at = Array.isArray(o.at) && Array.isArray(o.at[i]) ? { x: clampW(o.at[i][0]), y: clampW(o.at[i][1]) } : farSpot(120, placed);
+      const at = Array.isArray(o.at) && Array.isArray(o.at[i]) ? { x: clampWorld(o.at[i][0], G.WORLD.w), y: clampWorld(o.at[i][1], G.WORLD.h) } : randomSpot(120, placed, def.minDist);
       placed.push(at); addOrb('t', at, 'treasure');
     }
     ev.treasureLeft = ev.treasureTotal = n;
-  } else if (ev.kind === 'runner') {
-    const at = Number.isFinite(o.x) ? { x: clampW(o.x), y: clampW(o.y) } : farSpot(200);
-    ev.runner = { x: at.x, y: at.y, h: rand(0, Math.PI * 2), speed: Number.isFinite(o.speed) ? o.speed : def.speed };
+  } else if (ev.kind === 'runner') { // 3 runaway orbs at random places; each one stays inside its own zone
+    const n = o.count || def.count, placed = [];
+    for (let i = 0; i < n; i++) {
+      const at = i === 0 && Number.isFinite(o.x) ? { x: clampWorld(o.x, G.WORLD.w), y: clampWorld(o.y, G.WORLD.h) } : randomSpot(200, placed, 1200);
+      placed.push(at);
+      ev.runners = ev.runners || [];
+      ev.runners.push({ id: i + 1, x: at.x, y: at.y, z: G.zoneOf(at.x), h: rand(0, Math.PI * 2), speed: Number.isFinite(o.speed) ? o.speed : def.speed, caught: null });
+    }
   }
   io.to('arena').emit('ev:start', publicEvent(now));
 }
-function moveRunner(dt) {
-  const R = ev.runner, def = G.EVENTS.runner, s = dt / 1000, W = G.ZONE_W, H = G.ZONE_H;
+function moveRunner(R, dt) {
+  const def = G.EVENTS.runner, s = dt / 1000, X0 = R.z === 2 ? G.ZONE_W : 0, W = G.ZONE_W, H = G.ZONE_H;
   let near = null, nd = def.fleeRange;
   for (const pl of players.values()) { const d = Math.hypot(pl.x - R.x, pl.y - R.y); if (d < nd) { nd = d; near = pl; } }
   let dx, dy, sp;
@@ -289,10 +384,11 @@ function moveRunner(dt) {
     const w = Math.sin(Date.now() / 380) * 0.55; [dx, dy] = [dx - dy * w, dy + dx * w]; sp = R.speed;
   } else { R.h += (Math.random() - 0.5) * 0.5; dx = Math.cos(R.h); dy = Math.sin(R.h); sp = def.wander; }
   const m = 170; // walls push it back, so it can be cornered
-  if (R.x < m) dx += (m - R.x) / m * 1.4; if (R.x > W - m) dx -= (R.x - (W - m)) / m * 1.4;
+  const rx = R.x - X0;
+  if (rx < m) dx += (m - rx) / m * 1.4; if (rx > W - m) dx -= (rx - (W - m)) / m * 1.4;
   if (R.y < m) dy += (m - R.y) / m * 1.4; if (R.y > H - m) dy -= (R.y - (H - m)) / m * 1.4;
   const l = Math.hypot(dx, dy) || 1;
-  R.x = Math.max(40, Math.min(W - 40, R.x + dx / l * sp * s)); R.y = Math.max(40, Math.min(H - 40, R.y + dy / l * sp * s));
+  R.x = Math.max(X0 + 40, Math.min(X0 + W - 40, R.x + dx / l * sp * s)); R.y = Math.max(40, Math.min(H - 40, R.y + dy / l * sp * s));
   if (!near) R.h = Math.atan2(dy, dx);
 }
 function pushKoth() {
@@ -305,7 +401,7 @@ function eventTick(now, dt) {
     evClock += dt;
     // never next to the legendary orb: not while one is alive or about to appear (heads-up already sent)
     if (evClock >= evGap && legendaryAlive === 0) {
-      const kinds = G.EVENT_KEYS.filter(k => k !== lastEvKind);
+      const kinds = G.AUTO_EVENT_KEYS.filter(k => k !== lastEvKind);
       announceEvent(kinds[Math.floor(Math.random() * kinds.length)]);
     }
     return;
@@ -325,14 +421,19 @@ function eventTick(now, dt) {
       if (pl.evInside) evScore(pl).score += dt / 1000 * def.pointsPerSec;
     }
     if (now - ev.lastPush >= 500) { ev.lastPush = now; pushKoth(); }
-  } else if (ev.kind === 'runner' && !ev.caught) {
-    moveRunner(dt);
-    for (const pl of players.values()) {
-      if (Math.hypot(pl.x - ev.runner.x, pl.y - ev.runner.y) > G.pickupFor(pl.acc.upgrades.magnet) + def.r) continue;
-      const sc = evScore(pl); sc.score = 1; sc.reward = def.reward; ev.caught = pl.acc.name;
-      payReward(pl, def.reward);
-      ev.endAt = now; break;
+  } else if (ev.kind === 'runner') {
+    for (const R of ev.runners) {
+      if (R.caught) continue;
+      moveRunner(R, dt);
+      for (const pl of players.values()) {
+        if (Math.hypot(pl.x - R.x, pl.y - R.y) > G.pickupFor(pl.acc.upgrades.magnet) + def.r) continue;
+        const sc = evScore(pl); sc.score++; sc.reward = addReward(sc.reward, def.reward); R.caught = pl.acc.name;
+        payReward(pl, def.reward);
+        io.to('arena').emit('ev:runner', { name: pl.acc.name, left: ev.runners.filter(r => !r.caught).length });
+        break;
+      }
     }
+    if (ev.runners.every(r => r.caught)) ev.endAt = now;
   }
   if (now >= ev.endAt) endEvent(now);
 }
@@ -340,7 +441,7 @@ function eventTick(now, dt) {
 function endEvent(now, reason) {
   const e = ev, def = G.EVENTS[e.kind];
   ev = null; evClock = 0; evGap = nextEventGap(); lastEvKind = e.kind;
-  for (const o of Array.from(orbs.values())) if (o.ev) removeOrb(o, 0); // leftover rain / treasure orbs vanish
+  for (const o of Array.from(orbs.values())) if (o.ev === 'rain' || o.ev === 'treasure') removeOrb(o, 0); // leftover rain / treasure orbs vanish
   for (const pl of players.values()) pl.evInside = false;
   if (reason) { io.to('arena').emit('ev:end', { kind: e.kind, cancelled: true, results: [] }); console.log(`event ${e.kind} cancelled (${reason})`); return; }
   const list = Array.from(e.scores.values()).filter(x => players.get(x.pl.id) === x.pl && x.score > 0).sort((a, b) => b.score - a.score);
@@ -353,12 +454,13 @@ function endEvent(now, reason) {
   list.forEach((x, i) => {
     x.place = i + 1;
     const st = x.pl.acc.stats; st.eventsPlayed = (st.eventsPlayed || 0) + 1;
-    if (i === 0 || (e.kind === 'treasure' && x.score > 0)) st.eventWins = (st.eventWins || 0) + 1;
+    if (i === 0 || ((e.kind === 'treasure' || e.kind === 'runner') && x.score > 0)) st.eventWins = (st.eventWins || 0) + 1;
     markDirty(x.pl.acc); emitProfile(x.pl); // stats changed
   });
   const row = x => ({ name: x.pl.acc.name, score: Math.floor(x.score), reward: x.reward || null });
   const results = list.slice(0, 5).map(row);
-  const extra = e.kind === 'runner' ? { outcome: e.caught ? 'caught' : 'escaped' } : e.kind === 'treasure' ? { remaining: e.treasureLeft, total: e.treasureTotal } : {};
+  const caught = e.runners ? e.runners.filter(r => r.caught).length : 0;
+  const extra = e.kind === 'runner' ? { outcome: caught === e.runners.length ? 'caught' : caught ? 'partial' : 'escaped', caught, total: e.runners.length } : e.kind === 'treasure' ? { remaining: e.treasureLeft, total: e.treasureTotal } : {};
   for (const pl of players.values()) {
     const mine = e.scores.get(pl.id);
     pl.socket.emit('ev:end', Object.assign({ kind: e.kind, results, you: mine && mine.score > 0 ? { score: Math.floor(mine.score), place: mine.place, reward: mine.reward || null } : null }, extra));
@@ -442,7 +544,7 @@ app.get('/api/leaderboard', async (req, res) => {
   try { res.json(await leaderboard(limit, req.query.name)); }
   catch (e) { console.error('leaderboard failed:', e.message); res.status(503).json({ error: 'unavailable' }); }
 });
-app.get('/api/health', (req, res) => res.json({ ok: true, online: players.size, orbs: orbs.size, targetOrbs: targetOrbs(), event: ev ? ev.kind + ':' + ev.phase : null, eventsEnabled: EV_EVERY !== 0, world: G.WORLD,
+app.get('/api/health', (req, res) => res.json({ ok: true, online: players.size, orbs: orbs.size, targetOrbs: targetOrbs(), event: ev ? ev.kind + ':' + ev.phase : null, eventsEnabled: EV_EVERY !== 0, obstacles: obstacles.length, world: G.WORLD,
   storage: store.mode, version: VERSION, uptimeSec: Math.round(process.uptime()) }));
 app.get('/api/shop', (req, res) => res.json({ items: G.ITEMS, upgrades: G.UPGRADES, minigames: G.MINIGAMES, orbs: G.ORB_TYPES, events: G.EVENTS, shardExchange: G.SHARD_EXCHANGE }));
 app.use((req, res) => res.status(404).type('text').send('Not found'));
@@ -762,6 +864,7 @@ io.on('connection', socket => {
       players: Array.from(players.values(), playerMeta),
       chat: chatHistory,
       event: publicEvent(),
+      obstacles: publicObstacles(),
     };
   }
 
@@ -1133,6 +1236,15 @@ io.on('connection', socket => {
       announceEvent(d.kind, { announceMs: num(d.announceMs), durationMs: num(d.durationMs), x: num(d.x), y: num(d.y), speed: num(d.speed), count: num(d.count), at: Array.isArray(d.at) ? d.at.slice(0, 6) : undefined });
       ack({ ok: true, event: publicEvent() });
     });
+    // spawn an obstacle now: {kind: 'wall'|'block'|'rock'|'laser', x, y, lifeMs} (tests / screenshots)
+    socket.on('test:obstacle', (d, ack) => {
+      ack = safeAck(ack);
+      if (!acct || !isObj(d)) return ack({ ok: false });
+      if (d.clear) { obstacles = []; pushObstacles(); return ack({ ok: true }); }
+      const n = v => (Number.isFinite(Number(v)) && v !== null && v !== '' ? Number(v) : undefined);
+      const o = spawnObstacle(Date.now(), { kind: ['wall', 'block', 'rock', 'laser'].includes(d.kind) ? d.kind : undefined, x: n(d.x), y: n(d.y), lifeMs: n(d.lifeMs) });
+      ack({ ok: !!o, obstacles: publicObstacles() });
+    });
     // spawn one orb of each requested tier in a ring around the caller or {x,y} (screenshots / rarity tests)
     socket.on('test:tp', (d, ack) => { // move own player to a point (tests only)
       ack = safeAck(ack);
@@ -1195,6 +1307,9 @@ io.on('connection', socket => {
 });
 
 // ---------------------------------------------------------------- main loop
+// initial fill for an empty arena
+for (const z of [1, 2]) for (let i = 0, n = targetZone(z); i < n; i++) { const p = pickSpot(z); if (p) addOrb(rollPool(z), p); }
+pendingAdds = []; pendingDels = [];
 function collectAround(pl, radius, now) {
   const r2max = (radius + 14) ** 2 * 4;
   for (const o of orbs.values()) {
@@ -1221,6 +1336,7 @@ function collectAround(pl, radius, now) {
     pl.acc.balance += rw.value;
     pl.acc.total += rw.value;
     if (o.ev === 'rain' && ev && ev.kind === 'rain') { ev.rainAlive--; evScore(pl).score += rw.value; }
+    if (luckyOn()) evScore(pl).score += rw.value; // «Волна удачи»: orbs collected during the wave
     if (ot.shards && (o.t === 'l' || o.t === 'm')) { // legendary 1, mythic 3 shards
       const g = INV.grantItem(pl.acc, G.SHARD_ID, ot.shards, 'arena');
       pl.socket.emit('item', g.ok ? { id: G.SHARD_ID, qty: ot.shards, source: 'arena' } : { error: g.error });
@@ -1246,6 +1362,7 @@ function tick() {
       const px = pl.x;
       G.applyInput(pl, inp.x, inp.y, speed);
       G.zoneGate(pl, px, pl.acc.stats.unlockedDoor2 === true);
+      G.resolveObstacles(pl, obstacles);
       pl.lastSeq = inp.s;
       collectAround(pl, radius, now);
     }
@@ -1261,14 +1378,15 @@ function tick() {
     const list = [];
     for (const pl of players.values()) { pl.mx = pl.x - pl.x0; pl.my = pl.y - pl.y0; pl.lvl = pl.acc.upgrades.speed || 0; list.push(pl); }
     G.separatePlayers(list);
-    for (const pl of list) G.zoneGate(pl, pl.x0, pl.acc.stats.unlockedDoor2 === true); // pushes never carry anyone through the wall
+    for (const pl of list) { G.zoneGate(pl, pl.x0, pl.acc.stats.unlockedDoor2 === true); G.resolveObstacles(pl, obstacles); } // pushes never carry anyone through a wall
   }
   spawnTick(now);
   eventTick(now, dt);
+  obstacleTick(now);
   const p = [];
   for (const pl of players.values()) p.push([pl.id, Math.round(pl.x * 100) / 100, Math.round(pl.y * 100) / 100, pl.lastSeq]);
   const st = { t: now, p, oa: pendingAdds, od: pendingDels };
-  if (ev && ev.runner && ev.phase === 'active') st.rn = [Math.round(ev.runner.x), Math.round(ev.runner.y)]; // «Сфера-беглец» position
+  if (ev && ev.runners && ev.phase === 'active') st.rn = ev.runners.filter(r => !r.caught).map(r => [r.id, Math.round(r.x), Math.round(r.y)]); // «Сферы-беглецы» positions
   io.to('arena').emit('s', st);
   pendingAdds = []; pendingDels = [];
 }

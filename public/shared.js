@@ -307,7 +307,7 @@
     }
     if (epic) out.push({ x: epic.x, y: epic.y, kind: 'e' });
     if (lvl >= 3 && ev && ev.zone) out.push({ x: ev.zone.x, y: ev.zone.y, kind: 'event' });
-    if (lvl >= 3 && ev && ev.runner) out.push({ x: ev.runner.x, y: ev.runner.y, kind: 'event' });
+    if (lvl >= 3 && ev && ev.runners) for (const r of ev.runners) out.push({ x: r.x, y: r.y, kind: 'event' });
     for (const t of out) t.dist = lvl >= 2 ? Math.hypot(t.x - me.x, t.y - me.y) : null;
     return out;
   }
@@ -321,13 +321,53 @@
     koth: { key: 'koth', name: 'Царь горы', icon: '👑', durationMs: 60000, radius: 230, pointsPerSec: 1, minScore: 10,
       desc: 'Стойте в светящейся зоне: каждая секунда в ней — очко. Топ-3 получают сферы и осколки.',
       rewards: [{ orbs: 200, shards: 2 }, { orbs: 120, shards: 1 }, { orbs: 80, shards: 0 }], solo: { orbs: 100, shards: 1 }, participation: { orbs: 20, shards: 0 } },
-    treasure: { key: 'treasure', name: 'Охота за сокровищем', icon: '💰', durationMs: 90000, count: 3, perPlayers: 4, maxCount: 6, minDist: 900,
-      desc: 'В дальних углах арены появились сферы-сокровища. Кто первым схватит — получит награду!', reward: { orbs: 50, shards: 1 } },
-    runner: { key: 'runner', name: 'Сфера-беглец', icon: '💨', durationMs: 60000, speed: 175, wander: 90, r: 14, fleeRange: 700,
-      desc: 'По арене носится сфера, которая убегает от игроков. Поймайте её первым!', reward: { orbs: 120, shards: 2 } },
+    treasure: { key: 'treasure', name: 'Охота за сокровищем', icon: '💰', durationMs: 120000, count: 5, maxCount: 5, minDist: 900,
+      desc: 'По всей карте в случайных местах спрятаны 5 сфер-сокровищ. Кто первым схватит — получит награду!', reward: { orbs: 50, shards: 1 } },
+    runner: { key: 'runner', name: 'Сферы-беглецы', icon: '💨', durationMs: 90000, count: 3, speed: 175, wander: 90, r: 14, fleeRange: 700,
+      desc: 'По карте носятся 3 сферы, которые убегают от игроков. Каждая пойманная — награда!', reward: { orbs: 80, shards: 1 } },
+    lucky: { key: 'lucky', name: 'Волна удачи', icon: '🍀', durationMs: 75000, spawnMult: 2, rareMult: 2,
+      desc: '75 секунд на карте вдвое больше сфер, а шанс редких, эпических, легендарных и мифических сфер удвоен (×2)!' },
   };
   const EVENT_KEYS = Object.keys(EVENTS);
-  const EVENT_SCHEDULE = { minMs: 6 * 60000, maxMs: 10 * 60000, announceMs: 25000 }; // counted only while ≥ 1 player is online
+  const AUTO_EVENT_KEYS = ['treasure', 'runner', 'lucky']; // the scheduler only picks these (rain / koth stay off)
+  const EVENT_SCHEDULE = { minMs: 4 * 60000, maxMs: 8 * 60000, announceMs: 25000 }; // counted only while ≥ 1 player is online
+
+  // «Волна удачи»: rare+ tiers (r, e, l, m) weigh ×rareMult
+  const luckyWeights = (w, k = EVENTS.lucky.rareMult) => { const o = {}; for (const t in w) o[t] = 'relm'.includes(t) ? w[t] * k : w[t]; return o; };
+
+  // ---------------------------------------------------------------- temporary obstacles (server spawns, everyone collides)
+  // kinds: 'wall' (long thin rect), 'block' (square-ish rect), 'rock' (circle), 'laser' (solid pylon + spinning beam)
+  const OBSTACLES = { maxAlive: 8, everyMinMs: 12000, everyMaxMs: 30000, lifeMinMs: 45000, lifeMaxMs: 90000, laserChance: 0.25,
+    warnMs: 3000, playerClear: 380, doorClear: 650, gap: 450, pylonR: 26, beamMin: 240, beamMax: 340, spinMin: 0.8, spinMax: 1.3,
+    penaltyPct: 0.07, penaltyMax: 150, invulnMs: 3000, dropMax: 10, dropLifeMs: 30000 };
+  const laserAngle = (o, now) => o.a0 + o.w * (now - o.t0) / 1000;
+  // pushes a player circle out of every solid obstacle (rects axis-aligned; lasers: only the pylon is solid)
+  function resolveObstacles(pos, list) {
+    if (!list) return;
+    for (const o of list) {
+      if (o.k === 'rect') {
+        const hx = o.w / 2, hy = o.h / 2, cx = Math.max(o.x - hx, Math.min(o.x + hx, pos.x)), cy = Math.max(o.y - hy, Math.min(o.y + hy, pos.y));
+        let dx = pos.x - cx, dy = pos.y - cy; const d = Math.hypot(dx, dy);
+        if (d >= PLAYER_R) continue;
+        if (d > 1e-6) { pos.x = cx + dx / d * PLAYER_R; pos.y = cy + dy / d * PLAYER_R; continue; }
+        const px = hx - Math.abs(pos.x - o.x), py = hy - Math.abs(pos.y - o.y); // centre inside: shortest way out
+        if (px < py) pos.x = o.x + Math.sign(pos.x - o.x || 1) * (hx + PLAYER_R); else pos.y = o.y + Math.sign(pos.y - o.y || 1) * (hy + PLAYER_R);
+      } else {
+        const r = o.r + PLAYER_R, dx = pos.x - o.x, dy = pos.y - o.y, d = Math.hypot(dx, dy);
+        if (d >= r) continue;
+        if (d < 1e-6) { pos.x = o.x + r; continue; }
+        pos.x = o.x + dx / d * r; pos.y = o.y + dy / d * r;
+      }
+    }
+  }
+  // is a point (player centre) touched by an armed laser beam?
+  function laserHits(o, x, y, now, pad = PLAYER_R) {
+    if (o.k !== 'laser' || now < o.armAt) return false;
+    const a = laserAngle(o, now), ex = Math.cos(a), ey = Math.sin(a);
+    const t = Math.max(0, Math.min(o.len, (x - o.x) * ex + (y - o.y) * ey));
+    return Math.hypot(o.x + ex * t - x, o.y + ey * t - y) <= pad;
+  }
+  const laserPenalty = balance => (balance >= 1 ? Math.min(OBSTACLES.penaltyMax, Math.max(1, Math.round(balance * OBSTACLES.penaltyPct))) : 0);
 
   const skillPrize = (prize, level) => prize > 0 ? Math.round(prize * (1 + upValue('skill', level) / 100)) : prize;
 
@@ -385,7 +425,7 @@
   const api = {
     WORLD, ZONE_W, ZONE_H, DOOR, DOOR_COST, ZONE2_WEIGHTS, zoneOf, zoneGate, PLAYER_R, BASE_SPEED, TICK_MS, STEP_DT, ORB_TYPES, ORB_RANK, ORB_LEGEND, POOL_WEIGHTS, RAIN_WEIGHTS, rollOrbType, expectedOrbValue, CATEGORIES, INV_CATEGORIES, RARITIES, ITEMS, ITEM_BY_ID, INV_SLOTS, INV_CAP, BUY_MAX_QTY, PAINTS,
     DEFAULT_EQUIPPED, DEFAULT_OWNED, UPGRADES, UPGRADE_KEYS, UPGRADE_REFUND_PRICES, upLevel, upValue, jackpotChance, upgradeText, orbReward, skillPrize, compassTargets, SENSE_EPIC_RANGE, RADAR, radarBlips, PUSH, separatePlayers,
-    EVENTS, EVENT_KEYS, EVENT_SCHEDULE, SHARD_ID, SHARD_EXCHANGE,
+    EVENTS, EVENT_KEYS, AUTO_EVENT_KEYS, EVENT_SCHEDULE, luckyWeights, OBSTACLES, laserAngle, resolveObstacles, laserHits, laserPenalty, SHARD_ID, SHARD_EXCHANGE,
     MINIGAMES, REACTION_PRIZES, rushPrize, memoryPrize, memoryShowMs, shellFinal, shellShuffleMs, throwPos, throwPoints, throwPrize, chainPrize, minigameMinMs, speedFor, pickupFor, applyInput,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
