@@ -45,7 +45,7 @@
       <span><i class="dot l"></i>Легендарная&nbsp;+25</span>
       <span><i class="dot m"></i>Мифическая&nbsp;+50</span>
     </div>
-    <div class="hint">Управление: <b>WASD</b> / <b>стрелки</b>, или зажмите мышь / палец — персонаж идёт за курсором.<br>Горячие клавиши: <b>P</b> — профиль, <b>I</b> — инвентарь, <b>B</b> — магазин, <b>M</b> — мини-игры, <b>L</b> — рейтинг, <b>H</b> — виды сфер, <b>Enter</b> / <b>T</b> — чат.</div>
+    <div class="hint">Управление: <b>WASD</b> / <b>стрелки</b>, или зажмите мышь / палец — персонаж идёт за курсором.<br>Горячие клавиши: <b>P</b> — профиль, <b>I</b> — инвентарь, <b>B</b> — магазин, <b>U</b> — улучшения, <b>M</b> — мини-игры, <b>L</b> — рейтинг, <b>H</b> — виды сфер, <b>Enter</b> / <b>T</b> — чат.</div>
     <div class="mini-lb"><h3>🏆 Лучшие сборщики</h3><ol id="startLb"><li class="muted">Загрузка…</li></ol></div>
   </div>
 </div>
@@ -99,6 +99,7 @@
   </div>
   <div class="menu-buttons">
     <button class="btn" data-open="shop" title="Магазин (B)"><i>🛒</i><span>Магазин</span></button>
+    <button class="btn" data-open="ups" id="upsBtn" title="Улучшения (U)"><i>⚡</i><span>Улучшения</span></button>
     <button class="btn" data-open="inv" title="Инвентарь (I)"><i>🎒</i><span>Инвентарь</span></button>
     <button class="btn" data-open="games" title="Мини-игры (M)"><i>🎮</i><span>Мини-игры</span></button>
     <button class="btn" data-open="lb" title="Рейтинг (L)"><i>🏆</i><span>Рейтинг</span></button>
@@ -163,6 +164,15 @@
     </div>
     <div class="grid" id="shopGrid"></div>
     <p class="muted shop-empty hidden" id="shopEmpty">Ничего не найдено — измените фильтр.</p>
+  </div>
+</div>
+
+<!-- Upgrades (own window, menu bar «Улучшения») -->
+<div id="ups" class="modal hidden">
+  <div class="modal-card wide">
+    <div class="modal-head"><h2>⚡ Улучшения</h2><div class="pill"><i class="cur-orb" aria-hidden="true"></i><span class="bal">0</span></div><button class="close" aria-label="Закрыть">✕</button></div>
+    <p class="muted note">Улучшения действуют на арене и в мини-играх и сохраняются в аккаунте.</p>
+    <div class="grid" id="upsGrid"></div>
   </div>
 </div>
 

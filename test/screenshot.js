@@ -228,13 +228,22 @@ function bot(url, name) {
   await desk.click('#shopTabs .tab[data-tab=hat]'); await sleep(150);
   ok(await desk.evaluate(() => document.querySelectorAll('#shopGrid .item[data-item]').length) === SG.ITEMS.filter(i => i.cat === 'hat' && i.price > 0).length - 3 && await desk.isVisible('#shopTools'), 'filters stay active across category tabs (hats minus the 3 owned)');
   await desk.uncheck('#shopHideOwned'); await desk.selectOption('#shopSort', 'price-asc');
-  await desk.click('#shopTabs .tab[data-tab=upgrades]'); await sleep(200);
-  const ups = await desk.evaluate(() => Array.from(document.querySelectorAll('#shopGrid .up-card')).map(e => ({ k: e.dataset.up, name: e.querySelector('.name').textContent, eff: e.querySelector('.up-eff').textContent, btn: e.querySelector('button').textContent, icon: (e.querySelector('.ico img') || {}).dataset && e.querySelector('.ico img').dataset.icon })));
+  ok(!(await desk.evaluate(() => !!document.querySelector('#shopTabs .tab[data-tab=upgrades]'))), 'upgrades are no longer a shop tab');
+  await desk.click('#shop .close'); await sleep(150);
+  ok(await desk.isVisible('#upsBtn') && /Улучшения/.test(await desk.textContent('#upsBtn')), 'menu bar has its own «Улучшения» button');
+  await desk.click('#upsBtn'); await sleep(250);
+  ok(await desk.isVisible('#ups') && !(await desk.isVisible('#shop')), '«Улучшения» opens its own window');
+  const ups = await desk.evaluate(() => Array.from(document.querySelectorAll('#upsGrid .up-card')).map(e => ({ k: e.dataset.up, name: e.querySelector('.name').textContent, eff: e.querySelector('.up-eff').textContent, btn: e.querySelector('button').textContent, icon: (e.querySelector('.ico img') || {}).dataset && e.querySelector('.ico img').dataset.icon })));
   const mag = ups.find(u => u.k === 'magnet') || {};
-  ok(ups.length === SG.UPGRADE_KEYS.length && ups.every(u => u.icon === 'u_' + u.k) && !(await desk.isVisible('#shopTools')), `upgrades tab: ${ups.length} cards with their own icons (filters hidden)`);
+  ok(ups.length === SG.UPGRADE_KEYS.length && ups.every(u => u.icon === 'u_' + u.k) && true, `upgrades window: ${ups.length} cards with their own icons`);
   ok(/ур\. 0\/5/.test(mag.name) && mag.eff.includes('Сейчас: ' + SG.upgradeText('magnet', 0)) && mag.eff.includes('→ ' + SG.upgradeText('magnet', 1)) && new RegExp('Улучшить · ' + SG.UPGRADES.magnet.prices[0].toLocaleString('ru-RU').replace(/\s/g, '\\s')).test(mag.btn),
     `upgrade card shows level, current → next effect and cost: ${mag.name} | ${mag.eff} | ${mag.btn}`);
   await shot(desk, 'screenshot-shop-upgrades.png');
+  await desk.click('#ups .close'); await sleep(150);
+  await desk.keyboard.press('KeyU'); await sleep(200);
+  ok(await desk.isVisible('#ups'), 'hotkey U toggles «Улучшения»');
+  await desk.keyboard.press('KeyU'); await sleep(150);
+  await desk.click('[data-open=shop]'); await sleep(200);
   await desk.click('#shopTabs .tab[data-tab=color]'); await sleep(150);
   const hudBal = () => desk.evaluate(() => Number(document.querySelector('#hudBalance').textContent.replace(/\s/g, '')));
   const violetCard = desk.locator('#shopGrid .item', { hasText: 'Фиолетовый' }), violetBtn = violetCard.locator('.buy-btn');
@@ -345,7 +354,18 @@ function bot(url, name) {
   await mob.tap('#pfPlay');
   await mob.waitForSelector('#hud:not(.hidden)', { timeout: 10000 });
   const mb = await mob.locator('.menu-buttons').boundingBox();
-  ok(mb && mb.x >= 0 && mb.x + mb.width <= 390, `mobile menu (4 buttons) fits the screen width (${mb && Math.round(mb.width)}px)`);
+  ok(mb && mb.x >= 0 && mb.x + mb.width <= 390, `mobile menu (5 buttons) fits the screen width (${mb && Math.round(mb.width)}px)`);
+  { // «Улучшения» button on the phone: no overlaps with radar / chat / zoom / help / joystick area, opens its own sheet
+    const bx = await mob.evaluate(() => ['.menu-buttons', '#radar', '#chatBtn', '.zoom-btns', '#helpBtn'].map(q => { const r = document.querySelector(q).getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom]; }));
+    const hit = (a, b) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
+    ok(bx.slice(1).every(b => !hit(bx[0], b)), 'mobile: menu bar (incl. «Улучшения») overlaps nothing');
+    await shot(mob, 'screenshot-upgrades-button.png');
+    await mob.tap('#upsBtn'); await sleep(300);
+    const cards = await mob.evaluate(() => document.querySelectorAll('#upsGrid .up-card').length);
+    const card = await mob.locator('#ups .modal-card').boundingBox();
+    ok(cards === SG.UPGRADE_KEYS.length && card && card.x >= 0 && card.x + card.width <= 390.5, `mobile: «Улучшения» sheet opens with ${cards} cards and fits the screen`);
+    await mob.tap('#ups .close'); await sleep(200);
+  }
   ok(await mob.isVisible('#chatBtn') && !(await mob.isVisible('#chat')), 'mobile: chat collapsed to a button');
   { // camera zoom on phones: zoomed out by default, pinch with two fingers, +/− buttons that don't overlap the HUD
     const z0 = await mob.evaluate(() => window.OCSZoom());
@@ -614,13 +634,13 @@ function bot(url, name) {
     const rc = await vp.evaluate(() => ({ c: window.OCSRadar().collapsed, h: document.getElementById('minimap').offsetHeight }));
     await vp.click('#radarToggle');
     ok(rc.c && rc.h === 0 && !(await vp.evaluate(() => window.OCSRadar().collapsed)), 'radar collapses and expands with its button');
-    // ---------------- zones + door: zone 1 (violet), the locked door, unlock via the HUD button, zone 2 (blue, rare+ orbs)
-    await call(abots[0], 'test:tp', { name: 'Viewer', x: 2600, y: 2400, orbs: 1500 });
+    // ---------------- zones + door: zone 1 (violet), the locked door, unlock via the HUD button, zone 2 (blue, better odds)
+    await call(abots[0], 'test:tp', { name: 'Viewer', x: 2600, y: 2400, orbs: 4500 });
     await sleep(1500);
     await shot(vp, 'screenshot-zone1.png');
     await call(abots[0], 'test:tp', { name: 'Viewer', x: SG.ZONE_W - 160, y: SG.DOOR.y });
     await vp.waitForSelector('#doorBtn:not(.hidden)', { timeout: 5000 });
-    ok(/Открыть дверь/.test(await vp.textContent('#doorBtn')) && /1\s?000/.test(await vp.textContent('#doorBtn')), 'door button appears next to the locked door: ' + (await vp.textContent('#doorBtn')).trim());
+    ok(/Открыть дверь/.test(await vp.textContent('#doorBtn')) && /3\s?750/.test(await vp.textContent('#doorBtn')), 'door button appears next to the locked door: ' + (await vp.textContent('#doorBtn')).trim());
     await sleep(500);
     await shot(vp, 'screenshot-door.png');
     await vp.click('#doorBtn');

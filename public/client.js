@@ -236,7 +236,6 @@
   socket.on('pmeta', p => { const pl = players.get(p.id); if (pl) { pl.eq = p.eq; pl.name = p.name; } });
   socket.on('sping', v => socket.emit('spong', v));
   socket.on('announce', a => toast('✨ ' + a.text));
-  socket.on('legend:soon', d => { const sec = Math.max(1, Math.round(((d && d.in) || 0) / 1000)); toast(`🧭 Чутьё легенды: легендарная сфера появится через ~${sec} с`, 'ok'); });
 
   socket.on('s', st => {
     if (!joined) return;
@@ -299,6 +298,7 @@
     if (summary) { Object.assign(summary, p); summary.items = p.inventory.reduce((n, s) => n + s.q, 0); summary.slotsUsed = p.inventory.length; summary.used = p.used; }
     updateHud();
     if (!$('shop').classList.contains('hidden')) renderShop();
+    if (!$('ups').classList.contains('hidden')) renderUps();
     if (!$('inv').classList.contains('hidden')) renderInv();
     if (!$('profile').classList.contains('hidden')) renderProfile();
   }
@@ -324,7 +324,7 @@
     socket.emit('door:unlock', null, res => {
       if (!res || !res.ok) { toast((res && res.error) || 'Ошибка', 'err'); return; }
       setProfile(res.profile); updateDoorBtn();
-      toast('🚪 Дверь открыта! Синяя зона: только редкие сферы и выше.', 'ok');
+      toast('🚪 Дверь открыта! В синей зоне редкие сферы попадаются чаще.', 'ok');
     });
   });
   function drawZones(t) {
@@ -344,9 +344,9 @@
       ctx.beginPath(); for (let y = D.y - D.half + 28; y < D.y + D.half; y += 28) { ctx.moveTo(Z - 20, y); ctx.lineTo(Z + 20, y); } ctx.stroke();
     }
     ctx.shadowBlur = 0; ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = '700 18px system-ui, sans-serif';
-    ctx.fillText(open ? '🚪 Зона 2' : `🔒 ${G.DOOR_COST} сфер`, Z, D.y - D.half - 16);
+    ctx.fillText(open ? '🚪 Зона 2' : `🔒 ${fmt(G.DOOR_COST)} сфер`, Z, D.y - D.half - 16);
     ctx.font = '600 14px system-ui, sans-serif'; ctx.fillStyle = 'rgba(200,215,255,0.8)';
-    ctx.fillText('редкие сферы и выше →', Z + 120, D.y + 6);
+    ctx.fillText('больше редких сфер →', Z + 120, D.y + 6);
     ctx.restore();
   }
   function updateHud(bump) {
@@ -381,6 +381,7 @@
     if (e.code === 'KeyP') toggleProfile();
     if (e.code === 'KeyI') toggleModal('inv');
     if (e.code === 'KeyB') toggleModal('shop');
+    if (e.code === 'KeyU') toggleModal('ups');
     if (e.code === 'KeyM') toggleModal('games');
     if (e.code === 'KeyL') toggleModal('lb');
     if (e.code === 'KeyH') toggleOrbHelp();
@@ -1512,6 +1513,7 @@
     if (id !== 'inv') { if (stage !== 'game') return; closeProfile(); }
     $(id).classList.remove('hidden');
     if (id === 'shop') renderShop();
+    if (id === 'ups') renderUps();
     if (id === 'inv') renderInv();
     if (id === 'lb') loadLb();
     if (id === 'games') { if (!mgRunning) showGamesList(); updateGameButtons(); }
@@ -1755,22 +1757,25 @@
     el.append(nm, pips, desc, eff, btn);
     return el;
   }
+  // «Улучшения»: own window from the menu bar (was a shop tab)
+  function renderUps() {
+    if (!profile) return;
+    const grid = $('upsGrid'); grid.innerHTML = '';
+    for (const up of Object.values(G.UPGRADES)) grid.appendChild(upgradeCard(up));
+  }
   function renderShop() {
     if (!profile) return;
     pruneHidden('shop');
-    const tabs = G.CATEGORIES.concat([{ key: 'upgrades', name: '⚡ Улучшения' }, { key: 'shards', name: 'Лавка осколков', icon: SHARD_I }, { key: 'codes', name: '🎟 Коды' }]);
+    if (shopTab === 'upgrades') shopTab = 'color'; // upgrades have their own window now («Улучшения», U)
+    const tabs = G.CATEGORIES.concat([{ key: 'shards', name: 'Лавка осколков', icon: SHARD_I }, { key: 'codes', name: '🎟 Коды' }]);
     $('shopTabs').innerHTML = tabs.map(c => `<button class="tab ${c.key === shopTab ? 'active' : ''}" data-tab="${c.key}">${c.icon ? c.icon + ' ' : ''}${c.name}</button>`).join('');
     $('shopTabs').querySelectorAll('.tab').forEach(b => b.onclick = () => { shopTab = b.dataset.tab; renderShop(); });
     const grid = $('shopGrid');
     grid.innerHTML = '';
-    $('shopTools').classList.toggle('hidden', shopTab === 'upgrades' || shopTab === 'shards' || shopTab === 'codes');
+    $('shopTools').classList.toggle('hidden', shopTab === 'shards' || shopTab === 'codes');
     $('shopEmpty').classList.add('hidden');
     if (shopTab === 'shards') { renderShardShop(grid); return; }
     if (shopTab === 'codes') { renderCodes(grid); return; }
-    if (shopTab === 'upgrades') {
-      for (const up of Object.values(G.UPGRADES)) grid.appendChild(upgradeCard(up));
-      return;
-    }
     const inCat = G.ITEMS.filter(i => i.cat === shopTab && i.price > 0 && i.sources.includes('shop'));
     if (shopRarity !== 'all' && !inCat.some(i => i.rarity === shopRarity)) shopRarity = 'all';
     const chips = [{ key: 'all', name: 'Все', color: '#aab3d9' }].concat(Object.entries(G.RARITIES).map(([k, r]) => ({ key: k, name: r.name, color: r.color })));

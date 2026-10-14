@@ -73,16 +73,16 @@ Global arena chat (logged-in players only), last 50 messages are sent on join, j
 | placement | best-of-6 emptiest random cells, then up to 8 random points per cell (Poisson-disc-like): ≥ 70 px from any other orb, ≥ 220 px from every player |
 | rarity | see «Orb rarities» below |
 | refill | a collected orb respawns 3–9 s later somewhere else; orbs added because more players joined fade in over ~4 s; ≤ 4 spawns per tick |
-| legendary (+25) | timed event, never part of the normal pool: first one 60 s after start, then every 90–150 s (only while someone is online), at most 1 alive, disappears after 75 s, announced to everyone; picking it up also grants a «Легендарный осколок» |
+| legendary (+25) | normal spawn-table tier, **no timer**: weight 24 (≈0.24 % of every orb spawn) in zone 1, 50 (≈0.5 %) in zone 2. Zone 1 respawns ≈ 70/min per active player, so with ~3 players one appears about every 2 min (1 player: ~6 min). At most 2 alive, disappears after 75 s, announced to everyone, shown by the compass; never spawns during an arena event (rolls an epic instead); picking it up grants a «Легендарный осколок» |
 
 Previously 380 orbs refilled instantly with 2 % legendaries regardless of player count; now the field scales with the player count and is evenly spread. `GET /api/health` shows `orbs` and `targetOrbs`.
 
 ## World: two zones and a door
 - World **12000 × 6000** = two zones of **6000 × 6000** each (was a single 3000 × 3000 arena; each side ×2).
 - **Zone 1** (violet tint): the old orb mix (common-heavy). New players always spawn here.
-- **Door** in the middle of the right wall of zone 1 (340 px opening). Unlock once for **1000 orbs** (`door:unlock`, ≈10 min of base farming); stored as `stats.unlockedDoor2`. The wall blocks everyone else (server-side `G.zoneGate`, mirrored in client prediction). The HUD shows «🚪 Открыть дверь…» when you stand next to it.
-- **Zone 2** (blue tint): only rare+ orbs — weights `r 5200 · e 3500 · m 300` (mean ≈ 7.6 per orb vs 1.43 in zone 1), at ~35 % of zone-1's orb count (lower density).
-- Orb targets: zone 1 = clamp(280 + 60 × online, 360, 1000); zone 2 = 35 % of that.
+- **Door** in the middle of the right wall of zone 1 (340 px opening). Unlock once for **3750 orbs** (`door:unlock`, ≈35 min of base farming); stored as `stats.unlockedDoor2`. Players who unlocked it earlier for 1000 keep access (no extra charge). The wall blocks everyone else (server-side `G.zoneGate`, mirrored in client prediction). The HUD shows «🚪 Открыть дверь…» when you stand next to it.
+- **Zone 2** (blue tint): the same tiers as zone 1 with better odds — `c 70 · u 18 · r 8.5 · e 2.8 · l 0.5 · m 0.3 %` (zone 1: `c 82.0 · u 12 · r 4.6 · e 1.1 · l 0.24 · m 0.06 %`; mean ≈ 2.03 vs 1.49 per orb). Mythic cap (1 alive) is shared. Measured with greedy bots, 0 upgrades: zone 1 ≈ 94/min, zone 2 ≈ 137/min (≈ 1.45×).
+- Orb targets: zone 1 = clamp(280 + 60 × online, 360, 1000); zone 2 = the same (same density).
 - Screenshots: `screenshot-zone1.png`, `screenshot-door.png`, `screenshot-zone2.png`.
 
 ## Orb rarities (`G.ORB_TYPES` in `public/shared.js`)
@@ -175,7 +175,21 @@ Shop prices (★ = new in this update):
 - Шапки: Шапка-бини 300 ★, Праздничный колпак 450 ★, Кепка 500, Заячьи ушки 500 ★, Кошачьи ушки 700 ★, Наушники 1 000 ★, Ковбойская шляпа 1 300 ★, Цилиндр 1 500, Рожки 2 000 ★, Шлем викинга 3 000 ★, Нимб 3 200, Кепка с пропеллером 3 900 ★, Шляпа волшебника 9 500 ★, Корона 20 000
 - Everything together: 235 600 (the 49 new items: 158 100). Existing item ids, prices and ownership are unchanged.
 
+## Mini-game prizes (Oct 2026: ≈2× prizes, 100 s pause per game, fees unchanged)
+| Game | Fee | Prizes |
+|---|---|---|
+| Реакция | 10 | <250 ms 32 · <320 24 · <400 20 · <550 12 · <750 6 |
+| Сферный шторм | 20 | 150 % of score, max 80 |
+| Память | 10 | +6 per round after round 2, max 60 |
+| Угадай чашу | 10 | 22 (blind guess EV 7.3, 9.7 with «Мастер» 3 — below the fee) |
+| Точный бросок | 10 | 160 % of points, max 48 |
+| Цепочка | 10 | <3.5 s 36 · <4.5 28 · <6 20 · <8 12 · <10 6 |
+
+«Мастер мини-игр» adds +10 / 20 / 30 %. Flawless play of all 6 in rotation with «Мастер» 3 nets ≈ 100 orbs/min (single game ≤ 42/min) — still below zone-1 farming (~112/min).
+
 ## Upgrades (soft curve, Oct 2026)
+Upgrades have their own window: menu button **«⚡ Улучшения»** (hotkey **U**); they are no longer a shop tab.
+
 All upgrades were **refunded once** (sum of the old prices of each owned level → orb balance, not the all-time total) and reset to 0; flag `stats.upgradeRefundV1` prevents a second refund.
 
 | Upgrade | Prices (lvl 1→max) | Effect at levels 1…max |
@@ -184,8 +198,8 @@ All upgrades were **refunded once** (sum of the old prices of each owned level �
 | Ускорение | 250 / 700 / 1800 / 4000 / 8000 | +3 / 5 / 7 / 9 / 11 % speed |
 | Множитель сфер | 350 / 900 / 2200 / 5000 / 10000 | +3 / 6 / 9 / 12 / 15 % |
 | Удача | 300 / 800 / 2000 / 4500 / 9000 | ×2 chance 1–5 %; «находка» 0.25 / 0.4 / 0.55 % from lvl 3 |
-| Чутьё легенды | 400 / 1200 / 3000 | compass (unchanged) |
-| Мастер мини-игр | 200 / 600 / 1400 | +3 / 6 / 9 % mini-game prizes |
+| Чутьё легенды | 400 / 1200 / 3000 | compass: legendary + mythic → + nearest epic → + event targets (the 15 s legendary heads-up is gone: legendaries have no timer now) |
+| Мастер мини-игр | 200 / 600 / 1400 | +10 / 20 / 30 % mini-game prizes |
 
 Multiplier × luck at max ≈ ×1.25 per orb; with movement upgrades the target is ≤ ~1.4× of base income (was ≈ 1.7×).
 
@@ -211,7 +225,7 @@ Logs: `logs/server.log`. Deployed on Render: build `npm install --omit=dev`, sta
     UPGRADES=max node test/measure-earn-rate.js 1 90 http://localhost:3110   # income measurement against a scratch server started with OCS_TEST_HOOKS=1
     node test/seed-demo.js [file]              # demo accounts (password demo-pass-123) into a JSON data file
 
-`npm test` covers: auth, profile data, chat moderation + the clear cycle, spawn distribution (count vs players, spread, gaps, no spawns on players, rarity share, legendary event), price sanity, shop purchases, inventory limit / stacking / full-inventory refusal, equip & unequip from the inventory, trash (unique items, partial / whole stacks, equipped items, invalid requests, rate limit, re-buying, persistence across restarts), the silent chat clear (no schedule or notice reaches clients), mini-game payouts and cooldowns, persistence across restarts, migration of old-format accounts (JSON and Postgres) upgrades (price tables, diminishing curves, caps, exact multiplier accounting with carried fractions, luck, speed, mini-game skill, legendary heads-up only for «Чутьё легенды» 3, level migration), income with everything maxed vs none (3 + 3 fresh servers in parallel; skip with `OCS_TEST_INCOME=0`), every new cosmetic bought / equipped / seen by others / trashed, catalog rules (tier price ranges, unchanged old ids and prices) and a privacy audit of everything clients received. Also: orb tier weights / roll distribution / pool income, luck «находка» and compass levels, every arena event (rain, king of the hill with placed rewards, treasure, runner, cancelling), the event scheduler (no events with 0 players or while a legendary is alive, sequencing, announce timing), the shard shop (prices, refusals, exchange, all-or-nothing) and event payload privacy. `OCS_TEST_ONLY=events` runs just those. `OCS_TEST_HOOKS=1` enables test-only socket events (`test:grant`, `test:orbs`, `test:upgrades`, `test:event`, `test:spawn`) — the test runner sets it for its own servers; never set it in production.
+`npm test` covers: auth, profile data, chat moderation + the clear cycle, spawn distribution (count vs players, spread, gaps, no spawns on players, rarity share, legendary as a spawn tier), price sanity, shop purchases, inventory limit / stacking / full-inventory refusal, equip & unequip from the inventory, trash (unique items, partial / whole stacks, equipped items, invalid requests, rate limit, re-buying, persistence across restarts), the silent chat clear (no schedule or notice reaches clients), mini-game payouts and cooldowns, persistence across restarts, migration of old-format accounts (JSON and Postgres) upgrades (price tables, diminishing curves, caps, exact multiplier accounting with carried fractions, luck, speed, mini-game skill, legendary spawn chance per zone, level migration), income with everything maxed vs none (3 + 3 fresh servers in parallel; skip with `OCS_TEST_INCOME=0`), every new cosmetic bought / equipped / seen by others / trashed, catalog rules (tier price ranges, unchanged old ids and prices) and a privacy audit of everything clients received. Also: orb tier weights / roll distribution / pool income, luck «находка» and compass levels, every arena event (rain, king of the hill with placed rewards, treasure, runner, cancelling), the event scheduler (no events with 0 players or while a legendary is alive, sequencing, announce timing), the shard shop (prices, refusals, exchange, all-or-nothing) and event payload privacy. `OCS_TEST_ONLY=events` runs just those. `OCS_TEST_HOOKS=1` enables test-only socket events (`test:grant`, `test:orbs`, `test:upgrades`, `test:event`, `test:spawn`) — the test runner sets it for its own servers; never set it in production.
 Screenshots: `screenshot-profile.png`, `screenshot-profile-mobile.png`, `screenshot-inventory.png`, `screenshot-inventory-mobile.png`, `screenshot-trash-confirm.png`, `screenshot-shop.png`, `screenshot-shop-mobile.png`, `screenshot-shop-upgrades.png`, `screenshot-icons-all.png` (every item + upgrade icon), `screenshot-arena-cosmetics.png` (players wearing new cosmetics), `screenshot-event-banner.png`, `screenshot-event-koth.png`, `screenshot-shard-shop.png`, `screenshot-shop-icons.png` (currency icons: CSS glowing orb for orb amounts, gold SVG shard for shard prices — no emoji), `screenshot-orb-rarities.png` (test:ui also writes `screenshot-event-results.png` and `screenshot-arena-exclusives.png`, not committed), plus the login / chat screenshots.
 
 ## API

@@ -297,7 +297,17 @@ function upgradeRules() {
   const lucky = G.orbReward(5, { luck: 5 }, {}, () => 0), unlucky = G.orbReward(5, { luck: 5 }, {}, () => 0.5), noLuck = G.orbReward(5, {}, {}, () => 0);
   ok(lucky.value === 10 && lucky.lucky && unlucky.value === 5 && !unlucky.lucky && noLuck.value === 5, `luck: ${U.luck.values[U.luck.max]} % chance at max to count an orb twice (roll < chance → ×2); levels 3–5 add a ${U.luck.jackpot.slice(3).join('/')} % «находка»`);
   ok(sum(20, 1, { mult: 5, luck: 5 }, () => 0) === 46, 'luck and multiplier stack (2 per orb +15 % → 46 for 20 orbs)');
-  ok(G.skillPrize(16, 3) === 17 && G.skillPrize(16, 0) === 16 && G.skillPrize(0, 3) === 0 && G.skillPrize(40, 99) === 44, 'mini-game skill: +3/6/9 % on prizes > 0, capped at level 3');
+  { // legendary: a normal spawn-table tier (no timer). Expected gap in a populated zone 1 ≈ 2 min.
+    const W1 = G.POOL_WEIGHTS, W2 = G.ZONE2_WEIGHTS, sum = w => Object.values(w).reduce((a, b) => a + b, 0);
+    const p1 = W1.l / sum(W1), p2 = W2.l / sum(W2);
+    let seed = 12345; const prng = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; // mulberry32
+    const N = 200000; let hits = 0; for (let i = 0; i < N; i++) if (G.rollOrbType(W1, prng) === 'l') hits++;
+    const spawnsPerMin = 3 * 70; // 3 players × ~70 pickups/min each = respawns/min in zone 1
+    const gapMin = 1 / (p1 * spawnsPerMin);
+    ok(Math.abs(hits / N - p1) < 0.0006 && p2 > p1 * 1.5 && gapMin > 1.5 && gapMin < 2.6,
+      `legendary per-spawn chance: zone 1 ${(p1 * 100).toFixed(2)} % (rolled ${(hits / N * 100).toFixed(2)} % of ${N}), zone 2 ${(p2 * 100).toFixed(2)} % → ≈1 per ${gapMin.toFixed(1)} min with 3 players (${spawnsPerMin} spawns/min)`);
+  }
+  ok(G.skillPrize(16, 3) === 21 && G.skillPrize(16, 1) === 18 && G.skillPrize(16, 0) === 16 && G.skillPrize(0, 3) === 0 && G.skillPrize(40, 99) === 52, 'mini-game skill: +10/20/30 % on prizes > 0, capped at level 3');
   // one-time upgrade refund (old price table) → levels reset to 0; flag prevents a second refund; total untouched
   const INV = require('../lib/inventory.js'), RP = G.UPGRADE_REFUND_PRICES;
   const acc = { key: 'mig', name: 'Mig', passHash: 'x', balance: 100, total: 5, owned: [], equipped: {}, upgrades: { magnet: 3, speed: '2', mult: 5, bogus: 4, luck: -1, sense: 9 }, stats: {} };
@@ -310,7 +320,7 @@ function upgradeRules() {
 }
 
 
-// ------------------------------------------------------------------ zones + door (zone 1 | wall + door | zone 2 rare+)
+// ------------------------------------------------------------------ zones + door (zone 1 | wall + door | zone 2 better odds)
 async function zoneSuite(URL) {
   console.log('--- zones / door');
   const h = await (await fetch(URL + '/api/health')).json();
@@ -338,8 +348,10 @@ async function zoneSuite(URL) {
   ok(P.pos.x > G.ZONE_W + 100 && G.zoneOf(P.pos.x) === 2, `walked through the door into zone 2 (x=${Math.round(P.pos.x)})`);
   const z2 = Array.from(P.orbs.values()).filter(o => o.x > G.ZONE_W && !o.ev && o.t !== 'l'), z1 = Array.from(P.orbs.values()).filter(o => o.x < G.ZONE_W && o.t !== 'l' && !o.ev);
   const cnt = t => z2.filter(o => o.t === t).length;
-  ok(z2.length >= 100 && z2.every(o => ['r', 'e', 'm'].includes(o.t)) && cnt('r') > cnt('e'), `zone 2 spawns rare+ only: ${z2.length} orbs (r ${cnt('r')}, e ${cnt('e')}, m ${cnt('m')}); zone 1 has ${z1.length}`);
-  ok(z1.filter(o => o.t === 'c').length > z1.length * 0.6 && z2.length < z1.length * 0.5, 'zone 1 stays common-heavy; zone 2 is less dense');
+  const mean = l => l.reduce((n, o) => n + G.ORB_TYPES[o.t].value, 0) / l.length;
+  ok(z2.length >= 250 && cnt('c') > 0 && cnt('u') > 0 && cnt('r') > 0 && cnt('c') > z2.length * 0.55, `zone 2 has the same tiers incl. commons: ${z2.length} orbs (c ${cnt('c')}, u ${cnt('u')}, r ${cnt('r')}, e ${cnt('e')}, m ${cnt('m')})`);
+  ok(mean(z2) > mean(z1) * 1.15 && mean(z2) < mean(z1) * 1.8 && Math.abs(z2.length - z1.length) < z1.length * 0.25,
+    `zone 2: better odds, same density — mean orb ${mean(z2).toFixed(2)} vs zone 1 ${mean(z1).toFixed(2)}; counts ${z2.length} vs ${z1.length}`);
   P.close();
   // persisted: login again keeps the unlock
   const Q = makeClient(URL); const lr = await Q.login(P.profile.name);
@@ -352,15 +364,15 @@ function tierEventRules() {
   const T = G.ORB_TYPES, keys = ['c', 'u', 'r', 'e', 'l', 'm'];
   ok(keys.map(k => T[k].value).join(',') === '1,2,5,10,25,50' && keys.every((k, i) => !i || T[k].r > T[keys[i - 1]].r) && new Set(keys.map(k => T[k].color)).size === keys.length,
     'tiers common +1, uncommon +2, rare +5, epic +10, legendary +25, mythic +50 — each bigger than the last, distinct colours');
-  ok(T.l.weight === 0 && T.t.weight === 0 && T.m.weight > 0 && T.m.shards === 3 && T.l.shards === 1 && T.m.maxAlive === 1, 'legendary stays timed, treasure only in events, mythic: random, max 1 alive, 3 shards');
+  ok(T.l.weight > 0 && T.l.weight < T.e.weight && T.l.maxAlive === 2 && T.l.lifeMs === 75000 && T.t.weight === 0 && T.m.weight > 0 && T.m.shards === 3 && T.l.shards === 1 && T.m.maxAlive === 1, 'legendary is a random spawn tier (max 2 alive, 75 s), treasure only in events, mythic: random, max 1 alive, 3 shards');
   const ev = G.expectedOrbValue();
   ok(ev >= 1.35 && ev <= 1.5, `pool mean orb value ${ev.toFixed(3)} (old 1.4 → income stays ≈100/min)`);
   ok(G.expectedOrbValue(G.RAIN_WEIGHTS) > ev * 1.4, `«Сферный дождь» orbs are richer (mean ${G.expectedOrbValue(G.RAIN_WEIGHTS).toFixed(2)})`);
-  let seed = 7; const prng = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  let seed = 7; const prng = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; // mulberry32
   const N = 400000, cnt = {}; for (let i = 0; i < N; i++) { const t = G.rollOrbType(G.POOL_WEIGHTS, prng); cnt[t] = (cnt[t] || 0) + 1; }
   const tot = Object.values(G.POOL_WEIGHTS).reduce((a, b) => a + b, 0);
   const off = Object.keys(G.POOL_WEIGHTS).filter(k => Math.abs(cnt[k] / N - G.POOL_WEIGHTS[k] / tot) > Math.max(0.002, 0.08 * G.POOL_WEIGHTS[k] / tot) && k !== 'm');
-  ok(!off.length && !cnt.l && !cnt.t && cnt.m > 0, 'roll distribution matches the weights: ' + Object.keys(cnt).map(k => `${k} ${(cnt[k] / N * 100).toFixed(2)}%`).join(', '));
+  ok(!off.length && cnt.l > 0 && !cnt.t && cnt.m > 0, 'roll distribution matches the weights: ' + Object.keys(cnt).map(k => `${k} ${(cnt[k] / N * 100).toFixed(2)}%`).join(', '));
   // luck: ×2 chance + «находка» (common/uncommon → epic +10) from level 3
   const seq = arr => { let i = 0; return () => arr[i++ % arr.length]; };
   ok(G.orbReward(1, { luck: 5 }, {}, seq([0, 0.5]), 'c').value === 10 && G.orbReward(1, { luck: 5 }, {}, seq([0, 0]), 'u').value === 20 && G.orbReward(5, { luck: 5 }, {}, seq([0, 0.5]), 'r').value === 10 &&
@@ -611,7 +623,7 @@ async function shardShopSuite(URL) {
 async function schedulerSuite() {
   console.log('\n===== event scheduler (short timers) =====');
   const tmp = path.join(os.tmpdir(), `ocs-sched-${process.pid}.json`);
-  const srv = await startServer(3107, { DATA_FILE: tmp, OCS_TEST_HOOKS: '1', EVENT_EVERY_MS: '2000', EVENT_ANNOUNCE_MS: '1000', EVENT_DURATION_MS: '2500', LEGENDARY_EVERY_MS: '60000' });
+  const srv = await startServer(3107, { DATA_FILE: tmp, OCS_TEST_HOOKS: '1', EVENT_EVERY_MS: '2000', EVENT_ANNOUNCE_MS: '1000', EVENT_DURATION_MS: '2500' });
   await sleep(3000);
   const h0 = await (await fetch(srv.url + '/api/health')).json();
   ok(h0.event === null, 'no event while nobody is online (the clock only runs with players)');
@@ -659,7 +671,7 @@ function priceSanity() {
   const skillMax = G.UPGRADES.skill.max; // worst case: «Мастер мини-игр» maxed
   const rushPerMin = (G.skillPrize(G.rushPrize(1e9), skillMax) - rush.fee) / ((rush.duration + rush.cooldownMs) / 60000);
   const reactPerMin = (G.skillPrize(G.REACTION_PRIZES[0][1], skillMax) - re.fee) / ((2500 + re.cooldownMs) / 60000);
-  ok(rushPerMin < RATE * 0.5 && reactPerMin < RATE * 0.5, `perfect play with maxed «Мастер мини-игр» nets at most ${rushPerMin.toFixed(0)} (rush) / ${reactPerMin.toFixed(0)} (reaction) orbs/min, farming ≈${RATE}`);
+  ok(rushPerMin < RATE && reactPerMin < RATE, `perfect play with maxed «Мастер мини-игр» nets at most ${rushPerMin.toFixed(0)} (rush) / ${reactPerMin.toFixed(0)} (reaction) orbs/min, farming ≈${RATE}`);
   const TIERS = { common: [150, 500], rare: [400, 1500], epic: [1800, 4000], legendary: [9000, 20000] };
   const outOfTier = sold.filter(i => i.price < TIERS[i.rarity][0] || i.price > TIERS[i.rarity][1]);
   ok(!outOfTier.length, `every shop item priced inside its tier (common 150–500, rare 400–1500, epic 1800–4000, legendary 9000–20000)${outOfTier.length ? ': ' + outOfTier.map(i => i.id).join(',') : ''}`);
@@ -672,7 +684,7 @@ function priceSanity() {
   ok(G.ITEMS.every(i => i.type !== 'cosmetic' || typeof i.value === 'string') && new Set(G.ITEMS.map(i => i.id)).size === G.ITEMS.length, 'item ids unique, every cosmetic has a visual value');
   const paintVals = G.ITEMS.filter(i => (i.cat === 'color' || i.cat === 'nameColor') && !/^#[0-9a-f]{6}$/i.test(i.value) && i.value !== 'rainbow').map(i => i.value);
   ok(paintVals.every(v => has(G.PAINTS, v)), `multi-colour values all defined in G.PAINTS (${paintVals.join(', ')})`);
-  ok(G.rushPrize(20) === 15 && G.rushPrize(100) === rush.maxPrize && G.rushPrize(-5) === 0, `rush payout 75% capped at ${rush.maxPrize}`);
+  ok(G.rushPrize(20) === 30 && G.rushPrize(100) === rush.maxPrize && G.rushPrize(-5) === 0, `rush payout 150% capped at ${rush.maxPrize}`);
 }
 
 async function shopInventorySuite(URL) {
@@ -813,9 +825,13 @@ async function newGamesSuite(URL) {
     return [k, (G.skillPrize(mx, maxSkill) - M[k].fee) / (G.minigameMinMs(k) + M[k].cooldownMs) * 60000];
   });
   ok(rates.every(([, r]) => r < FARM / 2), 'flawless play incl. cooldowns + «Мастер мини-игр» 3 stays < 50/min: ' + rates.map(([k, r]) => `${k} ${r.toFixed(0)}`).join(', '));
-  ok(M.shell.prize / M.shell.cups < M.shell.fee && G.memoryPrize(M.memory.freeRounds) === 0 && G.memoryPrize(99) === M.memory.maxPrize && G.throwPrize(999) === M.throw.maxPrize &&
+  const net = Object.fromEntries(rates.map(([k]) => [k, G.skillPrize(k === 'reaction' ? G.REACTION_PRIZES[0][1] : M[k].maxPrize, maxSkill) - M[k].fee]));
+  const cycle = Math.max(rates.reduce((n, [k]) => n + G.minigameMinMs(k), 0), Math.max(...rates.map(([k]) => G.minigameMinMs(k) + M[k].cooldownMs)));
+  const rot = Object.values(net).reduce((a, b) => a + b, 0) / cycle * 60000;
+  ok(rot < 112, `flawless rotation of all 6 games with «Мастер» 3: ${rot.toFixed(0)} orbs/min < zone-1 farming (~112/min)`);
+  ok(G.skillPrize(M.shell.prize, maxSkill) / M.shell.cups < M.shell.fee && G.memoryPrize(M.memory.freeRounds) === 0 && G.memoryPrize(99) === M.memory.maxPrize && G.throwPrize(999) === M.throw.maxPrize &&
     G.throwPoints(0) > G.throwPoints(0.03) && G.throwPoints(0.03) > G.throwPoints(0.05) && G.throwPoints(0.2) === 0 && G.chainPrize(1000) === M.chain.maxPrize && G.chainPrize(99999) === 0,
-    `payout tables: blind shell guess EV ${(M.shell.prize / 3).toFixed(1)} < fee ${M.shell.fee}; memory ≤ ${M.memory.maxPrize}, throw ≤ ${M.throw.maxPrize} (closer = more), chain ≤ ${M.chain.maxPrize}`);
+    `payout tables: blind shell guess EV ${(G.skillPrize(M.shell.prize, maxSkill) / 3).toFixed(1)} (with «Мастер» 3) < fee ${M.shell.fee}; memory ≤ ${M.memory.maxPrize}, throw ≤ ${M.throw.maxPrize} (closer = more), chain ≤ ${M.chain.maxPrize}`);
   const cl = []; const mk = async n => { const c = makeClient(URL); await c.register(n + rnd()); await c.emit('test:orbs', 500); cl.push(c); return c; };
   const once = (c, ev, ms = 8000) => new Promise((res, rej) => { const t = setTimeout(() => rej(new Error('timeout ' + ev)), ms); c.s.once(ev, d => { clearTimeout(t); res(d); }); });
   // «Память»
@@ -1098,11 +1114,11 @@ async function spawnSuite(URL) {
   const n0 = cl[0].orbs.size;
   await sleep(1000);
   const n1 = cl[0].orbs.size;
-  ok(n1 > n0, `new orbs fade in gradually (${n0} → ${n1} after 1 s; zone-1 target ${h1.targetOrbs}, zone-2 ~35 %)`);
+  ok(n1 > n0, `new orbs fade in gradually (${n0} → ${n1} after 1 s; zone-1 target ${h1.targetOrbs}, zone 2 same count)`);
   await sleep(4500);
   const list = Array.from(cl[0].orbs.values()).filter(o => o.t !== 'l');
   const z1 = list.filter(o => o.x < G.ZONE_W), z2 = list.filter(o => o.x >= G.ZONE_W);
-  ok(Math.abs(z1.length - h1.targetOrbs) <= 20 && z2.length >= Math.round(h1.targetOrbs * 0.25), `orb counts: zone1 ${z1.length}/${h1.targetOrbs}, zone2 ${z2.length} (≈35 %)`);
+  ok(Math.abs(z1.length - h1.targetOrbs) <= 20 && Math.abs(z2.length - h1.targetOrbs) <= 30, `orb counts: zone1 ${z1.length}/${h1.targetOrbs}, zone2 ${z2.length} (same density)`);
   const cells = new Map();
   for (const o of z1) { const k = Math.floor(o.x / 300) + ',' + Math.floor(o.y / 300); cells.set(k, (cells.get(k) || 0) + 1); }
   const maxCell = Math.max(0, ...cells.values());
@@ -1115,7 +1131,8 @@ async function spawnSuite(URL) {
   const share = k => types.filter(t => t === k).length / types.length;
   ok(share('c') > 0.7 && share('c') < 0.92 && share('u') > 0.05 && share('u') < 0.2 && share('r') > 0.01 && share('r') < 0.1,
     `zone-1 tier shares of ${types.length} orbs: ${['c', 'u', 'r', 'e', 'm'].map(k => k + ' ' + (share(k) * 100).toFixed(1) + '%').join(', ')}`);
-  ok(z2.length && z2.every(o => ['r', 'e', 'm'].includes(o.t)), `zone-2 spawn table is rare+ only (${z2.length} orbs)`);
+  const t2 = z2.map(o => o.t), sh2 = k => t2.filter(t => t === k).length / t2.length;
+  ok(z2.length && sh2('c') > 0.55 && sh2('c') < share('c') && sh2('r') + sh2('e') > share('r') + share('e'), `zone-2 tier shares (better odds): ${['c', 'u', 'r', 'e', 'm'].map(k => k + ' ' + (sh2(k) * 100).toFixed(1) + '%').join(', ')}`);
   // collected orbs come back after a delay, not instantly
   const A = cl[0];
   const before = A.profile.total;
@@ -1127,35 +1144,24 @@ async function spawnSuite(URL) {
 }
 
 async function legendarySuite(URL) {
-  console.log('--- legendary event');
-  const S3 = makeClient(URL), S0 = makeClient(URL);
-  await S3.register('Sense' + rnd()); await S0.register('NoSense' + rnd());
-  await S3.emit('test:upgrades', { sense: 3 });
-  const warn3 = [], warn0 = [];
-  S3.s.on('legend:soon', d => warn3.push(d)); S0.s.on('legend:soon', d => warn0.push(d));
+  console.log('--- legendary orb (spawn-table tier, no timer)');
   const A = makeClient(URL); await A.register('Hunter' + rnd());
-  const atJoin = Array.from(A.orbs.values()).filter(o => o.t === 'l').length;
-  const items = [], announces = [];
-  A.s.on('item', d => items.push(d));
-  A.s.on('announce', d => announces.push(d));
-  const t0 = Date.now(); let maxAlive = 0;
-  while (!items.length && Date.now() - t0 < 40000) {
-    const ls = Array.from(A.orbs.values()).filter(o => o.t === 'l');
-    maxAlive = Math.max(maxAlive, ls.length);
-    let dx = 0, dy = 0;
-    if (ls.length) { dx = ls[0].x - A.pos.x; dy = ls[0].y - A.pos.y; const l = Math.hypot(dx, dy) || 1; dx /= l; dy /= l; }
-    A.s.emit('input', { s: ++A.seq, x: dx, y: dy });
-    await sleep(50);
-  }
-  await sleep(300); // well inside the 2.5 s test cycle, so the next spawn cannot be mistaken for a leftover
+  const items = [], announces = [], soon = [];
+  A.s.on('item', d => items.push(d)); A.s.on('announce', d => announces.push(d)); A.s.on('legend:soon', d => soon.push(d));
+  const r = await A.emit('test:spawn', { types: ['l'], ring: 90 });
+  await sleep(250);
+  const ls = Array.from(A.orbs.values()).filter(o => o.t === 'l');
+  ok(r.ok && ls.length >= 1 && announces.some(a => /легендарная/.test(a.text)), `legendary spawn is announced to everyone (${ls.length} on field)`);
+  const target = ls.sort((a, b) => Math.hypot(a.x - A.pos.x, a.y - A.pos.y) - Math.hypot(b.x - A.pos.x, b.y - A.pos.y))[0];
+  const t0 = Date.now();
+  while (A.orbs.has(target.id) && Date.now() - t0 < 5000) { const dx = target.x - A.pos.x, dy = target.y - A.pos.y, l = Math.hypot(dx, dy) || 1; A.s.emit('input', { s: ++A.seq, x: dx / l, y: dy / l }); await sleep(50); }
+  await sleep(300);
   const sh = A.profile.inventory.find(x => x.id === 'x_legend_shard');
-  const after = Array.from(A.orbs.values()).filter(o => o.t === 'l').length;
-  ok((announces.length >= 1 || atJoin === 1) && maxAlive <= 1 && after === 0, `legendary orb is a timed event (on field at join: ${atJoin}, announced ${announces.length}×, max ${maxAlive} alive, none 0.3 s after pickup — cooldown)`);
-  ok(items.length === 1 && items[0].id === 'x_legend_shard' && sh && sh.src === 'arena', 'collecting it grants a «Легендарный осколок» via grantItem (source "arena")');
-  await waitFor(() => warn3.length, 4000);
-  ok(warn3.length >= 1 && warn0.length === 0 && warn3.every(w => JSON.stringify(Object.keys(w)) === '["in"]' && w.in >= 0 && w.in <= 15000),
-    `«Чутьё легенды» lvl 3 gets a heads-up before a legendary appears (${warn3.length}×, ${warn3[0] && warn3[0].in} ms ahead, no position), players without it get none`);
-  A.close(); S3.close(); S0.close();
+  ok(items.some(d => d.id === 'x_legend_shard') && sh && sh.src === 'arena', 'collecting it grants a «Легендарный осколок» via grantItem (source "arena")');
+  ok(soon.length === 0, 'no timer: no «legend:soon» heads-up is ever sent');
+  const h = await (await fetch(URL + '/api/health')).json();
+  ok(h.ok, 'server healthy after legendary pickup (it respawns as a normal pool orb)');
+  A.close();
 }
 
 // ------------------------------------------------------------------ migration of accounts saved by the previous version (7c2dacd)
@@ -1356,7 +1362,7 @@ async function runMode(label, env, opts) {
 async function runCycleMode() {
   console.log('\n===== chat cycle / spawn / legendary (short timers) =====');
   const tmp = path.join(os.tmpdir(), `ocs-cycle-${process.pid}.json`);
-  const srv = await startServer(3104, { DATA_FILE: tmp, OCS_TEST_HOOKS: '1', CHAT_CLEAR_MS: '3000', LEGENDARY_EVERY_MS: '2500' });
+  const srv = await startServer(3104, { DATA_FILE: tmp, OCS_TEST_HOOKS: '1', CHAT_CLEAR_MS: '3000' });
   await spawnSuite(srv.url);
   await chatClearSuite(srv.url, 3000);
   await legendarySuite(srv.url);

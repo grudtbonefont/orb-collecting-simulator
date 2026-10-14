@@ -2,8 +2,8 @@
 (function (root) {
   const ZONE_W = 6000, ZONE_H = 6000; // one zone (was 3000×3000; 2× each side)
   const WORLD = { w: ZONE_W * 2, h: ZONE_H }; // zone 1 (violet) | door | zone 2 (blue)
-  const DOOR_COST = 1000; // one-time unlock for zone 2 (~10 min of base farming)
-  const ZONE2_WEIGHTS = { r: 5200, e: 3500, m: 300 }; // rare+ only, richer than zone 1
+  const DOOR_COST = 3750; // one-time unlock for zone 2 (~35 min of base farming); earlier 1000-orb unlocks are kept
+  const ZONE2_WEIGHTS = { c: 7000, u: 1800, r: 850, e: 280, l: 50, m: 30 }; // same tiers as zone 1, better odds: c 70 / u 18 / r 8.5 / e 2.8 / l 0.5 / m 0.3 % (mean ≈ 2.03 vs 1.49)
   const zoneOf = x => (x < ZONE_W ? 1 : 2);
   const DOOR = { x: ZONE_W, y: ZONE_H / 2, half: 170 }; // opening in the wall between the zones (340 px tall)
   // The wall at x = ZONE_W blocks everyone; only an unlocked player inside the door opening may cross. prevX = x before the move.
@@ -24,7 +24,7 @@
     u: { key: 'u', name: 'Необычная', value: 2, r: 8, color: '#5dff8f', glow: 'rgba(93,255,143,', weight: 1200 },
     r: { key: 'r', name: 'Редкая', value: 5, r: 10, color: '#b46bff', glow: 'rgba(180,107,255,', weight: 460 },
     e: { key: 'e', name: 'Эпическая', value: 10, r: 12, color: '#ff9a2e', glow: 'rgba(255,154,46,', weight: 110 },
-    l: { key: 'l', name: 'Легендарная', value: 25, r: 14, color: '#ffcc33', glow: 'rgba(255,204,51,', weight: 0, shards: 1, note: 'по расписанию, раз в 1,5–2,5 мин' },
+    l: { key: 'l', name: 'Легендарная', value: 25, r: 14, color: '#ffcc33', glow: 'rgba(255,204,51,', weight: 24, shards: 1, maxAlive: 2, lifeMs: 75000, note: 'редкая: шанс 0,24 % на каждую новую сферу (во 2-й зоне 0,5 %), живёт 75 с' },
     m: { key: 'm', name: 'Мифическая', value: 50, r: 15, color: '#ff3d6e', glow: 'rgba(255,61,110,', weight: 6, shards: 3, maxAlive: 1, lifeMs: 60000, note: 'очень редкая, живёт 60 с' },
     t: { key: 't', name: 'Сокровище', value: 50, r: 15, color: '#ffe680', glow: 'rgba(255,230,128,', weight: 0, shards: 1, event: true, note: 'только во время события' },
   };
@@ -199,7 +199,7 @@
     luck: { key: 'luck', name: 'Удача', desc: 'Шанс ×2 за сферу; с 3-го уровня ещё и «находка»: обычная или необычная сфера становится эпической (+10)', max: 5, prices: [300, 800, 2000, 4500, 9000],
       values: [0, 1, 2, 3, 4, 5], jackpot: [0, 0, 0, 0.25, 0.4, 0.55], unit: '%' },
     sense: { key: 'sense', name: 'Чутьё легенды', desc: 'Компас: стрелки к самым редким сферам и к событиям', max: 3, prices: [400, 1200, 3000], values: [0, 1, 2, 3], unit: '' },
-    skill: { key: 'skill', name: 'Мастер мини-игр', desc: 'Бонус к выигрышам в мини-играх', max: 3, prices: [200, 600, 1400], values: [0, 3, 6, 9], unit: '%' },
+    skill: { key: 'skill', name: 'Мастер мини-игр', desc: 'Бонус к выигрышам в мини-играх', max: 3, prices: [200, 600, 1400], values: [0, 10, 20, 30], unit: '%' },
   };
   // Prices players actually paid before the soft-reset (used once to refund → then upgrades reset to 0)
   const UPGRADE_REFUND_PRICES = {
@@ -207,7 +207,7 @@
     luck: [500, 1400, 3400, 7000, 13000], sense: [500, 1500, 4000], skill: [300, 900, 2000],
   };
   const UPGRADE_KEYS = Object.keys(UPGRADES);
-  const SENSE_TEXT = ['нет', 'стрелки к легендарной и мифической сферам', '+ стрелка к ближайшей эпической, расстояния', '+ сигнал за 15 с до легендарной и стрелки к целям событий'];
+  const SENSE_TEXT = ['нет', 'стрелки к легендарной и мифической сферам', '+ стрелка к ближайшей эпической, расстояния', '+ стрелки к целям событий'];
   const SENSE_EPIC_RANGE = 1500; // «Чутьё легенды» 2+: nearest epic orb within this distance
   const upLevel = (key, level) => Math.max(0, Math.min(UPGRADES[key].max, Math.floor(Number(level) || 0))); // caps any stored value
   const upValue = (key, level) => UPGRADES[key].values[upLevel(key, level)];
@@ -224,20 +224,21 @@
   }
 
   // Mini-games are for fun and skill, not a better income than collecting orbs (see README "Economy").
+  // Prizes ≈ 2× (Oct 2026) with a 100 s pause per game: flawless rotation of all 6 with «Мастер» 3 ≈ 100/min < zone-1 farming (~112/min).
   const MINIGAMES = {
-    reaction: { key: 'reaction', name: 'Реакция', fee: 10, cooldownMs: 15000 },
-    rush: { key: 'rush', name: 'Сферный шторм', fee: 20, duration: 20000, w: 600, h: 400, payoutRate: 0.75, maxPrize: 40, cooldownMs: 20000 },
-    // «Память»: repeat a growing sequence of 4 coloured orbs; prize 3 per round after the first 2, cap 30 (12 rounds)
-    memory: { key: 'memory', name: 'Память', fee: 10, cooldownMs: 20000, colors: 4, maxRounds: 12, onMs: 450, gapMs: 200, leadMs: 700, pauseMs: 500,
-      minInputMs: 120, inputMsPerStep: 1200, inputBaseMs: 3000, freeRounds: 2, perRound: 3, maxPrize: 30 },
-    // «Угадай чашу»: follow the orb under 3 cups; win = 16 (fee 10) → blind guessing loses (EV 5.3), perfect tracking stays far below farming
-    shell: { key: 'shell', name: 'Угадай чашу', fee: 10, prize: 16, maxPrize: 16, cooldownMs: 15000, cups: 3, swaps: 9, showMs: 1000, swapMsFrom: 420, swapMsTo: 220, pickTimeoutMs: 8000 },
-    // «Точный бросок»: 3 throws, stop the marker in the target; points by distance (bar = 0..1), prize 80 % of points, cap 24
-    throw: { key: 'throw', name: 'Точный бросок', fee: 10, cooldownMs: 25000, throws: 3, points: [[0.015, 10], [0.035, 7], [0.06, 4], [0.1, 1]], payoutRate: 0.8, maxPrize: 24,
+    reaction: { key: 'reaction', name: 'Реакция', fee: 10, cooldownMs: 100000 },
+    rush: { key: 'rush', name: 'Сферный шторм', fee: 20, duration: 20000, w: 600, h: 400, payoutRate: 1.5, maxPrize: 80, cooldownMs: 100000 },
+    // «Память»: repeat a growing sequence of 4 coloured orbs; prize 6 per round after the first 2, cap 60 (12 rounds)
+    memory: { key: 'memory', name: 'Память', fee: 10, cooldownMs: 100000, colors: 4, maxRounds: 12, onMs: 450, gapMs: 200, leadMs: 700, pauseMs: 500,
+      minInputMs: 120, inputMsPerStep: 1200, inputBaseMs: 3000, freeRounds: 2, perRound: 6, maxPrize: 60 },
+    // «Угадай чашу»: follow the orb under 3 cups; win = 22 (fee 10) → blind guessing loses (EV 7.3, 9.5 with «Мастер» 3), perfect tracking stays far below farming
+    shell: { key: 'shell', name: 'Угадай чашу', fee: 10, prize: 22, maxPrize: 22, cooldownMs: 100000, cups: 3, swaps: 9, showMs: 1000, swapMsFrom: 420, swapMsTo: 220, pickTimeoutMs: 8000 },
+    // «Точный бросок»: 3 throws, stop the marker in the target; points by distance (bar = 0..1), prize 160 % of points, cap 48
+    throw: { key: 'throw', name: 'Точный бросок', fee: 10, cooldownMs: 100000, throws: 3, points: [[0.015, 10], [0.035, 7], [0.06, 4], [0.1, 1]], payoutRate: 1.6, maxPrize: 48,
       periodMin: 1300, periodMax: 1800, minStopMs: 250, gapMs: 900, throwTimeoutMs: 6000 },
     // «Цепочка»: tap orbs 1..8 in order; prize by time
-    chain: { key: 'chain', name: 'Цепочка', fee: 10, cooldownMs: 20000, n: 8, w: 600, h: 400, r: 28, countdownMs: 1200, limitMs: 15000, minTapGapMs: 120,
-      prizes: [[3500, 18], [4500, 14], [6000, 10], [8000, 6], [10000, 3]], maxPrize: 18 },
+    chain: { key: 'chain', name: 'Цепочка', fee: 10, cooldownMs: 100000, n: 8, w: 600, h: 400, r: 28, countdownMs: 1200, limitMs: 15000, minTapGapMs: 120,
+      prizes: [[3500, 36], [4500, 28], [6000, 20], [8000, 12], [10000, 6]], maxPrize: 36 },
   };
   const memoryPrize = rounds => { const d = MINIGAMES.memory; return Math.max(0, Math.min(d.maxPrize, (Math.min(rounds, d.maxRounds) - d.freeRounds) * d.perRound)); };
   const memoryShowMs = round => { const d = MINIGAMES.memory; return d.leadMs + round * (d.onMs + d.gapMs); };
@@ -260,7 +261,7 @@
     if (kind === 'chain') return d.countdownMs + (d.n - 1) * d.minTapGapMs;
     return 0;
   }
-  const REACTION_PRIZES = [ [250, 16], [320, 12], [400, 10], [550, 6], [750, 3] ]; // [ms threshold, prize]
+  const REACTION_PRIZES = [ [250, 32], [320, 24], [400, 20], [550, 12], [750, 6] ]; // [ms threshold, prize]
   const rushPrize = score => Math.max(0, Math.min(MINIGAMES.rush.maxPrize, Math.floor(score * MINIGAMES.rush.payoutRate)));
 
   function speedFor(level) { return BASE_SPEED * (1 + upValue('speed', level) / 100); }

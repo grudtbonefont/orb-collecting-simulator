@@ -29,21 +29,18 @@ const rand = (a, b) => a + Math.random() * (b - a);
 const envInt = (name, def) => { const v = parseInt(process.env[name], 10); return Number.isFinite(v) && v >= 0 ? v : def; };
 
 // ---------------------------------------------------------------- orb spawning (all numbers documented in README)
-const legendEvery = parseInt(process.env.LEGENDARY_EVERY_MS, 10) || 0; // test override
 const SPAWN = {
   cell: 300,                       // world (2 zones of 6000×6000) is split into 40 x 20 cells of 300 px
   base: 280, perPlayer: 60, min: 360, max: 1000, // zone-1 target = clamp(base + perPlayer * online, min, max) (4× the old area)
-  zone2Share: 0.35,                // zone 2 keeps ~35 % of zone-1's orb count (rarer, richer orbs, lower density)
-  // orb tiers + weights: G.ORB_TYPES / G.POOL_WEIGHTS (common +1, uncommon +2, rare +5, epic +10, mythic +50; legendary +25 is timed)
+  zone2Share: Number(process.env.OCS_ZONE2_SHARE) || 1,  // zone 2 has the same orb count/density as zone 1, just better tier odds
+  // orb tiers + weights: G.ORB_TYPES / G.POOL_WEIGHTS (common +1, uncommon +2, rare +5, epic +10, legendary +25, mythic +50; legendary/mythic are capped and announced)
   respawnMin: 3000, respawnMax: 9000, // a collected orb comes back 3-9 s later (somewhere else)
   fillSpread: 4000,                // extra orbs for newly joined players appear over ~4 s
   maxPerTick: 4,                   // at most 80 spawns per second
   orbGap: 70,                      // min distance between orbs
   playerClear: 220,                // never spawn closer than this to a player
   candidates: 6,                   // cells sampled per spawn; the emptiest one wins
-  legendFirst: legendEvery || 60000, legendMin: legendEvery || 90000, legendMax: legendEvery || 150000, // timed event
-  legendLife: 75000, legendMaxAlive: 1,
-  legendWarnMs: 15000,             // «Чутьё легенды» lvl 3: heads-up (no position) this long before a legendary appears
+  // legendary: a normal spawn-table tier (0.24 % per spawn in zone 1, 0.5 % in zone 2), no timer; ≤ 2 alive, 75 s life
 };
 
 const store = createStore();
@@ -117,7 +114,7 @@ const NX = Math.ceil(G.WORLD.w / SPAWN.cell), NY = Math.ceil(G.WORLD.h / SPAWN.c
 const cells = Array.from({ length: NX * NY }, () => new Set()); // orb ids per cell
 const cellOf = (x, y) => Math.min(NY - 1, Math.floor(y / SPAWN.cell)) * NX + Math.min(NX - 1, Math.floor(x / SPAWN.cell));
 let respawnQueue = [];      // { due, z } respawns for normal (pool) orbs, per zone
-let legendaryAlive = 0, nextLegendAt = Date.now() + SPAWN.legendFirst, legendWarnedFor = 0;
+let legendaryAlive = 0;
 let mythicAlive = 0, evAlive = 0; // mythic orbs (pool, max 1), event orbs (rain / treasure, not part of the pool)
 const targetOrbs = () => Math.max(SPAWN.min, Math.min(SPAWN.max, SPAWN.base + SPAWN.perPlayer * players.size));
 const targetZone = z => (z === 1 ? targetOrbs() : Math.round(targetOrbs() * SPAWN.zone2Share));
@@ -125,6 +122,7 @@ const zoneCount = { 1: 0, 2: 0 }; // normal (pool) orbs alive per zone
 // one normal pool spawn: weighted tier roll; a mythic only while none is alive and someone is playing (else epic)
 function rollPool(z = 1) {
   const t = G.rollOrbType(z === 2 ? G.ZONE2_WEIGHTS : G.POOL_WEIGHTS);
+  if (t === 'l') return legendaryAlive >= G.ORB_TYPES.l.maxAlive || players.size === 0 || ev ? 'e' : 'l'; // never during an arena event
   return t === 'm' && (mythicAlive >= G.ORB_TYPES.m.maxAlive || players.size === 0) ? 'e' : t;
 }
 
@@ -160,13 +158,14 @@ function pickSpot(z = 1) {
 // evKind: 'rain' | 'treasure' for event orbs (5th field = 1 so clients can animate them), undefined for pool orbs
 function addOrb(t, pos, evKind) {
   const o = { id: nextOrbId++, x: pos.x, y: pos.y, t, cell: cellOf(pos.x, pos.y), z: G.zoneOf(pos.x) };
-  if (!evKind && t !== 'l') { o.pool = true; zoneCount[o.z]++; }
-  if (t === 'l') { o.expires = Date.now() + SPAWN.legendLife; legendaryAlive++; }
+  if (!evKind) { o.pool = true; zoneCount[o.z]++; }
+  if (t === 'l') { o.expires = Date.now() + G.ORB_TYPES.l.lifeMs; legendaryAlive++; }
   if (t === 'm') { o.expires = Date.now() + G.ORB_TYPES.m.lifeMs; mythicAlive++; }
   if (evKind) { o.ev = evKind; evAlive++; }
   orbs.set(o.id, o);
   cells[o.cell].add(o.id);
   pendingAdds.push(evKind ? [o.id, o.x, o.y, o.t, 1] : [o.id, o.x, o.y, o.t]);
+  if (t === 'l' && !evKind && io) io.to('arena').emit('announce', { text: 'Появилась легендарная сфера (+25)! Её покажет компас «Чутьё легенды».', x: o.x, y: o.y });
   if (t === 'm' && !evKind && io) io.to('arena').emit('announce', { text: 'Появилась мифическая сфера (+50 и 3 осколка)! Её покажет компас «Чутьё легенды».', x: o.x, y: o.y });
   return o;
 }
@@ -196,24 +195,7 @@ function spawnTick(now) {
     spawned++;
   }
   respawnQueue = keep;
-  // legendary: a timed event with cooldown, only while someone is playing
-  for (const o of orbs.values()) if (o.expires <= now) { removeOrb(o, 0); }
-  if (ev) nextLegendAt = Math.max(nextLegendAt, ev.endAt + EV_LEGEND_GAP); // never during an arena event
-  if (now >= nextLegendAt - SPAWN.legendWarnMs && legendWarnedFor !== nextLegendAt && legendaryAlive < SPAWN.legendMaxAlive && players.size > 0) {
-    legendWarnedFor = nextLegendAt;
-    const inMs = Math.max(0, Math.round(nextLegendAt - now));
-    for (const pl of players.values()) if (G.upLevel('sense', pl.acc.upgrades.sense) >= 3) pl.socket.emit('legend:soon', { in: inMs });
-  }
-  if (now >= nextLegendAt) {
-    if (players.size > 0 && legendaryAlive < SPAWN.legendMaxAlive) {
-      const pos = pickSpot();
-      if (pos) {
-        addOrb('l', pos);
-        io.to('arena').emit('announce', { text: 'Появилась легендарная сфера (+25)! Её покажет компас «Чутьё легенды».', x: pos.x, y: pos.y });
-        nextLegendAt = now + rand(SPAWN.legendMin, SPAWN.legendMax);
-      }
-    } else nextLegendAt = now + 5000;
-  }
+  for (const o of orbs.values()) if (o.expires <= now) { removeOrb(o, 0); } // legendary / mythic lifetime
 }
 // initial fill for an empty arena
 for (const z of [1, 2]) for (let i = 0, n = targetZone(z); i < n; i++) { const p = pickSpot(z); if (p) addOrb(rollPool(z), p); }
@@ -228,7 +210,6 @@ pendingAdds = []; pendingDels = [];
 const EV_EVERY = process.env.EVENT_EVERY_MS !== undefined && process.env.EVENT_EVERY_MS !== '' ? envInt('EVENT_EVERY_MS', 0) : process.env.EVENTS_ENABLED === '1' ? -1 : 0;
 const EV_ANNOUNCE = envInt('EVENT_ANNOUNCE_MS', G.EVENT_SCHEDULE.announceMs);
 const EV_DURATION = envInt('EVENT_DURATION_MS', 0);
-const EV_LEGEND_GAP = 20000; // the legendary orb waits at least this long after an event
 let ev = null, evClock = 0, lastEvKind = null;
 const nextEventGap = () => (EV_EVERY > 0 ? EV_EVERY : rand(G.EVENT_SCHEDULE.minMs, G.EVENT_SCHEDULE.maxMs));
 let evGap = nextEventGap();
@@ -277,7 +258,6 @@ function announceEvent(kind, opts = {}) {
     const z = Number.isFinite(opts.x) ? { x: clampW(opts.x), y: clampW(opts.y) } : { x: Math.round(rand(550, G.ZONE_W - 550)), y: Math.round(rand(550, G.ZONE_H - 550)) };
     ev.zone = { x: z.x, y: z.y, r: def.radius };
   }
-  nextLegendAt = Math.max(nextLegendAt, ev.endAt + EV_LEGEND_GAP);
   io.to('arena').emit('ev:announce', publicEvent(now));
   systemChat(`Скоро событие «${def.name}»!`);
   console.log(`event announced: ${kind}`);
@@ -324,7 +304,7 @@ function eventTick(now, dt) {
     if (EV_EVERY === 0 || !players.size) return; // the clock only runs while someone is online
     evClock += dt;
     // never next to the legendary orb: not while one is alive or about to appear (heads-up already sent)
-    if (evClock >= evGap && legendaryAlive === 0 && now < nextLegendAt - SPAWN.legendWarnMs - 1000) {
+    if (evClock >= evGap && legendaryAlive === 0) {
       const kinds = G.EVENT_KEYS.filter(k => k !== lastEvKind);
       announceEvent(kinds[Math.floor(Math.random() * kinds.length)]);
     }
@@ -579,7 +559,7 @@ function finishMinigame(pl, info) {
   if (info.cheat) { prize = 0; result.message = 'Результат отклонён сервером (неправдоподобно быстро).'; }
   if (info.aborted && mg.kind !== 'rush') prize = 0;
   const basePrize = prize;
-  prize = G.skillPrize(prize, pl.acc.upgrades.skill); // «Мастер мини-игр»: +5/10/15 %, perfect play stays below half of farming
+  prize = G.skillPrize(prize, pl.acc.upgrades.skill); // «Мастер мини-игр»: +10/20/30 %, flawless rotation of all games stays below farming
   if (prize !== basePrize) result.bonus = prize - basePrize;
   result.prize = prize;
   pl.acc.balance += prize;
@@ -1245,7 +1225,7 @@ function collectAround(pl, radius, now) {
       const g = INV.grantItem(pl.acc, G.SHARD_ID, ot.shards, 'arena');
       pl.socket.emit('item', g.ok ? { id: G.SHARD_ID, qty: ot.shards, source: 'arena' } : { error: g.error });
       if (g.ok) emitProfile(pl);
-      if (o.t === 'm') { systemChat(`${pl.acc.name} поймал(а) мифическую сферу!`); respawnQueue.push({ due: now + rand(SPAWN.respawnMin, SPAWN.respawnMax), z: o.z }); }
+      if (o.t === 'm' || o.t === 'l') { if (o.t === 'm') systemChat(`${pl.acc.name} поймал(а) мифическую сферу!`); respawnQueue.push({ due: now + rand(SPAWN.respawnMin, SPAWN.respawnMax), z: o.z }); }
     } else if (o.pool) respawnQueue.push({ due: now + rand(SPAWN.respawnMin, SPAWN.respawnMax), z: o.z });
   }
 }
