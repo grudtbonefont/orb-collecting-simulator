@@ -716,7 +716,12 @@ async function runnerLagSuite(URL) {
   ok(got === 0, 'forged touch claims (teleport onto the runner / touch from 1000 px away) are refused');
   await sleep(4000); B.close();
   ok(Math.abs(G.EVENTS.runner.r / 2 / 1.1 * 2 * 1.1 - R.r) < 1e-9 && R.r === 30, `drawn runner core radius = hitbox radius (${R.r} px); catch = player ${G.PLAYER_R} + ${R.r} + ${R.catchPad} on the server, claims up to +${R.touchPad}`);
-  ok(!('maxAlive' in G.ORB_TYPES.m) && !('lifeMs' in G.ORB_TYPES.m), 'mythic orbs: no max-alive cap and no lifetime, chance only');
+  { const M = makeClient(URL); await M.register('Myth' + rnd()); await M.emit('test:tp', { x: 2000, y: 2000 }); await sleep(200);
+    await M.emit('test:spawn', { types: ['m', 'm'], ring: 400, lifeMs: 1500 }); await M.emit('test:spawn', { types: ['m'], ring: 400, x: 3000, noExpiry: true });
+    await sleep(300); const n0 = Array.from(M.orbs.values()).filter(o => o.t === 'm').length;
+    await waitFor(() => Array.from(M.orbs.values()).filter(o => o.t === 'm').length === 1, 4000); const n1 = Array.from(M.orbs.values()).filter(o => o.t === 'm').length;
+    M.close();
+    ok(!('maxAlive' in G.ORB_TYPES.m) && G.ORB_TYPES.m.lifeMs === 60000 && n0 === 3 && n1 === 1, `mythic orbs: no cap (${n0} alive at once), expire after their lifetime (${n0} → ${n1}); 60 s life`); }
 }
 async function robotSuite(URL) {
   console.log('--- iron robot');

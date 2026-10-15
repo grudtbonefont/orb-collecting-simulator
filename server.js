@@ -162,7 +162,7 @@ function addOrb(t, pos, evKind) {
   const o = { id: nextOrbId++, x: pos.x, y: pos.y, t, cell: cellOf(pos.x, pos.y), z: G.zoneOf(pos.x) };
   if (!evKind) { o.pool = true; zoneCount[o.z]++; }
   if (t === 'l') { o.expires = Date.now() + G.ORB_TYPES.l.lifeMs; legendaryAlive++; }
-  if (t === 'm') mythicAlive++;
+  if (t === 'm') { o.expires = Date.now() + G.ORB_TYPES.m.lifeMs; mythicAlive++; }
   if (evKind) { o.ev = evKind; evAlive++; }
   orbs.set(o.id, o);
   cells[o.cell].add(o.id);
@@ -197,7 +197,10 @@ function spawnTick(now) {
     spawned++;
   }
   respawnQueue = keep;
-  for (const o of orbs.values()) if (o.expires <= now) { removeOrb(o, 0); } // legendary / mythic lifetime
+  for (const o of orbs.values()) {
+    if ((o.t === 'm' || o.t === 'l') && !Number.isFinite(o.expires)) o.expires = now + G.ORB_TYPES[o.t].lifeMs; // older orbs without a lifetime get one
+    if (o.expires <= now) removeOrb(o, 0); // legendary / mythic lifetime
+  }
 }
 
 
@@ -1363,7 +1366,8 @@ io.on('connection', socket => {
       if (!pl || !isObj(d) || !Array.isArray(d.types)) return ack({ ok: false });
       const ring = Number(d.ring) || 150, list = d.types.filter(t => has(G.ORB_TYPES, t)).slice(0, 20);
       const cx = Number.isFinite(d.x) ? d.x : pl.x, cy = Number.isFinite(d.y) ? d.y : pl.y; // centre: the caller, or a given point
-      list.forEach((t, i) => { const a = -Math.PI / 2 + i * 2 * Math.PI / list.length; addOrb(t, { x: clampW(cx + Math.cos(a) * ring * 1.6), y: clampW(cy + Math.sin(a) * ring) }); });
+      list.forEach((t, i) => { const a = -Math.PI / 2 + i * 2 * Math.PI / list.length; const o = addOrb(t, { x: clampW(cx + Math.cos(a) * ring * 1.6), y: clampW(cy + Math.sin(a) * ring) });
+        if (o && d.noExpiry) delete o.expires; else if (o && Number(d.lifeMs) > 0) o.expires = Date.now() + Number(d.lifeMs); }); // test: old orb without a lifetime / short life
       ack({ ok: true, n: list.length });
     });
     socket.on('test:orbs', (n, ack) => {
