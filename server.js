@@ -66,7 +66,8 @@ function newAccount(name, passHash) {
 }
 // Only what the owner may see about their own account (never the hash/key).
 function ownProfile(a) {
-  return { name: a.name, balance: a.balance, total: a.total, equipped: a.equipped, upgrades: a.upgrades, stats: a.stats,
+  const { pwResetMark, ...stats } = a.stats || {}; // internal marker stays server-side
+  return { name: a.name, balance: a.balance, total: a.total, equipped: a.equipped, upgrades: a.upgrades, stats, mustChangePw: !!(a.stats && a.stats.mustChangePw),
     inventory: a.inventory.slots.map(s => ({ id: s.id, q: s.q, src: s.src })), slots: G.INV_CAP, cap: G.INV_CAP, used: INV.unitsUsed(a), createdAt: a.createdAt };
 }
 async function loadAccount(key) {
@@ -549,6 +550,27 @@ function scheduleChatClear() {
     io.to('arena').emit('chat:clear'); // silent: clients just empty the log (the schedule is not shown to players)
     scheduleChatClear();
   }, Math.max(10, chatClearAt - Date.now()));
+}
+
+// ---------------------------------------------------------------- one-shot admin password reset
+// PW_RESET_USER=<nick> + PW_RESET_HASH=<bcrypt hash>: on boot the account's password hash is replaced ONCE (a fingerprint
+// of the hash is stored in stats.pwResetMark, so later boots with the same env do nothing). Progress is untouched; the
+// player is asked to set a new password (profile → «Сменить пароль»). Neither the hash nor the user's IP is logged.
+async function applyPasswordReset() {
+  const user = String(process.env.PW_RESET_USER || '').trim().toLowerCase(), hash = String(process.env.PW_RESET_HASH || '').trim();
+  if (!user || !hash) return;
+  if (!/^\$2[aby]\$\d\d\$[./A-Za-z0-9]{53}$/.test(hash)) { console.warn('password reset: PW_RESET_HASH is not a bcrypt hash, ignored'); return; }
+  try {
+    const acc = await store.getAccount(user);
+    if (!acc) { console.warn('password reset: account not found'); return; }
+    const mark = sha256('pwreset:' + hash).slice(0, 16);
+    if (acc.stats && acc.stats.pwResetMark === mark) { console.log('password reset: already applied, skipped'); return; }
+    if (!(await store.setPassHash(acc.key, hash))) { console.warn('password reset: not applied'); return; }
+    acc.passHash = hash; acc.stats = Object.assign({}, acc.stats, { pwResetMark: mark, mustChangePw: true });
+    await store.saveAccounts([acc]);
+    profiles.delete(acc.key);
+    console.log('password reset: applied for 1 account');
+  } catch (e) { console.error('password reset failed:', e.message); }
 }
 
 // ---------------------------------------------------------------- http
@@ -1353,6 +1375,25 @@ io.on('connection', socket => {
     ack({ ok: true, id: t.id, v: t.v, score: mg.score });
   });
 
+  // change own password: requires the current one; clears the «set a new password» flag
+  socket.on('pw:change', async (d, ack) => {
+    ack = safeAck(ack);
+    if (!acct || !isObj(d) || typeof d.old !== 'string' || typeof d.new !== 'string') return ack({ ok: false, error: 'Ошибка запроса' });
+    const now = Date.now(), left = lockLeft(sockFails.get('s'), now);
+    if (left) return ack({ ok: false, error: lockMsg(left) });
+    if (!takeGlobalAuth(now)) return ack({ ok: false, error: 'Сервер перегружен, попробуйте через несколько секунд.' });
+    const acc = acct.acc;
+    try {
+      if (!(await bcrypt.compare(d.old.slice(0, 200), acc.passHash))) { failSock(now); return ack({ ok: false, error: 'Текущий пароль неверный' }); }
+      const pe = R.passwordError(d.new); if (pe) return ack({ ok: false, error: pe });
+      const hash = await bcrypt.hash(d.new, BCRYPT_COST);
+      if (!(await store.setPassHash(acc.key, hash))) return ack({ ok: false, error: 'Ошибка сервера, попробуйте ещё раз' });
+      acc.passHash = hash;
+      if (acc.stats.mustChangePw) { delete acc.stats.mustChangePw; markDirty(acc); flushSoon(); }
+      ack({ ok: true, profile: ownProfile(acc) });
+    } catch (e) { console.error('pw change error:', e.message); ack({ ok: false, error: 'Ошибка сервера, попробуйте ещё раз' }); }
+  });
+
   socket.on('disconnect', () => { removePlayer(pl); pl = null; release(); });
 });
 
@@ -1480,6 +1521,7 @@ process.on('unhandledRejection', e => console.error('Unhandled rejection:', e &&
   console.log(`Storage: ${store.describe()}, ${await store.countAccounts()} accounts`);
   if (TEST_HOOKS) console.warn('WARNING: OCS_TEST_HOOKS=1 — test-only socket events are enabled');
   await store.purgeExpiredSessions(Date.now());
+  await applyPasswordReset();
   setInterval(tick, G.TICK_MS);
   setInterval(everySecond, 1000);
   setInterval(flush, FLUSH_MS);
