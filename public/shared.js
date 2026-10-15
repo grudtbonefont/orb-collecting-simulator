@@ -24,7 +24,7 @@
     u: { key: 'u', name: 'Необычная', value: 2, r: 8, color: '#5dff8f', glow: 'rgba(93,255,143,', weight: 1200 },
     r: { key: 'r', name: 'Редкая', value: 5, r: 10, color: '#b46bff', glow: 'rgba(180,107,255,', weight: 460 },
     e: { key: 'e', name: 'Эпическая', value: 10, r: 12, color: '#ff9a2e', glow: 'rgba(255,154,46,', weight: 110 },
-    l: { key: 'l', name: 'Легендарная', value: 25, r: 14, color: '#ffcc33', glow: 'rgba(255,204,51,', weight: 20, shards: 1, maxAlive: 2, maxAliveZone: { 1: 1, 2: 2 }, lifeMs: 75000, note: 'редкая: шанс 0,2 % на каждую новую сферу (во 2-й зоне 0,8 %, там их может быть до 2 сразу), живёт 75 с' },
+    l: { key: 'l', name: 'Легендарная', value: 25, r: 14, color: '#ffcc33', glow: 'rgba(255,204,51,', weight: 20, shards: 1, lifeMs: 75000, note: 'редкая: шанс 0,2 % на каждую новую сферу (во 2-й зоне 0,8 %), живёт 75 с' },
     m: { key: 'm', name: 'Мифическая', value: 50, r: 15, color: '#ff3d6e', glow: 'rgba(255,61,110,', weight: 6, shards: 3, note: 'очень редкая: появляется только по шансу, как обычные сферы' },
     t: { key: 't', name: 'Сокровище', value: 50, r: 15, color: '#ffe680', glow: 'rgba(255,230,128,', weight: 0, shards: 1, event: true, note: 'только во время события' },
   };

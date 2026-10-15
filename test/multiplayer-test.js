@@ -309,8 +309,8 @@ function upgradeRules() {
     const N = 200000; let hits = 0; for (let i = 0; i < N; i++) if (G.rollOrbType(W1, prng) === 'l') hits++;
     const spawnsPerMin = 3 * 70; // 3 players × ~70 pickups/min each = respawns/min in zone 1
     const gapMin = 1 / (p1 * spawnsPerMin);
-    ok(Math.abs(hits / N - p1) < 0.0006 && Math.abs(p1 - 0.002) < 1e-9 && Math.abs(p2 - 0.008) < 1e-9 && G.ORB_TYPES.l.maxAliveZone[1] === 1 && G.ORB_TYPES.l.maxAliveZone[2] === 2 && gapMin > 1.5 && gapMin < 2.6,
-      `legendary per-spawn chance: zone 1 ${(p1 * 100).toFixed(2)} % (rolled ${(hits / N * 100).toFixed(2)} % of ${N}), zone 2 ${(p2 * 100).toFixed(2)} % → ≈1 per ${gapMin.toFixed(1)} min with 3 players (${spawnsPerMin} spawns/min)`);
+    ok(Math.abs(hits / N - p1) < 0.0006 && Math.abs(p1 - 0.002) < 1e-9 && Math.abs(p2 - 0.008) < 1e-9 && !('maxAlive' in G.ORB_TYPES.l) && !('maxAliveZone' in G.ORB_TYPES.l) && gapMin > 1.5 && gapMin < 2.6,
+      `legendary per-spawn chance: zone 1 ${(p1 * 100).toFixed(2)} % (rolled ${(hits / N * 100).toFixed(2)} % of ${N}), zone 2 ${(p2 * 100).toFixed(2)} %, no max-alive cap → ≈1 per ${gapMin.toFixed(1)} min with 3 players (${spawnsPerMin} spawns/min)`);
   }
   ok(G.skillPrize(16, 3) === 21 && G.skillPrize(16, 1) === 18 && G.skillPrize(16, 0) === 16 && G.skillPrize(0, 3) === 0 && G.skillPrize(40, 99) === 53, 'mini-game skill: +11/22/33 % on prizes > 0, capped at level 3');
   // one-time upgrade refund (old price table) → levels reset to 0; flag prevents a second refund; total untouched
@@ -370,7 +370,7 @@ function tierEventRules() {
   const T = G.ORB_TYPES, keys = ['c', 'u', 'r', 'e', 'l', 'm'];
   ok(keys.map(k => T[k].value).join(',') === '1,2,5,10,25,50' && keys.every((k, i) => !i || T[k].r > T[keys[i - 1]].r) && new Set(keys.map(k => T[k].color)).size === keys.length,
     'tiers common +1, uncommon +2, rare +5, epic +10, legendary +25, mythic +50 — each bigger than the last, distinct colours');
-  ok(T.l.weight > 0 && T.l.weight < T.e.weight && T.l.maxAlive === 2 && T.l.lifeMs === 75000 && T.t.weight === 0 && T.m.weight > 0 && T.m.shards === 3 && T.l.shards === 1 && T.m.maxAlive === undefined, 'legendary is a random spawn tier (max 2 alive, 75 s), treasure only in events, mythic: random by chance only (no cap), 3 shards');
+  ok(T.l.weight > 0 && T.l.weight < T.e.weight && T.l.maxAlive === undefined && T.l.lifeMs === 75000 && T.t.weight === 0 && T.m.weight > 0 && T.m.shards === 3 && T.l.shards === 1 && T.m.maxAlive === undefined, 'legendary is a random spawn tier (no cap, 75 s), treasure only in events, mythic: random by chance only (no cap), 3 shards');
   const ev = G.expectedOrbValue();
   ok(ev >= 1.35 && ev <= 1.5, `pool mean orb value ${ev.toFixed(3)} (old 1.4 → income stays ≈100/min)`);
   ok(G.expectedOrbValue(G.RAIN_WEIGHTS) > ev * 1.4, `«Сферный дождь» orbs are richer (mean ${G.expectedOrbValue(G.RAIN_WEIGHTS).toFixed(2)})`);
@@ -831,12 +831,12 @@ async function schedulerSuite() {
   for (const e of ['ev:announce', 'ev:start', 'ev:end']) P.s.on(e, d => evs.push({ e, kind: d.kind, at: Date.now(), d }));
   P.s.on('s', st => { for (const a of st.oa) if (a[3] === 'l') legends.push(Date.now()); });
   await P.register('Sched' + rnd());
-  await P.emit('test:spawn', { types: ['l'], ring: 100 }); // a legendary orb is alive → no event may start
-  await sleep(3500);
-  ok(evs.length === 0, 'no event is announced while a legendary orb is on the field');
+  await P.emit('test:spawn', { types: ['l'], ring: 100 }); // a legendary orb is alive → events still start
+  await waitFor(() => evs.length > 0, 4000);
+  ok(evs.length > 0, 'a legendary orb on the field does not hold events back');
   const lo = Array.from(P.orbs.values()).find(o => o.t === 'l');
   for (let i = 0; i < 60 && lo && P.orbs.has(lo.id); i++) { const dx = lo.x - P.pos.x, dy = lo.y - P.pos.y, l = Math.hypot(dx, dy) || 1; P.s.emit('input', { s: ++P.seq, x: dx / l, y: dy / l }); await sleep(50); }
-  await waitFor(() => evs.filter(x => x.e === 'ev:end').length >= 3, 120000); // a legendary from «Волна удачи» may delay the next one
+  await waitFor(() => evs.filter(x => x.e === 'ev:end').length >= 3, 120000); 
   const seq = evs.map(x => x.e.slice(3)[0]).join('');
   const kinds = evs.filter(x => x.e === 'ev:announce').map(x => x.kind);
   const firstAnn = evs[0] && evs[0].d;

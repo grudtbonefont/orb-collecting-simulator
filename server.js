@@ -114,7 +114,7 @@ const NX = Math.ceil(G.WORLD.w / SPAWN.cell), NY = Math.ceil(G.WORLD.h / SPAWN.c
 const cells = Array.from({ length: NX * NY }, () => new Set()); // orb ids per cell
 const cellOf = (x, y) => Math.min(NY - 1, Math.floor(y / SPAWN.cell)) * NX + Math.min(NX - 1, Math.floor(x / SPAWN.cell));
 let respawnQueue = [];      // { due, z } respawns for normal (pool) orbs, per zone
-let legendaryAlive = 0; const legendaryZ = { 1: 0, 2: 0 }; // per-zone caps: G.ORB_TYPES.l.maxAliveZone
+let legendaryAlive = 0; // legendary orbs on the field (stats only — no cap, chance only)
 let mythicAlive = 0, evAlive = 0; // mythic orbs (pool, max 1), event orbs (rain / treasure, not part of the pool)
 const targetOrbs = () => Math.max(SPAWN.min, Math.min(SPAWN.max, SPAWN.base + SPAWN.perPlayer * players.size));
 const luckyOn = () => !!(ev && ev.kind === 'lucky' && ev.phase === 'active');
@@ -123,7 +123,7 @@ const zoneCount = { 1: 0, 2: 0 }; // normal (pool) orbs alive per zone
 // one normal pool spawn: weighted tier roll; a mythic only while none is alive and someone is playing (else epic)
 function rollPool(z = 1) {
   const w = z === 2 ? G.ZONE2_WEIGHTS : G.POOL_WEIGHTS, t = G.rollOrbType(luckyOn() ? G.luckyWeights(w) : w); // «Волна удачи»: rare+ ×2
-  if (t === 'l') return legendaryZ[z] >= G.ORB_TYPES.l.maxAliveZone[z] || players.size === 0 || (ev && ev.kind !== 'lucky') ? 'e' : 'l'; // never during an arena event (except «Волна удачи»)
+  if (t === 'l') return players.size === 0 || (ev && ev.kind !== 'lucky') ? 'e' : 'l'; // chance only; not while nobody can catch it (75 s life, announced); never during an arena event (except «Волна удачи»)
   return t; // mythic: by chance only, no cap / timer
 }
 
@@ -161,7 +161,7 @@ function pickSpot(z = 1) {
 function addOrb(t, pos, evKind) {
   const o = { id: nextOrbId++, x: pos.x, y: pos.y, t, cell: cellOf(pos.x, pos.y), z: G.zoneOf(pos.x) };
   if (!evKind) { o.pool = true; zoneCount[o.z]++; }
-  if (t === 'l') { o.expires = Date.now() + G.ORB_TYPES.l.lifeMs; legendaryAlive++; legendaryZ[o.z]++; }
+  if (t === 'l') { o.expires = Date.now() + G.ORB_TYPES.l.lifeMs; legendaryAlive++; }
   if (t === 'm') mythicAlive++;
   if (evKind) { o.ev = evKind; evAlive++; }
   orbs.set(o.id, o);
@@ -174,7 +174,7 @@ function addOrb(t, pos, evKind) {
 function removeOrb(o, byPlayerId) {
   orbs.delete(o.id);
   cells[o.cell].delete(o.id);
-  if (o.t === 'l') { legendaryAlive--; legendaryZ[o.z]--; }
+  if (o.t === 'l') legendaryAlive--;
   if (o.t === 'm') mythicAlive--;
   if (o.ev) evAlive--;
   if (o.pool) zoneCount[o.z]--;
@@ -485,8 +485,7 @@ function eventTick(now, dt) {
   if (!ev) {
     if (EV_EVERY === 0 || !players.size) return; // the clock only runs while someone is online
     evClock += dt;
-    // never next to the legendary orb: not while one is alive or about to appear (heads-up already sent)
-    if (evClock >= evGap && legendaryZ[1] === 0) { // zone-2 legendaries (0.8 %) would otherwise starve the scheduler
+    if (evClock >= evGap) { // legendaries on the field don't hold events back
       const kinds = G.AUTO_EVENT_KEYS.filter(k => k !== lastEvKind);
       announceEvent(kinds[Math.floor(Math.random() * kinds.length)]);
     }
