@@ -658,7 +658,7 @@
     return { c, half: size / 2 };
   }
   for (const t of Object.values(G.ORB_TYPES)) orbSprites[t.key] = makeOrbSprite(t);
-  orbSprites.runner = makeOrbSprite({ r: 14, color: '#c6fdff', glow: 'rgba(125,252,255,' });
+  orbSprites.runner = makeOrbSprite({ r: 18, color: '#c6fdff', glow: 'rgba(125,252,255,' });
   const orbDef = type => (Object.prototype.hasOwnProperty.call(G.ORB_TYPES, type) ? G.ORB_TYPES[type] : G.ORB_TYPES.c); // unknown tier → common look
   function drawOrb(g, x, y, type, t, id, scale = 1) {
     const s = orbSprites[type] || orbSprites.c, ot = orbDef(type);

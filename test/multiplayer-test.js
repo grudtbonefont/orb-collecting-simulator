@@ -278,25 +278,30 @@ const NEW_ITEMS = () => G.ITEMS.filter(i => !has(OLD_PRICES, i.id) && !i.exclusi
 function upgradeRules() {
   console.log('--- upgrades (rules)');
   const U = G.UPGRADES;
+  { const OLD = { magnet: [[200, 600, 1500, 3500, 7000], [0, 4, 8, 12, 15, 18]], speed: [[250, 700, 1800, 4000, 8000], [0, 3, 5, 7, 9, 11]], mult: [[350, 900, 2200, 5000, 10000], [0, 3, 6, 9, 12, 15]],
+      luck: [[300, 800, 2000, 4500, 9000], [0, 1, 2, 3, 4, 5]], sense: [[400, 1200, 3000], [0, 1, 2, 3]], skill: [[200, 600, 1400], [0, 10, 20, 30]] };
+    const priceOk = G.UPGRADE_KEYS.every(k => U[k].prices.every((p, i) => Math.abs(p - OLD[k][0][i] * 0.75) <= 5));
+    const effOk = ['magnet', 'speed', 'mult', 'luck', 'skill'].every(k => U[k].values.every((v, i) => Math.abs(v - OLD[k][1][i] * 1.1) < 0.051)) && U.sense.values.join() === '0,1,2,3';
+    ok(priceOk && effOk, `upgrade prices ×0.75 (e.g. magnet ${U.magnet.prices.join('/')}), numeric effects ×1.1 (speed ${U.speed.values.join('/')} %), compass unchanged`); }
   ok(G.UPGRADE_KEYS.join(',') === 'magnet,speed,mult,luck,sense,skill', 'upgrades: magnet, speed, orb multiplier, luck, legendary sense, mini-game skill');
-  const dim = ['magnet', 'speed', 'mult', 'luck'].filter(k => { const v = U[k].values, inc = v.slice(1).map((x, i) => x - v[i]); return inc.every(d => d > 0) && inc.every((d, i) => !i || d <= inc[i - 1]); });
+  const dim = ['magnet', 'speed', 'mult', 'luck'].filter(k => { const v = U[k].values, inc = v.slice(1).map((x, i) => x - v[i]); return inc.every(d => d > 0) && inc.every((d, i) => !i || d <= inc[i - 1] + 1e-9); });
   ok(dim.length === 4, `diminishing (or flat for the multiplier) returns per level: ${dim.join(', ')}`);
   const RATE = 80;
   ok(G.UPGRADE_KEYS.every(k => U[k].prices.length === U[k].max && U[k].values.length === U[k].max + 1 && U[k].prices.every((v, i) => !i || v > U[k].prices[i - 1])), 'one price per level, strictly increasing; one effect value per level');
-  ok(G.UPGRADE_KEYS.every(k => U[k].prices[0] >= 200 && U[k].prices[0] <= 400), 'first levels are cheap (200–400): ' + G.UPGRADE_KEYS.map(k => U[k].prices[0]).join('/'));
+  ok(G.UPGRADE_KEYS.every(k => U[k].prices[0] >= 150 && U[k].prices[0] <= 300), 'first levels are cheap (150–300, −25 % since Oct 2026): ' + G.UPGRADE_KEYS.map(k => U[k].prices[0]).join('/'));
   const lastMax = ['magnet', 'speed', 'mult', 'luck'].map(k => U[k].prices[U[k].max - 1]);
-  ok(lastMax.every(p => p / RATE / 60 >= 1.2 && p / RATE / 60 <= 2.5), `max levels cost 1–2 h of play each: ${lastMax.map(p => (p / RATE / 60).toFixed(1) + ' h').join(' / ')}`);
+  ok(lastMax.every(p => p / RATE / 60 >= 0.9 && p / RATE / 60 <= 1.9), `max levels cost ≈1–1.5 h of play each: ${lastMax.map(p => (p / RATE / 60).toFixed(1) + ' h').join(' / ')}`);
   // caps
-  ok(G.speedFor(99) === G.speedFor(U.speed.max) && G.speedFor(-4) === G.BASE_SPEED && G.speedFor('x') === G.BASE_SPEED && G.speedFor(U.speed.max) <= G.BASE_SPEED * 1.12,
-    `speed capped: max ${G.speedFor(U.speed.max).toFixed(0)} px/s (base ${G.BASE_SPEED}, ≤ +12 %), out-of-range levels clamp`);
+  ok(G.speedFor(99) === G.speedFor(U.speed.max) && G.speedFor(-4) === G.BASE_SPEED && G.speedFor('x') === G.BASE_SPEED && G.speedFor(U.speed.max) <= G.BASE_SPEED * 1.125,
+    `speed capped: max ${G.speedFor(U.speed.max).toFixed(0)} px/s (base ${G.BASE_SPEED}, ≤ +12.1 %), out-of-range levels clamp`);
   ok(G.pickupFor(99) === G.pickupFor(U.magnet.max) && G.pickupFor(U.magnet.max) <= G.PLAYER_R * 2, `soft magnet: pickup radius capped at ${G.pickupFor(U.magnet.max)} px (base ${G.PLAYER_R}, never clears the field)`);
   // multiplier with fractional carry: +5 % on 1-orb pickups must not be rounded away
   const sum = (n, v, ups, rnd) => { const st = { frac: 0 }; let t = 0; for (let i = 0; i < n; i++) t += G.orbReward(v, ups, st, rnd).value; return t; };
-  ok(sum(100, 1, { mult: 1 }, () => 1) === 103 && sum(100, 1, { mult: 5 }, () => 1) === 115 && sum(33, 1, { mult: 1 }, () => 1) === 33 && sum(20, 5, { mult: 5 }, () => 1) === 115,
-    'multiplier: 100×1 orb at +3 % → 103, at +15 % → 115 (fractions carried, never lost)');
+  ok(sum(100, 1, { mult: 1 }, () => 1) === 103 && sum(100, 1, { mult: 5 }, () => 1) === 116 && sum(33, 1, { mult: 1 }, () => 1) === 34 && sum(20, 5, { mult: 5 }, () => 1) === 116,
+    'multiplier: 100×1 orb at +3.3 % → 103, at +16.5 % → 116 (fractions carried, never lost)');
   const lucky = G.orbReward(5, { luck: 5 }, {}, () => 0), unlucky = G.orbReward(5, { luck: 5 }, {}, () => 0.5), noLuck = G.orbReward(5, {}, {}, () => 0);
   ok(lucky.value === 10 && lucky.lucky && unlucky.value === 5 && !unlucky.lucky && noLuck.value === 5, `luck: ${U.luck.values[U.luck.max]} % chance at max to count an orb twice (roll < chance → ×2); levels 3–5 add a ${U.luck.jackpot.slice(3).join('/')} % «находка»`);
-  ok(sum(20, 1, { mult: 5, luck: 5 }, () => 0) === 46, 'luck and multiplier stack (2 per orb +15 % → 46 for 20 orbs)');
+  ok(sum(20, 1, { mult: 5, luck: 5 }, () => 0) === 46, 'luck and multiplier stack (2 per orb +16.5 % → 46 for 20 orbs)');
   { // legendary: a normal spawn-table tier (no timer). Expected gap in a populated zone 1 ≈ 2 min.
     const W1 = G.POOL_WEIGHTS, W2 = G.ZONE2_WEIGHTS, sum = w => Object.values(w).reduce((a, b) => a + b, 0);
     const p1 = W1.l / sum(W1), p2 = W2.l / sum(W2);
@@ -304,10 +309,10 @@ function upgradeRules() {
     const N = 200000; let hits = 0; for (let i = 0; i < N; i++) if (G.rollOrbType(W1, prng) === 'l') hits++;
     const spawnsPerMin = 3 * 70; // 3 players × ~70 pickups/min each = respawns/min in zone 1
     const gapMin = 1 / (p1 * spawnsPerMin);
-    ok(Math.abs(hits / N - p1) < 0.0006 && p2 > p1 * 1.5 && gapMin > 1.5 && gapMin < 2.6,
+    ok(Math.abs(hits / N - p1) < 0.0006 && Math.abs(p1 - 0.002) < 1e-9 && Math.abs(p2 - 0.008) < 1e-9 && G.ORB_TYPES.l.maxAliveZone[1] === 1 && G.ORB_TYPES.l.maxAliveZone[2] === 2 && gapMin > 1.5 && gapMin < 2.6,
       `legendary per-spawn chance: zone 1 ${(p1 * 100).toFixed(2)} % (rolled ${(hits / N * 100).toFixed(2)} % of ${N}), zone 2 ${(p2 * 100).toFixed(2)} % → ≈1 per ${gapMin.toFixed(1)} min with 3 players (${spawnsPerMin} spawns/min)`);
   }
-  ok(G.skillPrize(16, 3) === 21 && G.skillPrize(16, 1) === 18 && G.skillPrize(16, 0) === 16 && G.skillPrize(0, 3) === 0 && G.skillPrize(40, 99) === 52, 'mini-game skill: +10/20/30 % on prizes > 0, capped at level 3');
+  ok(G.skillPrize(16, 3) === 21 && G.skillPrize(16, 1) === 18 && G.skillPrize(16, 0) === 16 && G.skillPrize(0, 3) === 0 && G.skillPrize(40, 99) === 53, 'mini-game skill: +11/22/33 % on prizes > 0, capped at level 3');
   // one-time upgrade refund (old price table) → levels reset to 0; flag prevents a second refund; total untouched
   const INV = require('../lib/inventory.js'), RP = G.UPGRADE_REFUND_PRICES;
   const acc = { key: 'mig', name: 'Mig', passHash: 'x', balance: 100, total: 5, owned: [], equipped: {}, upgrades: { magnet: 3, speed: '2', mult: 5, bogus: 4, luck: -1, sense: 9 }, stats: {} };
@@ -377,7 +382,7 @@ function tierEventRules() {
   // luck: ×2 chance + «находка» (common/uncommon → epic +10) from level 3
   const seq = arr => { let i = 0; return () => arr[i++ % arr.length]; };
   ok(G.orbReward(1, { luck: 5 }, {}, seq([0, 0.5]), 'c').value === 10 && G.orbReward(1, { luck: 5 }, {}, seq([0, 0]), 'u').value === 20 && G.orbReward(5, { luck: 5 }, {}, seq([0, 0.5]), 'r').value === 10 &&
-    G.orbReward(1, { luck: 2 }, {}, seq([0, 0.5]), 'c').value === 2 && G.jackpotChance(5) === 0.55 && G.jackpotChance(2) === 0,
+    G.orbReward(1, { luck: 2 }, {}, seq([0, 0.5]), 'c').value === 2 && G.jackpotChance(5) === 0.6 && G.jackpotChance(2) === 0,
     '«Удача»: find turns a common/uncommon orb into +10 (then ×2 may apply), never on rare+; only from level 3');
   const j = G.jackpotChance(5) / 100, pPool = G.POOL_WEIGHTS, ptot = Object.values(pPool).reduce((a, b) => a + b, 0);
   const cuShare = (pPool.c + pPool.u) / ptot, cuMean = (pPool.c * 1 + pPool.u * 2) / (pPool.c + pPool.u);
@@ -644,13 +649,39 @@ async function codesSuite(URL) {
   ok(rs.slice(0, 4).every(x => x.code === 'invalid') && rs[4].code === 'rate', 'rate limit: the 6th attempt within a minute is refused (' + rs[4].error + ')');
   // production codes (one use per account, case-insensitive)
   const D = makeClient(URL); await D.register('CodeD' + rnd());
-  const L = require('../lib/codes.js'), want = { SPOOKYMONTH: [666, 0], BRIMSTONEBASEMENT: [125, 0], SHARDY: [0, 2], SECRETCODE: [123, 1], TREASURE: [50, 0], PATCH1: [111, 0], OSHIOTASHNIEIAICHA: [67, 1] };
-  ok(Object.entries(want).every(([k, [o, sh]]) => { const c = L.findCode(k.toLowerCase()); return c && (c.rewards.orbs || 0) === o && (c.rewards.shards || 0) === sh && !c.expiresAt && c.maxUses == null; }), '7 new promo codes defined with the right rewards, no expiry, no global limit');
+  const L = require('../lib/codes.js'), want = { KATIADESUTOP: [67, 1], ABSOLUTESECRETCODE: [67, 1], SPOOKYMONTH: [666, 0], BRIMSTONEBASEMENT: [125, 0], SHARDY: [0, 2], SECRETCODE: [123, 1], TREASURE: [50, 0], PATCH1: [111, 0], OSHIOTASHNIEIAICHA: [67, 1] };
+  ok(Object.entries(want).every(([k, [o, sh]]) => { const c = L.findCode(k.toLowerCase()); return c && (c.rewards.orbs || 0) === o && (c.rewards.shards || 0) === sh && !c.expiresAt && c.maxUses == null; }), '9 promo codes defined with the right rewards, no expiry, no global limit');
   const d0 = D.profile.balance, s0 = units(D, G.SHARD_ID);
   const c1 = await D.emit('code:redeem', 'spookyMonth'), c2 = await D.emit('code:redeem', 'SPOOKYMONTH'), c3 = await D.emit('code:redeem', ' secretcode ');
   ok(c1.ok && !c2.ok && c3.ok && D.profile.balance === d0 + 666 + 123 && units(D, G.SHARD_ID) === s0 + 1, `SPOOKYMONTH (+666, any case, once) and SECRETCODE (+123 + 1 💎) redeemed`);
   D.close();
   A.close(); B.close(); C.close();
+}
+async function runnerCatchSuite(URL) {
+  console.log('--- Раннеры are catchable at base speed');
+  const R = G.EVENTS.runner;
+  ok(R.speed <= G.BASE_SPEED * 0.7 && R.fleeRange <= 500 && R.restMs >= 1000 && R.r + R.catchPad >= 30, `runner ${R.speed} px/s vs player ${G.BASE_SPEED} (${Math.round(R.speed / G.BASE_SPEED * 100)} %), flees within ${R.fleeRange} px, rests ${R.restMs / 1000} s every ${R.tireEveryMs / 1000} s at ${R.restSpeed * 100} %, catch radius player+${R.r + R.catchPad}`);
+  const times = [];
+  for (let round = 0; round < 3; round++) {
+    const A = makeClient(URL); await A.register('Chase' + rnd());
+    let rn = null, caught = 0; A.s.on('s', st => { rn = st.rn || null; }); A.s.on('ev:runner', d => { if (d.name === A.profile.name) caught++; });
+    const p0 = [[1500, 1500], [4500, 1200], [3000, 4500]][round];
+    await A.emit('test:tp', { x: p0[0], y: p0[1] }); await sleep(200);
+    await A.emit('test:event', { kind: 'runner', announceMs: 100, durationMs: 40000, count: 1, x: p0[0] + 500, y: p0[1] + 150 });
+    await sleep(300); const t0 = Date.now();
+    while (!caught && Date.now() - t0 < 25000) { // greedy chase at base speed, like a player holding the stick towards it
+      const q = rn && rn[0]; if (q) { const dx = q[1] - A.pos.x, dy = q[2] - A.pos.y, l = Math.hypot(dx, dy) || 1; A.s.emit('input', { s: ++A.seq, x: dx / l, y: dy / l }); }
+      await sleep(50);
+    }
+    times.push(caught ? Date.now() - t0 : null); A.close(); await sleep(300);
+  }
+  ok(times.every(t => t !== null && t <= 20000), `a base-speed chaser (no upgrades) catches a Раннер every time: ${times.map(t => t === null ? 'never' : (t / 1000).toFixed(1) + ' s').join(', ')}`);
+  // spawn: near players, in the player's zone
+  const B = makeClient(URL); await B.register('RnSp' + rnd()); await B.emit('test:tp', { x: 2000, y: 3000 }); await sleep(200);
+  let first = null; B.s.on('s', st => { if (st.rn && !first) first = st.rn; });
+  await B.emit('test:event', { kind: 'runner', announceMs: 100, durationMs: 3000 }); await waitFor(() => first, 3000);
+  ok(first && first.length === 3 && first.every(q => q[1] < G.ZONE_W && Math.hypot(q[1] - 2000, q[2] - 3000) <= R.spawnNear[1] + 60), `3 Раннеры spawn ${first && first.map(q => Math.round(Math.hypot(q[1] - 2000, q[2] - 3000))).join('/')} px from the player, all in the player's zone`);
+  await sleep(3200); B.close();
 }
 async function robotSuite(URL) {
   console.log('--- iron robot');
@@ -1484,7 +1515,7 @@ async function runMode(label, env, opts) {
   if (opts.legacy) await migrationSuite(srv.url, opts.legacy, label);
   await authSuite(srv.url);
   await profileSuite(srv.url);
-  if (opts.full) { await chatSuite(srv.url); await gameplaySuite(srv.url); await minigameSuite(srv.url); await newGamesSuite(srv.url); await upgradeSuite(srv.url); await newItemsSuite(srv.url); await tiersSuite(srv.url); await eventSuite(srv.url); await luckyObstacleSuite(srv.url); await robotSuite(srv.url); await pushSuite(srv.url); }
+  if (opts.full) { await chatSuite(srv.url); await gameplaySuite(srv.url); await minigameSuite(srv.url); await newGamesSuite(srv.url); await upgradeSuite(srv.url); await newItemsSuite(srv.url); await tiersSuite(srv.url); await eventSuite(srv.url); await luckyObstacleSuite(srv.url); await robotSuite(srv.url); await runnerCatchSuite(srv.url); await pushSuite(srv.url); }
   await shardShopSuite(srv.url);
   await zoneSuite(srv.url);
   await codesSuite(srv.url);
@@ -1548,6 +1579,12 @@ async function runCycleMode() {
     await chatClearSuite(srv.url);
     await srv.stop(); fs.rmSync(tmp, { force: true });
     await chatRestartSuite();
+  } else if (process.env.OCS_TEST_ONLY === 'update4') {
+    upgradeRules();
+    const tmp = path.join(os.tmpdir(), `ocs-u4-${process.pid}.json`);
+    const srv = await startServer(3101, { DATA_FILE: tmp, OCS_TEST_HOOKS: '1' });
+    await runnerCatchSuite(srv.url); await codesSuite(srv.url); await upgradeSuite(srv.url);
+    await srv.stop(); fs.rmSync(tmp, { force: true });
   } else if (process.env.OCS_TEST_ONLY === 'codes') {
     const tmp = path.join(os.tmpdir(), `ocs-codes-${process.pid}.json`);
     const srv = await startServer(3101, { DATA_FILE: tmp, OCS_TEST_HOOKS: '1' });

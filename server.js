@@ -114,7 +114,7 @@ const NX = Math.ceil(G.WORLD.w / SPAWN.cell), NY = Math.ceil(G.WORLD.h / SPAWN.c
 const cells = Array.from({ length: NX * NY }, () => new Set()); // orb ids per cell
 const cellOf = (x, y) => Math.min(NY - 1, Math.floor(y / SPAWN.cell)) * NX + Math.min(NX - 1, Math.floor(x / SPAWN.cell));
 let respawnQueue = [];      // { due, z } respawns for normal (pool) orbs, per zone
-let legendaryAlive = 0;
+let legendaryAlive = 0; const legendaryZ = { 1: 0, 2: 0 }; // per-zone caps: G.ORB_TYPES.l.maxAliveZone
 let mythicAlive = 0, evAlive = 0; // mythic orbs (pool, max 1), event orbs (rain / treasure, not part of the pool)
 const targetOrbs = () => Math.max(SPAWN.min, Math.min(SPAWN.max, SPAWN.base + SPAWN.perPlayer * players.size));
 const luckyOn = () => !!(ev && ev.kind === 'lucky' && ev.phase === 'active');
@@ -123,7 +123,7 @@ const zoneCount = { 1: 0, 2: 0 }; // normal (pool) orbs alive per zone
 // one normal pool spawn: weighted tier roll; a mythic only while none is alive and someone is playing (else epic)
 function rollPool(z = 1) {
   const w = z === 2 ? G.ZONE2_WEIGHTS : G.POOL_WEIGHTS, t = G.rollOrbType(luckyOn() ? G.luckyWeights(w) : w); // «Волна удачи»: rare+ ×2
-  if (t === 'l') return legendaryAlive >= G.ORB_TYPES.l.maxAlive || players.size === 0 || (ev && ev.kind !== 'lucky') ? 'e' : 'l'; // never during an arena event (except «Волна удачи»)
+  if (t === 'l') return legendaryZ[z] >= G.ORB_TYPES.l.maxAliveZone[z] || players.size === 0 || (ev && ev.kind !== 'lucky') ? 'e' : 'l'; // never during an arena event (except «Волна удачи»)
   return t === 'm' && (mythicAlive >= G.ORB_TYPES.m.maxAlive || players.size === 0) ? 'e' : t;
 }
 
@@ -161,7 +161,7 @@ function pickSpot(z = 1) {
 function addOrb(t, pos, evKind) {
   const o = { id: nextOrbId++, x: pos.x, y: pos.y, t, cell: cellOf(pos.x, pos.y), z: G.zoneOf(pos.x) };
   if (!evKind) { o.pool = true; zoneCount[o.z]++; }
-  if (t === 'l') { o.expires = Date.now() + G.ORB_TYPES.l.lifeMs; legendaryAlive++; }
+  if (t === 'l') { o.expires = Date.now() + G.ORB_TYPES.l.lifeMs; legendaryAlive++; legendaryZ[o.z]++; }
   if (t === 'm') { o.expires = Date.now() + G.ORB_TYPES.m.lifeMs; mythicAlive++; }
   if (evKind) { o.ev = evKind; evAlive++; }
   orbs.set(o.id, o);
@@ -174,7 +174,7 @@ function addOrb(t, pos, evKind) {
 function removeOrb(o, byPlayerId) {
   orbs.delete(o.id);
   cells[o.cell].delete(o.id);
-  if (o.t === 'l') legendaryAlive--;
+  if (o.t === 'l') { legendaryAlive--; legendaryZ[o.z]--; }
   if (o.t === 'm') mythicAlive--;
   if (o.ev) evAlive--;
   if (o.pool) zoneCount[o.z]--;
@@ -415,13 +415,25 @@ function startEvent(now) {
   } else if (ev.kind === 'runner') { // 3 runaway orbs at random places; each one stays inside its own zone
     const n = o.count || def.count, placed = [];
     for (let i = 0; i < n; i++) {
-      const at = i === 0 && Number.isFinite(o.x) ? { x: clampWorld(o.x, G.WORLD.w), y: clampWorld(o.y, G.WORLD.h) } : randomSpot(200, placed, 1200);
+      const at = i === 0 && Number.isFinite(o.x) ? { x: clampWorld(o.x, G.WORLD.w), y: clampWorld(o.y, G.WORLD.h) } : runnerSpot(placed);
       placed.push(at);
       ev.runners = ev.runners || [];
-      ev.runners.push({ id: i + 1, x: at.x, y: at.y, z: G.zoneOf(at.x), h: rand(0, Math.PI * 2), speed: Number.isFinite(o.speed) ? o.speed : def.speed, caught: null });
+      ev.runners.push({ id: i + 1, x: at.x, y: at.y, z: G.zoneOf(at.x), h: rand(0, Math.PI * 2), speed: Number.isFinite(o.speed) ? o.speed : def.speed, caught: null, tireAt: Date.now() + rand(2000, def.tireEveryMs), restUntil: 0 });
     }
   }
   io.to('arena').emit('ev:start', publicEvent(now));
+}
+// a Раннер starts 900–1600 px from a random online player, in that player's zone (so nobody gets runners behind a locked door)
+function runnerSpot(avoid) {
+  const def = G.EVENTS.runner, list = Array.from(players.values());
+  for (let i = 0; i < 40 && list.length; i++) {
+    const pl = list[Math.floor(Math.random() * list.length)], a = rand(0, Math.PI * 2), d = rand(def.spawnNear[0], def.spawnNear[1]);
+    const z = G.zoneOf(pl.x), X0 = z === 2 ? G.ZONE_W : 0, x = Math.round(pl.x + Math.cos(a) * d), y = Math.round(pl.y + Math.sin(a) * d);
+    if (x < X0 + 200 || x > X0 + G.ZONE_W - 200 || y < 200 || y > G.WORLD.h - 200 || inObstacle(x, y, 60)) continue;
+    if (avoid.some(p => Math.hypot(p.x - x, p.y - y) < 500)) continue;
+    return { x, y };
+  }
+  return randomSpot(200, avoid, 1200);
 }
 function moveRunner(R, dt) {
   const def = G.EVENTS.runner, s = dt / 1000, X0 = R.z === 2 ? G.ZONE_W : 0, W = G.ZONE_W, H = G.ZONE_H;
@@ -431,6 +443,9 @@ function moveRunner(R, dt) {
   if (near) { // flee from the nearest player with a slight zig-zag
     dx = (R.x - near.x) / (nd || 1); dy = (R.y - near.y) / (nd || 1);
     const w = Math.sin(Date.now() / 380) * 0.55; [dx, dy] = [dx - dy * w, dy + dx * w]; sp = R.speed;
+    const now = Date.now(); // it tires: every ~5 s it slows to 35 % for 1.5 s
+    if (now >= R.tireAt) { R.restUntil = now + def.restMs; R.tireAt = now + def.restMs + def.tireEveryMs; }
+    if (now < R.restUntil) sp *= def.restSpeed;
   } else { R.h += (Math.random() - 0.5) * 0.5; dx = Math.cos(R.h); dy = Math.sin(R.h); sp = def.wander; }
   const m = 170; // walls push it back, so it can be cornered
   const rx = R.x - X0;
@@ -438,6 +453,8 @@ function moveRunner(R, dt) {
   if (R.y < m) dy += (m - R.y) / m * 1.4; if (R.y > H - m) dy -= (R.y - (H - m)) / m * 1.4;
   const l = Math.hypot(dx, dy) || 1;
   R.x = Math.max(X0 + 40, Math.min(X0 + W - 40, R.x + dx / l * sp * s)); R.y = Math.max(40, Math.min(H - 40, R.y + dy / l * sp * s));
+  G.resolveObstacles(R, obstacles); // can't hide inside walls / rocks
+  R.x = Math.max(X0 + 40, Math.min(X0 + W - 40, R.x)); R.y = Math.max(40, Math.min(H - 40, R.y));
   if (!near) R.h = Math.atan2(dy, dx);
 }
 function pushKoth() {
@@ -449,7 +466,7 @@ function eventTick(now, dt) {
     if (EV_EVERY === 0 || !players.size) return; // the clock only runs while someone is online
     evClock += dt;
     // never next to the legendary orb: not while one is alive or about to appear (heads-up already sent)
-    if (evClock >= evGap && legendaryAlive === 0) {
+    if (evClock >= evGap && legendaryZ[1] === 0) { // zone-2 legendaries (0.8 %) would otherwise starve the scheduler
       const kinds = G.AUTO_EVENT_KEYS.filter(k => k !== lastEvKind);
       announceEvent(kinds[Math.floor(Math.random() * kinds.length)]);
     }
@@ -475,7 +492,7 @@ function eventTick(now, dt) {
       if (R.caught) continue;
       moveRunner(R, dt);
       for (const pl of players.values()) {
-        if (Math.hypot(pl.x - R.x, pl.y - R.y) > G.pickupFor(pl.acc.upgrades.magnet) + def.r) continue;
+        if (Math.hypot(pl.x - R.x, pl.y - R.y) > G.pickupFor(pl.acc.upgrades.magnet) + def.r + def.catchPad) continue; // generous: lag between what you see and the server
         const sc = evScore(pl); sc.score++; sc.reward = addReward(sc.reward, def.reward); R.caught = pl.acc.name;
         payReward(pl, def.reward);
         io.to('arena').emit('ev:runner', { name: pl.acc.name, left: ev.runners.filter(r => !r.caught).length });

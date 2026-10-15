@@ -3,7 +3,7 @@
   const ZONE_W = 6000, ZONE_H = 6000; // one zone (was 3000×3000; 2× each side)
   const WORLD = { w: ZONE_W * 2, h: ZONE_H }; // zone 1 (violet) | door | zone 2 (blue)
   const DOOR_COST = 3750; // one-time unlock for zone 2 (~35 min of base farming); earlier 1000-orb unlocks are kept
-  const ZONE2_WEIGHTS = { c: 7000, u: 1800, r: 850, e: 280, l: 50, m: 30 }; // same tiers as zone 1, better odds: c 70 / u 18 / r 8.5 / e 2.8 / l 0.5 / m 0.3 % (mean ≈ 2.03 vs 1.49)
+  const ZONE2_WEIGHTS = { c: 6960, u: 1800, r: 850, e: 280, l: 80, m: 30 }; // same tiers as zone 1, better odds: c 69.6 / u 18 / r 8.5 / e 2.8 / l 0.8 / m 0.3 % (mean ≈ 2.03 vs 1.49)
   const zoneOf = x => (x < ZONE_W ? 1 : 2);
   const DOOR = { x: ZONE_W, y: ZONE_H / 2, half: 170 }; // opening in the wall between the zones (340 px tall)
   // The wall at x = ZONE_W blocks everyone; only an unlocked player inside the door opening may cross. prevX = x before the move.
@@ -20,11 +20,11 @@
   // Orb tiers. `weight` = share (per 10 000) of normal pool spawns; 0 = never in the pool (timed / event orbs).
   // The pool mean (≈1.43 per orb) is tuned so a player without upgrades still earns ≈100 orbs/min (README «Orb rarities»).
   const ORB_TYPES = {
-    c: { key: 'c', name: 'Обычная', value: 1, r: 7, color: '#3ee0ff', glow: 'rgba(62,224,255,', weight: 8224 },
+    c: { key: 'c', name: 'Обычная', value: 1, r: 7, color: '#3ee0ff', glow: 'rgba(62,224,255,', weight: 8204 },
     u: { key: 'u', name: 'Необычная', value: 2, r: 8, color: '#5dff8f', glow: 'rgba(93,255,143,', weight: 1200 },
     r: { key: 'r', name: 'Редкая', value: 5, r: 10, color: '#b46bff', glow: 'rgba(180,107,255,', weight: 460 },
     e: { key: 'e', name: 'Эпическая', value: 10, r: 12, color: '#ff9a2e', glow: 'rgba(255,154,46,', weight: 110 },
-    l: { key: 'l', name: 'Легендарная', value: 25, r: 14, color: '#ffcc33', glow: 'rgba(255,204,51,', weight: 24, shards: 1, maxAlive: 2, lifeMs: 75000, note: 'редкая: шанс 0,24 % на каждую новую сферу (во 2-й зоне 0,5 %), живёт 75 с' },
+    l: { key: 'l', name: 'Легендарная', value: 25, r: 14, color: '#ffcc33', glow: 'rgba(255,204,51,', weight: 20, shards: 1, maxAlive: 2, maxAliveZone: { 1: 1, 2: 2 }, lifeMs: 75000, note: 'редкая: шанс 0,2 % на каждую новую сферу (во 2-й зоне 0,8 %, там их может быть до 2 сразу), живёт 75 с' },
     m: { key: 'm', name: 'Мифическая', value: 50, r: 15, color: '#ff3d6e', glow: 'rgba(255,61,110,', weight: 6, shards: 3, maxAlive: 1, lifeMs: 60000, note: 'очень редкая, живёт 60 с' },
     t: { key: 't', name: 'Сокровище', value: 50, r: 15, color: '#ffe680', glow: 'rgba(255,230,128,', weight: 0, shards: 1, event: true, note: 'только во время события' },
   };
@@ -193,13 +193,13 @@
   // Fully maxed magnet + speed + multiplier + luck ≈ +60–80 % orb income (measured, see README "Upgrades").
   // Softer curve: maxed farm ≈ ≤1.4× base (magnet no longer vacuums the field). Same names/levels.
   const UPGRADES = {
-    magnet: { key: 'magnet', name: 'Магнит', desc: 'Чуть больше радиус сбора сфер', max: 5, prices: [200, 600, 1500, 3500, 7000], values: [0, 4, 8, 12, 15, 18], unit: 'px' },
-    speed: { key: 'speed', name: 'Ускорение', desc: 'Чуть быстрее движение по арене', max: 5, prices: [250, 700, 1800, 4000, 8000], values: [0, 3, 5, 7, 9, 11], unit: '%' },
-    mult: { key: 'mult', name: 'Множитель сфер', desc: 'Каждая сфера приносит чуть больше (дробные части копятся)', max: 5, prices: [350, 900, 2200, 5000, 10000], values: [0, 3, 6, 9, 12, 15], unit: '%' },
-    luck: { key: 'luck', name: 'Удача', desc: 'Шанс ×2 за сферу; с 3-го уровня ещё и «находка»: обычная или необычная сфера становится эпической (+10)', max: 5, prices: [300, 800, 2000, 4500, 9000],
-      values: [0, 1, 2, 3, 4, 5], jackpot: [0, 0, 0, 0.25, 0.4, 0.55], unit: '%' },
-    sense: { key: 'sense', name: 'Чутьё легенды', desc: 'Компас: стрелки к самым редким сферам и к событиям', max: 3, prices: [400, 1200, 3000], values: [0, 1, 2, 3], unit: '' },
-    skill: { key: 'skill', name: 'Мастер мини-игр', desc: 'Бонус к выигрышам в мини-играх', max: 3, prices: [200, 600, 1400], values: [0, 10, 20, 30], unit: '%' },
+    magnet: { key: 'magnet', name: 'Магнит', desc: 'Чуть больше радиус сбора сфер', max: 5, prices: [150, 450, 1130, 2630, 5250], values: [0, 4.4, 8.8, 13.2, 16.5, 19.8], unit: 'px' },
+    speed: { key: 'speed', name: 'Ускорение', desc: 'Чуть быстрее движение по арене', max: 5, prices: [190, 520, 1350, 3000, 6000], values: [0, 3.3, 5.5, 7.7, 9.9, 12.1], unit: '%' },
+    mult: { key: 'mult', name: 'Множитель сфер', desc: 'Каждая сфера приносит чуть больше (дробные части копятся)', max: 5, prices: [260, 680, 1650, 3750, 7500], values: [0, 3.3, 6.6, 9.9, 13.2, 16.5], unit: '%' },
+    luck: { key: 'luck', name: 'Удача', desc: 'Шанс ×2 за сферу; с 3-го уровня ещё и «находка»: обычная или необычная сфера становится эпической (+10)', max: 5, prices: [220, 600, 1500, 3380, 6750],
+      values: [0, 1.1, 2.2, 3.3, 4.4, 5.5], jackpot: [0, 0, 0, 0.3, 0.4, 0.6], unit: '%' },
+    sense: { key: 'sense', name: 'Чутьё легенды', desc: 'Компас: стрелки к самым редким сферам и к событиям', max: 3, prices: [300, 900, 2250], values: [0, 1, 2, 3], unit: '' },
+    skill: { key: 'skill', name: 'Мастер мини-игр', desc: 'Бонус к выигрышам в мини-играх', max: 3, prices: [150, 450, 1050], values: [0, 11, 22, 33], unit: '%' },
   };
   // Prices players actually paid before the soft-reset (used once to refund → then upgrades reset to 0)
   const UPGRADE_REFUND_PRICES = {
@@ -214,12 +214,12 @@
   const jackpotChance = level => UPGRADES.luck.jackpot[upLevel('luck', level)]; // % per common/uncommon pickup
   function upgradeText(key, level) {
     const u = UPGRADES[key], v = upValue(key, level);
-    if (key === 'magnet') return `радиус ${PLAYER_R + v} px` + (v ? ` (+${v})` : '');
-    if (key === 'speed') return `скорость ${Math.round(BASE_SPEED * (1 + v / 100))}` + (v ? ` (+${v}%)` : '');
+    if (key === 'magnet') return `радиус ${Math.round(PLAYER_R + v)} px` + (v ? ` (+${String(v).replace('.', ',')})` : '');
+    if (key === 'speed') return `скорость ${Math.round(BASE_SPEED * (1 + v / 100))}` + (v ? ` (+${String(v).replace('.', ',')}%)` : '');
     if (key === 'mult') return `×${(1 + v / 100).toFixed(2)} за сферу`;
-    if (key === 'luck') { const j = jackpotChance(level); return `${v}% шанс ×2` + (j ? ` · ${String(j).replace('.', ',')}% находка +10` : ''); }
+    if (key === 'luck') { const j = jackpotChance(level); return `${String(v).replace('.', ',')}% шанс ×2` + (j ? ` · ${String(j).replace('.', ',')}% находка +10` : ''); }
     if (key === 'sense') return SENSE_TEXT[upLevel(key, level)];
-    if (key === 'skill') return `+${v}% к выигрышу`;
+    if (key === 'skill') return `+${v}% к выигрышу`; // values ×1.1 since Oct 2026 (11/22/33)
     return String(v) + u.unit;
   }
 
@@ -323,7 +323,7 @@
       rewards: [{ orbs: 200, shards: 2 }, { orbs: 120, shards: 1 }, { orbs: 80, shards: 0 }], solo: { orbs: 100, shards: 1 }, participation: { orbs: 20, shards: 0 } },
     treasure: { key: 'treasure', name: 'Охота за сокровищем', icon: '💰', durationMs: 120000, count: 5, maxCount: 5, minDist: 900,
       desc: 'По всей карте в случайных местах спрятаны 5 сфер-сокровищ. Кто первым схватит — получит награду!', reward: { orbs: 50, shards: 1 } },
-    runner: { key: 'runner', name: 'Раннеры', icon: '💨', durationMs: 90000, count: 3, speed: 175, wander: 90, r: 14, fleeRange: 700,
+    runner: { key: 'runner', name: 'Раннеры', icon: '💨', durationMs: 90000, count: 3, speed: 150, wander: 70, r: 20, fleeRange: 450, catchPad: 12, tireEveryMs: 5000, restMs: 1500, restSpeed: 0.35, spawnNear: [900, 1600],
       desc: 'По карте носятся 3 Раннера — они убегают от игроков. Каждый пойманный Раннер — награда!', reward: { orbs: 80, shards: 1 } },
     lucky: { key: 'lucky', name: 'Волна удачи', icon: '🍀', durationMs: 75000, spawnMult: 1.25, rareMult: 2,
       desc: '75 секунд на карте на 25 % больше сфер, а шанс редких, эпических, легендарных и мифических сфер удвоен (×2)!' },
