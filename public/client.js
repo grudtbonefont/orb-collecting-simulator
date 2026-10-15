@@ -233,6 +233,18 @@
   $('logoutBtn').addEventListener('click', logout);
   $('resumeLogout').addEventListener('click', logout);
   $('pfLogout').addEventListener('click', logout);
+  $('pfPw').addEventListener('click', () => { // change own password (current one required)
+    const old = window.prompt('Текущий пароль:'); if (old == null) return;
+    const nw = window.prompt('Новый пароль:'); if (nw == null) return;
+    const ne = RULES.passwordError(nw); if (ne) { $('pfError').textContent = ne; return; }
+    const again = window.prompt('Повторите новый пароль:'); if (again == null) return;
+    if (again !== nw) { $('pfError').textContent = 'Пароли не совпадают'; return; }
+    socket.emit('pw:change', { old, new: nw }, r => {
+      if (!r || !r.ok) { $('pfError').textContent = (r && r.error) || 'Ошибка'; return; }
+      $('pfError').textContent = ''; if (summary) summary.mustChangePw = false; if (profile) profile.mustChangePw = false;
+      $('pfPwNote').classList.add('hidden'); toast('Пароль изменён', 'ok');
+    });
+  });
   $('pfPlay').addEventListener('click', play);
   $('resumeBtn').addEventListener('click', () => { paused = false; trySession(); });
   if (token) showResume('Входим как ' + (myName || 'игрок') + '…', false);
@@ -2196,6 +2208,7 @@
   function renderProfile() {
     const p = summary || profile;
     if (!p) return;
+    $('pfPwNote').classList.toggle('hidden', !p.mustChangePw);
     pruneHidden('profile');
     addPreview($('pfAvatar'), Object.assign({}, p.equipped), 'all', { owner: 'profile', size: 120, r: 28, name: p.name });
     $('pfName').textContent = p.name;
