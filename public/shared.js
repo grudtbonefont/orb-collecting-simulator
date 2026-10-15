@@ -25,7 +25,7 @@
     r: { key: 'r', name: 'Редкая', value: 5, r: 10, color: '#b46bff', glow: 'rgba(180,107,255,', weight: 460 },
     e: { key: 'e', name: 'Эпическая', value: 10, r: 12, color: '#ff9a2e', glow: 'rgba(255,154,46,', weight: 110 },
     l: { key: 'l', name: 'Легендарная', value: 25, r: 14, color: '#ffcc33', glow: 'rgba(255,204,51,', weight: 20, shards: 1, maxAlive: 2, maxAliveZone: { 1: 1, 2: 2 }, lifeMs: 75000, note: 'редкая: шанс 0,2 % на каждую новую сферу (во 2-й зоне 0,8 %, там их может быть до 2 сразу), живёт 75 с' },
-    m: { key: 'm', name: 'Мифическая', value: 50, r: 15, color: '#ff3d6e', glow: 'rgba(255,61,110,', weight: 6, shards: 3, maxAlive: 1, lifeMs: 60000, note: 'очень редкая, живёт 60 с' },
+    m: { key: 'm', name: 'Мифическая', value: 50, r: 15, color: '#ff3d6e', glow: 'rgba(255,61,110,', weight: 6, shards: 3, note: 'очень редкая: появляется только по шансу, как обычные сферы' },
     t: { key: 't', name: 'Сокровище', value: 50, r: 15, color: '#ffe680', glow: 'rgba(255,230,128,', weight: 0, shards: 1, event: true, note: 'только во время события' },
   };
   const ORB_RANK = { c: 0, u: 1, r: 2, e: 3, l: 4, t: 4, m: 5 };
@@ -323,7 +323,7 @@
       rewards: [{ orbs: 200, shards: 2 }, { orbs: 120, shards: 1 }, { orbs: 80, shards: 0 }], solo: { orbs: 100, shards: 1 }, participation: { orbs: 20, shards: 0 } },
     treasure: { key: 'treasure', name: 'Охота за сокровищем', icon: '💰', durationMs: 120000, count: 5, maxCount: 5, minDist: 900,
       desc: 'По всей карте в случайных местах спрятаны 5 сфер-сокровищ. Кто первым схватит — получит награду!', reward: { orbs: 50, shards: 1 } },
-    runner: { key: 'runner', name: 'Раннеры', icon: '💨', durationMs: 90000, count: 3, speed: 150, wander: 70, r: 20, fleeRange: 450, catchPad: 12, tireEveryMs: 5000, restMs: 1500, restSpeed: 0.35, spawnNear: [900, 1600],
+    runner: { key: 'runner', name: 'Раннеры', icon: '💨', durationMs: 90000, count: 3, speed: 150, wander: 70, r: 30, touchPad: 80, historyMs: 600, fleeRange: 450, catchPad: 12, tireEveryMs: 5000, restMs: 1500, restSpeed: 0.35, spawnNear: [900, 1600],
       desc: 'По карте носятся 3 Раннера — они убегают от игроков. Каждый пойманный Раннер — награда!', reward: { orbs: 80, shards: 1 } },
     lucky: { key: 'lucky', name: 'Волна удачи', icon: '🍀', durationMs: 75000, spawnMult: 1.25, rareMult: 2,
       desc: '75 секунд на карте на 25 % больше сфер, а шанс редких, эпических, легендарных и мифических сфер удвоен (×2)!' },

@@ -370,7 +370,7 @@ function tierEventRules() {
   const T = G.ORB_TYPES, keys = ['c', 'u', 'r', 'e', 'l', 'm'];
   ok(keys.map(k => T[k].value).join(',') === '1,2,5,10,25,50' && keys.every((k, i) => !i || T[k].r > T[keys[i - 1]].r) && new Set(keys.map(k => T[k].color)).size === keys.length,
     'tiers common +1, uncommon +2, rare +5, epic +10, legendary +25, mythic +50 — each bigger than the last, distinct colours');
-  ok(T.l.weight > 0 && T.l.weight < T.e.weight && T.l.maxAlive === 2 && T.l.lifeMs === 75000 && T.t.weight === 0 && T.m.weight > 0 && T.m.shards === 3 && T.l.shards === 1 && T.m.maxAlive === 1, 'legendary is a random spawn tier (max 2 alive, 75 s), treasure only in events, mythic: random, max 1 alive, 3 shards');
+  ok(T.l.weight > 0 && T.l.weight < T.e.weight && T.l.maxAlive === 2 && T.l.lifeMs === 75000 && T.t.weight === 0 && T.m.weight > 0 && T.m.shards === 3 && T.l.shards === 1 && T.m.maxAlive === undefined, 'legendary is a random spawn tier (max 2 alive, 75 s), treasure only in events, mythic: random by chance only (no cap), 3 shards');
   const ev = G.expectedOrbValue();
   ok(ev >= 1.35 && ev <= 1.5, `pool mean orb value ${ev.toFixed(3)} (old 1.4 → income stays ≈100/min)`);
   ok(G.expectedOrbValue(G.RAIN_WEIGHTS) > ev * 1.4, `«Сферный дождь» orbs are richer (mean ${G.expectedOrbValue(G.RAIN_WEIGHTS).toFixed(2)})`);
@@ -682,6 +682,41 @@ async function runnerCatchSuite(URL) {
   await B.emit('test:event', { kind: 'runner', announceMs: 100, durationMs: 3000 }); await waitFor(() => first, 3000);
   ok(first && first.length === 3 && first.every(q => q[1] < G.ZONE_W && Math.hypot(q[1] - 2000, q[2] - 3000) <= R.spawnNear[1] + 60), `3 Раннеры spawn ${first && first.map(q => Math.round(Math.hypot(q[1] - 2000, q[2] - 3000))).join('/')} px from the player, all in the player's zone`);
   await sleep(3200); B.close();
+}
+async function runnerLagSuite(URL) {
+  console.log('--- Раннеры: what you see is what you catch (200 ms RTT)');
+  const R = G.EVENTS.runner, ONE = 100, results = [];
+  for (let round = 0; round < 3; round++) {
+    const A = makeClient(URL); await A.register('Lag' + rnd());
+    const p0 = [[1500, 1500], [4500, 1200], [3000, 4500]][round];
+    await A.emit('test:tp', { x: p0[0], y: p0[1] }); await sleep(300);
+    let view = null, caughtAt = 0, touchAt = 0, minD = Infinity; const me = { x: A.pos.x, y: A.pos.y };
+    A.s.on('s', st => setTimeout(() => { view = st.rn || null; }, ONE)); // the client sees the world 100 ms late
+    A.s.on('ev:runner', d => setTimeout(() => { if (d.name === A.profile.name && !caughtAt) caughtAt = Date.now(); }, ONE));
+    const send = (ev, m) => setTimeout(() => A.s.emit(ev, m), ONE); // and its messages arrive 100 ms late
+    await A.emit('test:event', { kind: 'runner', announceMs: 100, durationMs: 40000, count: 1, x: p0[0] + 500, y: p0[1] + 150 });
+    await sleep(300); const t0 = Date.now(); let seq = A.seq;
+    while (!caughtAt && Date.now() - t0 < 25000) {
+      const q = view && view[0];
+      if (q) {
+        const dx = q[1] - me.x, dy = q[2] - me.y, l = Math.hypot(dx, dy) || 1; minD = Math.min(minD, l);
+        const inp = { s: ++seq, x: dx / l, y: dy / l }; send('input', inp); G.applyInput(me, inp.x, inp.y, G.speedFor(0)); // client-side prediction
+        if (l <= G.PLAYER_R + R.r) { if (!touchAt) touchAt = Date.now(); send('ev:touch', { id: q[0], x: Math.round(me.x), y: Math.round(me.y) }); } // same rule as client.js
+      }
+      await sleep(50);
+    }
+    results.push({ caught: !!caughtAt, touch: touchAt ? touchAt - t0 : null, delay: caughtAt ? (touchAt ? caughtAt - touchAt : -1) : null }); A.close(); await sleep(300);
+  }
+  ok(results.every(r => r.caught && r.delay <= 600), `with 200 ms RTT every visual touch registers a catch: ${results.map(r => !r.caught ? 'missed' : r.delay < 0 ? 'caught just before the drawn balls met' : `caught ${r.delay} ms after the drawn balls met`).join(', ')}`);
+  // anti-cheat: a claim far from the server's player position, or far from the runner, is refused
+  const B = makeClient(URL); await B.register('LagX' + rnd()); await B.emit('test:tp', { x: 1500, y: 1500 }); await sleep(200);
+  let rn = null, got = 0; B.s.on('s', st => { if (st.rn) rn = st.rn; }); B.s.on('ev:runner', () => got++);
+  await B.emit('test:event', { kind: 'runner', announceMs: 100, durationMs: 4000, count: 1, x: 2500, y: 1500 }); await waitFor(() => rn, 3000);
+  for (let i = 0; i < 5; i++) { B.s.emit('ev:touch', { id: rn[0][0], x: rn[0][1], y: rn[0][2] }); B.s.emit('ev:touch', { id: rn[0][0], x: B.pos.x, y: B.pos.y }); await sleep(100); }
+  ok(got === 0, 'forged touch claims (teleport onto the runner / touch from 1000 px away) are refused');
+  await sleep(4000); B.close();
+  ok(Math.abs(G.EVENTS.runner.r / 2 / 1.1 * 2 * 1.1 - R.r) < 1e-9 && R.r === 30, `drawn runner core radius = hitbox radius (${R.r} px); catch = player ${G.PLAYER_R} + ${R.r} + ${R.catchPad} on the server, claims up to +${R.touchPad}`);
+  ok(!('maxAlive' in G.ORB_TYPES.m) && !('lifeMs' in G.ORB_TYPES.m), 'mythic orbs: no max-alive cap and no lifetime, chance only');
 }
 async function robotSuite(URL) {
   console.log('--- iron robot');
@@ -1579,6 +1614,10 @@ async function runCycleMode() {
     await chatClearSuite(srv.url);
     await srv.stop(); fs.rmSync(tmp, { force: true });
     await chatRestartSuite();
+  } else if (process.env.OCS_TEST_ONLY === 'runlag') {
+    const tmp = path.join(os.tmpdir(), `ocs-rl-${process.pid}.json`);
+    const srv = await startServer(3121, { DATA_FILE: tmp, OCS_TEST_HOOKS: '1', EVENTS_ENABLED: '0' });
+    await runnerLagSuite(srv.url); await runnerCatchSuite(srv.url); await srv.stop(); fs.rmSync(tmp, { force: true });
   } else if (process.env.OCS_TEST_ONLY === 'update4') {
     upgradeRules();
     const tmp = path.join(os.tmpdir(), `ocs-u4-${process.pid}.json`);

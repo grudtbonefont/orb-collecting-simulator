@@ -124,7 +124,7 @@ const zoneCount = { 1: 0, 2: 0 }; // normal (pool) orbs alive per zone
 function rollPool(z = 1) {
   const w = z === 2 ? G.ZONE2_WEIGHTS : G.POOL_WEIGHTS, t = G.rollOrbType(luckyOn() ? G.luckyWeights(w) : w); // «Волна удачи»: rare+ ×2
   if (t === 'l') return legendaryZ[z] >= G.ORB_TYPES.l.maxAliveZone[z] || players.size === 0 || (ev && ev.kind !== 'lucky') ? 'e' : 'l'; // never during an arena event (except «Волна удачи»)
-  return t === 'm' && (mythicAlive >= G.ORB_TYPES.m.maxAlive || players.size === 0) ? 'e' : t;
+  return t; // mythic: by chance only, no cap / timer
 }
 
 function spotIsFree(x, y) {
@@ -162,7 +162,7 @@ function addOrb(t, pos, evKind) {
   const o = { id: nextOrbId++, x: pos.x, y: pos.y, t, cell: cellOf(pos.x, pos.y), z: G.zoneOf(pos.x) };
   if (!evKind) { o.pool = true; zoneCount[o.z]++; }
   if (t === 'l') { o.expires = Date.now() + G.ORB_TYPES.l.lifeMs; legendaryAlive++; legendaryZ[o.z]++; }
-  if (t === 'm') { o.expires = Date.now() + G.ORB_TYPES.m.lifeMs; mythicAlive++; }
+  if (t === 'm') mythicAlive++;
   if (evKind) { o.ev = evKind; evAlive++; }
   orbs.set(o.id, o);
   cells[o.cell].add(o.id);
@@ -423,6 +423,26 @@ function startEvent(now) {
   }
   io.to('arena').emit('ev:start', publicEvent(now));
 }
+function catchRunner(R, pl) {
+  const def = G.EVENTS.runner, sc = evScore(pl); sc.score++; sc.reward = addReward(sc.reward, def.reward); R.caught = pl.acc.name;
+  payReward(pl, def.reward);
+  io.to('arena').emit('ev:runner', { name: pl.acc.name, left: ev.runners.filter(r => !r.caught).length });
+  if (ev.runners.every(r => r.caught)) ev.endAt = Date.now();
+}
+// client claim «I touched runner id at my position x,y»: validated against the server position of the player
+// (anti-cheat: within what latency can explain) and the runner's recent positions (touch radius + touchPad)
+function runnerTouch(pl, m) {
+  const def = G.EVENTS.runner;
+  if (!ev || ev.kind !== 'runner' || ev.phase !== 'active' || !ev.runners || !m || typeof m !== 'object') return;
+  const id = Number(m.id), x = Number(m.x), y = Number(m.y);
+  if (!Number.isFinite(id) || !Number.isFinite(x) || !Number.isFinite(y)) return;
+  const R = ev.runners.find(r => r.id === id && !r.caught); if (!R) return;
+  const lagPx = G.speedFor(pl.acc.upgrades.speed) * Math.min(0.5, (pl.rtt || 0) / 1000 + 0.15) + 40;
+  if (Math.hypot(x - pl.x, y - pl.y) > lagPx) return; // claimed spot too far from where the server has the player
+  if (G.zoneOf(x) !== R.z && G.zoneOf(pl.x) !== R.z) return;
+  const lim = G.PLAYER_R + def.r + def.touchPad, pts = (R.hist || []).concat([{ x: R.x, y: R.y }]);
+  if (pts.some(h => Math.hypot(x - h.x, y - h.y) <= lim)) catchRunner(R, pl);
+}
 // a Раннер starts 900–1600 px from a random online player, in that player's zone (so nobody gets runners behind a locked door)
 function runnerSpot(avoid) {
   const def = G.EVENTS.runner, list = Array.from(players.values());
@@ -491,12 +511,10 @@ function eventTick(now, dt) {
     for (const R of ev.runners) {
       if (R.caught) continue;
       moveRunner(R, dt);
-      for (const pl of players.values()) {
-        if (Math.hypot(pl.x - R.x, pl.y - R.y) > G.pickupFor(pl.acc.upgrades.magnet) + def.r + def.catchPad) continue; // generous: lag between what you see and the server
-        const sc = evScore(pl); sc.score++; sc.reward = addReward(sc.reward, def.reward); R.caught = pl.acc.name;
-        payReward(pl, def.reward);
-        io.to('arena').emit('ev:runner', { name: pl.acc.name, left: ev.runners.filter(r => !r.caught).length });
-        break;
+      R.hist = (R.hist || []).filter(h => now - h.t <= def.historyMs); R.hist.push({ t: now, x: R.x, y: R.y });
+      for (const pl of players.values()) { // lag-compensated: closest of the runner's recent positions (what the client was looking at)
+        const lim = G.pickupFor(pl.acc.upgrades.magnet) + def.r + def.catchPad;
+        if (R.hist.some(h => Math.hypot(pl.x - h.x, pl.y - h.y) <= lim)) { catchRunner(R, pl); break; }
       }
     }
     if (ev.runners.every(r => r.caught)) ev.endAt = now;
@@ -1117,6 +1135,8 @@ io.on('connection', socket => {
     if (pl.inputs.length >= 40) return;
     pl.inputs.push({ s, x: Math.max(-1, Math.min(1, x)), y: Math.max(-1, Math.min(1, y)) });
   });
+
+  socket.on('ev:touch', m => { if (pl) runnerTouch(pl, m); });
 
   socket.on('spong', v => {
     if (!pl || typeof v !== 'number') return;

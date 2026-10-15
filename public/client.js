@@ -658,7 +658,7 @@
     return { c, half: size / 2 };
   }
   for (const t of Object.values(G.ORB_TYPES)) orbSprites[t.key] = makeOrbSprite(t);
-  orbSprites.runner = makeOrbSprite({ r: 18, color: '#c6fdff', glow: 'rgba(125,252,255,' });
+  orbSprites.runner = makeOrbSprite({ r: G.EVENTS.runner.r / 2 / 1.1, color: '#c6fdff', glow: 'rgba(125,252,255,' });
   const orbDef = type => (Object.prototype.hasOwnProperty.call(G.ORB_TYPES, type) ? G.ORB_TYPES[type] : G.ORB_TYPES.c); // unknown tier → common look
   function drawOrb(g, x, y, type, t, id, scale = 1) {
     const s = orbSprites[type] || orbSprites.c, ot = orbDef(type);
@@ -1338,7 +1338,7 @@
       }
       drawOrb(ctx, o.x, oy, o.t, t, id, k);
     }
-    drawRunner(t, now);
+    drawRunner(t, now); checkRunnerTouch(now);
     // collect fx
     for (let i = fx.length - 1; i >= 0; i--) {
       const f = fx[i], k = (now - f.start) / 220;
@@ -1671,6 +1671,15 @@
     ctx.restore();
   }
   function drawRunner(t, now) { for (const r of runners.values()) drawOneRunner(r, t, now); }
+  // what you see is what you catch: when my drawn ball overlaps a drawn Раннер, claim it (server validates with tolerance)
+  let lastTouch = 0;
+  function checkRunnerTouch(now) {
+    if (!runners.size || now - lastTouch < 100) return;
+    for (const [id, r] of runners) {
+      if (Math.hypot(runnerX(r, now) - dispMe.x, runnerY(r, now) - dispMe.y) > G.PLAYER_R + G.EVENTS.runner.r) continue;
+      lastTouch = now; socket.emit('ev:touch', { id, x: Math.round(me.x), y: Math.round(me.y) }); return;
+    }
+  }
   function drawOneRunner(runner, t, now) {
     const x = runnerX(runner, now), y = runnerY(runner, now);
     if (x < cam.x - 80 || x > cam.x + VW + 80 || y < cam.y - 80 || y > cam.y + VH + 80) return;
