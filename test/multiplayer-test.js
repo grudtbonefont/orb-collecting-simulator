@@ -495,7 +495,7 @@ async function eventSuite(URL) {
   ok(placeOk && JSON.stringify((first === A ? ke : kc).you.reward) === JSON.stringify(rw[0]) && JSON.stringify((first === A ? kc : ke).you.reward) === JSON.stringify(rw[1]),
     `koth rewards by score: 1st ${rw[0].orbs} ◉ + ${rw[0].shards} 💎, 2nd ${rw[1].orbs} ◉ + ${rw[1].shards} 💎 (scores ${ke && ke.you && ke.you.score}/${kc && kc.you && kc.you.score})`);
   const paidOk = placeOk && first.profile.balance - (first === A ? a0.A : a0.C) >= rw[0].orbs && second.profile.balance - (second === A ? a0.A : a0.C) >= rw[1].orbs && // ≥: stray orbs picked up on the way
-    shards(first) - (first === A ? a0.sA : a0.sC) === rw[0].shards && shards(second) - (second === A ? a0.sA : a0.sC) === rw[1].shards;
+    shards(first) - (first === A ? a0.sA : a0.sC) >= rw[0].shards && shards(second) - (second === A ? a0.sA : a0.sC) >= rw[1].shards; // ≥: a daily quest / achievement can pay shards too
   ok(paidOk, 'koth rewards paid server-side: orbs and shards to their balances');
   ok(kb && kb.you === null && kb.results.length >= 2 && kb.results.every(x => JSON.stringify(Object.keys(x)) === '["name","score","reward"]'), 'B (outside) gets the public results (name/score/reward only) and no reward');
   // treasure: one next to A, one far away; A grabs the near one
@@ -783,15 +783,15 @@ async function shardShopSuite(URL) {
   await S.register('Shards' + rnd()); await W.register('Look' + rnd());
   const shards = () => S.profile.shards || 0;
   let r = await S.emit('shard:buy', 'c_void');
-  ok(!r.ok && r.code === 'shards' && /нужно 40, у вас 0/.test(r.error), 'not enough shards → refused: ' + r.error);
+  ok(!r.ok && r.code === 'shards' && /нужно 50, у вас 0/.test(r.error), 'not enough shards → refused: ' + r.error);
   await S.emit('test:orbs', 100000);
   const bal = S.profile.balance;
   r = await S.emit('buy', 'c_void');
   ok(!r.ok && r.code === 'exclusive' && S.profile.balance === bal && !S.profile.inventory.some(x => x.id === 'c_void'), 'exclusives cannot be bought with orbs: ' + r.error);
-  await S.emit('test:grant', { id: G.SHARD_ID, qty: 45, source: 'event' });
+  await S.emit('test:grant', { id: G.SHARD_ID, qty: 55, source: 'event' });
   r = await S.emit('shard:buy', 'c_void');
   const slot = S.profile.inventory.find(x => x.id === 'c_void');
-  ok(r.ok && r.spent === 40 && shards() === 5 && slot && slot.src === 'shard_shop' && S.profile.balance === bal, 'bought «Пустота» for exactly 40 shards (5 left, orbs untouched, source "shard_shop")');
+  ok(r.ok && r.spent === 50 && shards() === 5 && slot && slot.src === 'shard_shop' && S.profile.balance === bal, 'bought «Пустота» for exactly 50 shards (5 left, orbs untouched, source "shard_shop")');
   const dup = await S.emit('shard:buy', 'c_void'), plain = await S.emit('shard:buy', 'c_coral'), proto = await S.emit('shard:buy', '__proto__');
   ok(!dup.ok && dup.code === 'shards' && !plain.ok && !proto.ok && shards() === 5, 'second copy needs its own shards; non-exclusive / bogus ids refused, no shards taken');
   await S.emit('inv:equip', 'c_void');
@@ -810,7 +810,7 @@ async function shardShopSuite(URL) {
   const poor = await S.emit('shard:buy', 'n_shard', 99);
   ok(badQ.every(x => !x.ok && x.code === 'qty') && !poor.ok && poor.code === 'shards' && shards() === have, `shard shop qty: 0 / 100 / 2.5 / "3" / −1 / null refused; ×99 without enough shards refused (${poor.error})`);
   r = await S.emit('shard:buy', 'n_shard', 3);
-  ok(r.ok && r.spent === 3 * 50 && r.qty === 3 && shards() === have - 150 && S.profile.inventory.filter(x => x.id === 'n_shard').reduce((n, x) => n + x.q, 0) === 3, 'shard shop ×3 «Осколочный ник»: exactly 150 shards spent, 3 copies stacked');
+  ok(r.ok && r.spent === 3 * 63 && r.qty === 3 && shards() === have - 189 && S.profile.inventory.filter(x => x.id === 'n_shard').reduce((n, x) => n + x.q, 0) === 3, 'shard shop ×3 «Осколочный ник»: exactly 189 shards spent, 3 copies stacked');
   // over-cap account (e.g. migrated): items kept, every grant refused until under the cap
   const INV = require('../lib/inventory');
   const big = { inventory: { v: 1, slots: [{ id: 'c_coral', q: 99 }, { id: 'c_coral', q: 99 }, { id: 'c_coral', q: 99 }, { id: 'c_coral', q: 99 }, { id: 'c_coral', q: 99 }, { id: 'c_coral', q: 5 }, { id: G.SHARD_ID, q: 40 }] }, owned: [], equipped: {}, stats: {} };

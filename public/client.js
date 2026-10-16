@@ -1296,7 +1296,7 @@
     requestAnimationFrame(frame);
     frameNo++;
     const now = performance.now(), t = now / 1000;
-    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0); ctx.globalAlpha = 1; ctx.shadowBlur = 0; ctx.globalCompositeOperation = 'source-over'; ctx.setLineDash([]); // a throw mid-frame can't leak state into the next frame
     VW = W; VH = H;
     if (!joined) { drawIdleBackground(t); drawPreviews(t, now); return; }
 
@@ -2312,6 +2312,7 @@
     ex.append(lab, inp, btn);
     head.append(ico, txt, ex); grid.appendChild(head);
     const list = G.ITEMS.filter(i => i.exclusive).sort((a, b2) => a.shardPrice - b2.shardPrice);
+    { const v = list.findIndex(i => i.id === 'c_void'), c = list.findIndex(i => i.id === 's_crystal'); if (v >= 0 && c >= 0) [list[v], list[c]] = [list[c], list[v]]; } // «Кристалл» shown first, «Пустота» in its place
     for (const it of list) {
       const owned = owns(it.id);
       const el = document.createElement('div'); el.className = 'item ex-item rar-' + it.rarity; el.dataset.item = it.id;

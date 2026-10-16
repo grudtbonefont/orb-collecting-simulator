@@ -333,7 +333,7 @@ function obstacleTick(now) {
   robotTick(now);
   for (const o of obstacles) {
     if (o.k !== 'laser' || now < o.armAt) continue;
-    for (const pl of players.values()) if (!(pl.zapUntil > now) && G.laserHits(o, pl.x, pl.y, now, G.PLAYER_R + 2)) laserHit(pl, o, now);
+    for (const pl of players.values()) if (!(pl.zapUntil > now) && G.laserHits(o, pl.x, pl.y, now, G.PLAYER_R)) laserHit(pl, o, now);
   }
 }
 
@@ -1368,6 +1368,7 @@ io.on('connection', socket => {
       if (d.clear) { obstacles = []; shots = []; pushObstacles(); return ack({ ok: true }); }
       const n = v => (Number.isFinite(Number(v)) && v !== null && v !== '' ? Number(v) : undefined);
       const o = spawnObstacle(Date.now(), { kind: ['wall', 'block', 'rock', 'laser', 'robot'].includes(d.kind) ? d.kind : undefined, x: n(d.x), y: n(d.y), lifeMs: n(d.lifeMs) });
+      if (o && o.k === 'laser' && n(d.a0) !== undefined) { o.a0 = n(d.a0); o.w = n(d.w) || 0; o.t0 = Date.now(); if (d.armNow) o.armAt = Date.now(); pushObstacles(); } // fixed beam (hitbox tests)
       ack({ ok: !!o, obstacles: publicObstacles() });
     });
     // spawn one orb of each requested tier in a ring around the caller or {x,y} (screenshots / rarity tests)

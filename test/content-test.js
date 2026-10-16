@@ -237,10 +237,33 @@ async function schedulerSuite() {
   A.close(); await srv.stop(); fs.rmSync(file, { force: true });
 }
 
+async function hitboxSuite(url) {
+  console.log('--- laser / shot / ring hitbox = the ball only (not the name label)');
+  const A = client(url); await A.register('Hit' + rnd());
+  const P = { x: 2000, y: 2000 }, R = G.PLAYER_R;
+  await A.emit('test:obstacle', { clear: true });
+  await A.emit('test:tp', { x: P.x + 150, y: P.y - (R + 12) }); await sleep(150); // beam runs 32 px above the centre: through the nickname/title label, above the ball
+  await A.emit('test:orbs', 500);
+  let r = await A.emit('test:obstacle', { kind: 'laser', x: P.x, y: P.y, lifeMs: 20000, a0: 0, w: 0, armNow: true });
+  const z0 = A.events('zap').length; await sleep(1200);
+  ok(r.ok && A.events('zap').length === z0, 'static beam through the label area (32 px above the centre) → no hit');
+  await A.emit('test:tp', { x: P.x + 150, y: P.y - (R + 1) }); await sleep(800);
+  ok(A.events('zap').length === z0, `beam 1 px outside the ${R} px ball → no hit (no padding)`);
+  await A.emit('test:tp', { x: P.x + 150, y: P.y - (R - 4) }); await sleep(800);
+  ok(A.events('zap').length === z0 + 1, 'beam crossing the ball (16 px from the centre) → hit');
+  await A.emit('test:obstacle', { clear: true });
+  const F = require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'features.js'), 'utf8'), S = require('fs').readFileSync(require('path').join(__dirname, '..', 'server.js'), 'utf8');
+  ok(/laserHits\(o, pl\.x, pl\.y, now, G\.PLAYER_R\)/.test(S) && /G\.PLAYER_R \+ OB\.shotR\)/.test(S) && /G\.PLAYER_R \+ G\.OBSTACLES\.shotR\)/.test(F) && /B\.ringW \/ 2 \+ G\.PLAYER_R\)/.test(F),
+    'robot shot, boss shot and boss ring all test against the ball radius (+ projectile / ring half-width only)');
+  ok(G.laserHits({ k: 'laser', x: 0, y: 0, len: 300, w: 0, a0: 0, t0: 0, armAt: 0 }, 150, -R, 1, R) && !G.laserHits({ k: 'laser', x: 0, y: 0, len: 300, w: 0, a0: 0, t0: 0, armAt: 0 }, 150, -R - 0.5, 1, R) && !G.laserHits({ k: 'laser', x: 0, y: 0, len: 300, w: 0, a0: 0, t0: 0, armAt: 0 }, 300 + R + 1, 0, 1, R),
+    'segment-to-circle distance: tangent hits, 0.5 px off misses, past the beam end misses');
+}
+
 (async () => {
   const file = path.join(os.tmpdir(), `ocs-ct-${process.pid}.json`);
   const srv = await startServer(3131, { DATA_FILE: file, MINI_ROOM_MS: '3000' });
   try {
+    if (want('hitbox')) await hitboxSuite(srv.url);
     if (want('shards')) await shardSuite(srv.url);
     if (want('ach')) await achSuite(srv.url);
     if (want('quests')) await questSuite(srv.url);
