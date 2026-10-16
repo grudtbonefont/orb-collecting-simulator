@@ -42,7 +42,8 @@
   const pointer = { down: false, x: 0, y: 0 };
 
   const itemVal = id => (G.ITEM_BY_ID[id] || {}).value;
-  const mySpeed = () => G.speedFor(profile ? profile.upgrades.speed : 0);
+  const mySpeed = () => G.speedFor(profile ? profile.upgrades.speed : 0) * C.boostMult(profile && profile.stats, 'speed', Date.now() + srvSkew); // quest boost «Скорость +10 %»
+  let srvSkew = 0;
   const myPickup = () => G.pickupFor(profile ? profile.upgrades.magnet : 0);
   const fmt = n => Number(n).toLocaleString('ru-RU');
   // currency icons (CSS-drawn, see .cur-orb / .cur-shard): use with innerHTML; amounts go through fmt (numbers only)
@@ -192,11 +193,12 @@
     $('hudName').textContent = '👤 ' + myName;
     resetChat(res.chat || []);
     runners.clear(); evResultHide(); setEvent(res.event || null); setObstacles(res.obstacles || []); setWeekend(res.weekend || 0);
+    setMini(res.mini || null); setBoss(res.boss || null); roomUntil = 0; bossRings.length = 0; updateRoomBar();
     updateHud();
     if (!reconnect) toast(`Добро пожаловать, ${myName}! Собирайте сферы.`, 'ok');
   }
   function hideGameUi() {
-    joined = false; evState = null; runners.clear(); obstacles = []; wkEnd = 0; updateWeekendChip();
+    joined = false; evState = null; runners.clear(); obstacles = []; wkEnd = 0; updateWeekendChip(); setMini(null); setBoss(null); roomUntil = 0; updateRoomBar();
     $('hud').classList.add('hidden'); $('chat').classList.add('hidden'); $('chatBtn').classList.add('hidden'); closeChat();
     closeModals();
   }
@@ -261,12 +263,12 @@
   socket.on('kicked', msg => { paused = true; stage = 'auth'; hideGameUi(); showResume(msg, true); });
 
   function addPlayer(p) {
-    players.set(p.id, { id: p.id, name: p.name, eq: p.eq, trail: [], dir: { x: 1, y: 0 }, pos: { x: p.x, y: p.y }, last: { x: p.x, y: p.y } });
+    players.set(p.id, { id: p.id, name: p.name, ti: p.ti || '', eq: p.eq, trail: [], dir: { x: 1, y: 0 }, pos: { x: p.x, y: p.y }, last: { x: p.x, y: p.y } });
   }
   socket.on('pjoin', p => { if (!players.has(p.id)) addPlayer(p); });
   socket.on('pleave', id => players.delete(id));
   socket.on('chat', m => addChat(m, true));
-  socket.on('pmeta', p => { const pl = players.get(p.id); if (pl) { pl.eq = p.eq; pl.name = p.name; } });
+  socket.on('pmeta', p => { const pl = players.get(p.id); if (pl) { pl.eq = p.eq; pl.name = p.name; pl.ti = p.ti || ''; } });
   socket.on('sping', v => socket.emit('spong', v));
   socket.on('announce', a => toast('✨ ' + a.text));
   // ------------------------------------------------------------ temporary obstacles + rotating lasers (server-run)
@@ -297,7 +299,7 @@
   socket.on('zap', z => {
     if (!z) return; zapFlash = performance.now();
     floaters.push({ x: me.x, y: me.y - 26, text: (z.src === 'robot' ? '💥 −' : '⚡ −') + z.loss, color: '#ff4d5e', start: performance.now(), big: true });
-    toast(`${z.src === 'robot' ? '🤖 Робот попал в вас!' : '⚡ Лазер!'} Потеряно ${fmt(z.loss)} сфер — часть рассыпалась рядом. ${Math.round(z.inv / 1000)} с неуязвимости.`, 'err');
+    toast(`${z.src === 'robot' ? '🤖 Робот попал в вас!' : z.src === 'boss' ? '👹 Удар босса!' : '⚡ Лазер!'} Потеряно ${fmt(z.loss)} сфер — часть рассыпалась рядом. ${Math.round(z.inv / 1000)} с неуязвимости.`, 'err');
   });
   function drawRobot(o, t, now) {
     const st = robotState.get(o.id) || { face: 0, aim: 0 }, r = o.r, a = st.face;
@@ -401,6 +403,7 @@
     while (snapshots.length > 40) snapshots.shift();
     for (const [id, x, y, t, e] of st.oa) orbs.set(id, { x, y, t, born: now, fall: e && t !== 't' ? 1 : 0 }); // e: event orb (rain falls in)
     if (st.rn) syncRunners(st.rn, now); else runners.clear();
+    syncBoss(st.bs, now);
     robotState = new Map((st.rb || []).map(r => [r[0], { face: r[1], aim: r[2], ax: r[3], ay: r[4] }]));
     shotsNow = (st.pj || []).map(b => ({ x: b[1], y: b[2], vx: b[3], vy: b[4], at: now }));
     for (const [id, pid] of st.od) {
@@ -417,7 +420,7 @@
   function reconcile(x, y, ack) {
     pending = pending.filter(i => i.s > ack);
     const p = { x, y };
-    for (const i of pending) { const px = p.x; G.applyInput(p, i.x, i.y, mySpeed()); G.zoneGate(p, px, doorOpen()); G.resolveObstacles(p, obstacles); }
+    for (const i of pending) { const px = p.x; G.applyInput(p, i.x, i.y, mySpeed()); G.zoneGate(p, px, doorOpen()); G.resolveObstacles(p, obstacles); G.resolveObstacles(p, bossSolid()); }
     const ex = me.x - p.x, ey = me.y - p.y;
     if (Math.abs(ex) + Math.abs(ey) > 0.01) {
       if (Math.hypot(ex, ey) > 250) { corr.x = corr.y = 0; prevMe.x = p.x; prevMe.y = p.y; }
@@ -439,6 +442,7 @@
   socket.on('item', d => {
     if (!d) return;
     if (d.error) { toast(d.error, 'err'); return; }
+    if (d.id === G.SHARD_ID) { toast(`✦ +${d.qty} ${d.qty === 1 ? 'осколок' : d.qty < 5 ? 'осколка' : 'осколков'}`, 'ok'); return; }
     const def = G.ITEM_BY_ID[d.id];
     if (def) toast(`${def.icon || '🎁'} Получен предмет: ${def.name}${d.qty > 1 ? ' ×' + d.qty : ''} — он в инвентаре (I)`, 'ok');
   });
@@ -452,6 +456,8 @@
     if (!$('ups').classList.contains('hidden')) renderUps();
     if (!$('inv').classList.contains('hidden')) renderInv();
     if (!$('profile').classList.contains('hidden')) renderProfile();
+    if (!$('ach').classList.contains('hidden')) renderAch();
+    if (!$('quests').classList.contains('hidden')) renderQuests();
   }
   socket.on('top', d => {
     if (d.wk != null) setWeekend(d.wk);
@@ -504,6 +510,8 @@
   function updateHud(bump) {
     if (!profile) return;
     $('hudBalance').textContent = fmt(profile.balance);
+    $('hudShards').textContent = fmt(profile.shards || 0);
+    updateBoostsHud(); updateQuestTracker();
     $('hudTotal').textContent = fmt(profile.total);
     $('hudSession').textContent = fmt(sessionScore);
     document.querySelectorAll('.bal').forEach(e => e.textContent = fmt(profile.balance));
@@ -536,6 +544,8 @@
     if (e.code === 'KeyU') toggleModal('ups');
     if (e.code === 'KeyM') toggleModal('games');
     if (e.code === 'KeyL') toggleModal('lb');
+    if (e.code === 'KeyQ') toggleModal('quests');
+    if (e.code === 'KeyJ') toggleModal('ach');
     if (e.code === 'KeyH') toggleOrbHelp();
     if (e.code === 'Space' && reactionState === 'go' || e.code === 'Space' && reactionState === 'wait') { e.preventDefault(); reactionClick(); }
     if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
@@ -635,7 +645,7 @@
     prevMe.x = me.x; prevMe.y = me.y;
     G.applyInput(me, inp.x, inp.y, mySpeed());
     G.zoneGate(me, prevMe.x, doorOpen());
-    G.resolveObstacles(me, obstacles);
+    G.resolveObstacles(me, obstacles); G.resolveObstacles(me, bossSolid());
     pending.push(inp);
     updateDoorBtn();
     if (pending.length > 80) pending.shift();
@@ -936,6 +946,7 @@
     if (opts.name) {
       const ny = -top * r - hatRoom(hat, r);
       drawNameTag(g, opts.name, 0, ny, itemVal(eq.nameColor) || '#fff', t, opts.isMe ? 14 : 13);
+      if (opts.title) { g.font = '700 10.5px Segoe UI, system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'bottom'; g.lineWidth = 3; g.strokeStyle = 'rgba(0,0,0,0.65)'; const tt = '« ' + opts.title + ' »'; g.strokeText(tt, 0, ny - 15); g.fillStyle = '#ffd76a'; g.fillText(tt, 0, ny - 15); }
     }
     g.restore();
   }
@@ -1318,7 +1329,9 @@
     ctx.strokeStyle = 'rgba(120,90,255,0.8)'; ctx.lineWidth = 4; ctx.shadowColor = '#7a5cff'; ctx.shadowBlur = 20;
     ctx.strokeRect(0, 0, G.WORLD.w, G.WORLD.h); ctx.shadowBlur = 0;
 
+    drawBonusRoom(t);
     drawEventZone(t, now);
+    drawMiniWorld(t, now);
     drawObstacles(t, now);
     drawShots(now);
     // orbs
@@ -1339,6 +1352,7 @@
       drawOrb(ctx, o.x, oy, o.t, t, id, k);
     }
     drawRunner(t, now); checkRunnerTouch(now);
+    drawBoss(t, now);
     // collect fx
     for (let i = fx.length - 1; i >= 0; i--) {
       const f = fx[i], k = (now - f.start) / 220;
@@ -1369,7 +1383,7 @@
     for (const pl of order) {
       if (!pl.pos) continue;
       if (pl.pos.x < cam.x - 120 || pl.pos.x > cam.x + VW + 120 || pl.pos.y < cam.y - 120 || pl.pos.y > cam.y + VH + 120) continue;
-      drawAvatar(ctx, pl.pos.x, pl.pos.y, G.PLAYER_R, pl.eq, t, { name: pl.name, dir: pl.dir, isMe: pl.id === myId, phase: pl.id });
+      drawAvatar(ctx, pl.pos.x, pl.pos.y, G.PLAYER_R, pl.eq, t, { name: pl.name, title: pl.ti, dir: pl.dir, isMe: pl.id === myId, phase: pl.id });
     }
     // floating texts
     for (let i = floaters.length - 1; i >= 0; i--) {
@@ -1482,6 +1496,8 @@
       mctx.fillStyle = evState.phase === 'active' ? 'rgba(255,204,51,0.25)' : 'rgba(255,204,51,0.1)'; mctx.strokeStyle = 'rgba(255,204,51,0.8)';
       mctx.beginPath(); mctx.arc(zx, zy, Math.max(4, z.r * k), 0, Math.PI * 2); mctx.fill(); mctx.stroke();
     }
+    if (miniState) { const [mx, my] = px(miniState.x, miniState.y); mctx.fillStyle = '#ffd24a'; mctx.strokeStyle = '#fff'; mctx.lineWidth = 1.5; mctx.beginPath(); mctx.arc(Math.max(6, Math.min(S - 6, mx)), Math.max(6, Math.min(S - 6, my)), 4.5 + Math.sin(now / 150), 0, Math.PI * 2); mctx.fill(); mctx.stroke(); }
+    if (bossState) { const b = bossPos(now), [bx, by] = px(b.x, b.y); mctx.fillStyle = '#ff3355'; mctx.strokeStyle = '#fff'; mctx.lineWidth = 1.5; mctx.beginPath(); mctx.arc(Math.max(7, Math.min(S - 7, bx)), Math.max(7, Math.min(S - 7, by)), 6, 0, Math.PI * 2); mctx.fill(); mctx.stroke(); }
     for (const o of obstacles) { // obstacles + lasers are always shown (they are public map features)
       const [ox, oy] = px(o.x, o.y);
       if (o.k === 'robot') { mctx.fillStyle = '#c3cad6'; mctx.strokeStyle = '#ff4040'; mctx.lineWidth = 1.5; mctx.fillRect(ox - 3.5, oy - 3.5, 7, 7); mctx.strokeRect(ox - 3.5, oy - 3.5, 7, 7); continue; }
@@ -1694,6 +1710,265 @@
     for (const sgn of [-1, 1]) { const ex = x + d.x * 5 - d.y * sgn * 5, ey = y + d.y * 5 + d.x * sgn * 5; ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(ex, ey, 3.4, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#10142a'; ctx.beginPath(); ctx.arc(ex + d.x * 1.4, ey + d.y * 1.4, 1.7, 0, Math.PI * 2); ctx.fill(); }
   }
 
+  // ------------------------------------------------------------ content update: mini-events, bonus room, boss, achievements, daily quests
+  // (all server-run; the client only shows them)
+  let miniState = null, roomUntil = 0, bossState = null;
+  const bossRings = [];
+  const mmss = ms => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+  function setMini(d) {
+    if (!d) { miniState = null; updateMiniChip(); return; }
+    const now = performance.now();
+    miniState = Object.assign({}, d, { endAt: now + (d.left || 0), at: now });
+    updateMiniChip();
+  }
+  socket.on('mini:start', d => { if (!joined || !d) return; setMini(d); const def = C.MINI[d.kind]; if (def) toast(`${def.icon} Мини-событие «${def.name}»! Отмечено на радаре.`, 'ok'); });
+  socket.on('mini', d => { if (!joined) return; setMini(d); });
+  socket.on('mini:end', d => {
+    if (!joined) return; const k = miniState && miniState.kind; setMini(null);
+    if (d && d.reason === 'opened' && k === 'chest') toast(`🧰 Сундук открыт: ${(d.names || []).map(String).join(', ')}`);
+  });
+  socket.on('mini:reward', d => { if (d && d.reward) toast(`🧰 Награда из сундука: ${C.rewardText(d.reward)}`, 'ok'); });
+  socket.on('room', d => {
+    roomUntil = d && d.left > 0 ? performance.now() + d.left : 0;
+    toast(roomUntil ? '🌀 Бонусная комната! Собирайте сферы — через 30 с вернётесь обратно.' : '🌀 Вы вернулись на арену.', 'ok');
+    updateRoomBar();
+  });
+  function updateRoomBar() {
+    const el = $('roomBar'), left = roomUntil - performance.now();
+    if (!joined || left <= 0) { el.classList.add('hidden'); return; }
+    el.classList.remove('hidden'); el.textContent = `🌀 Бонусная комната · ${Math.ceil(left / 1000)} с`;
+  }
+  function updateMiniChip() {
+    const chip = $('miniChip'), m = miniState, def = m && C.MINI[m.kind];
+    if (!joined || !m || !def) { chip.classList.add('hidden'); chip.classList.remove('open'); return; }
+    const now = performance.now(), left = m.endAt - now;
+    chip.classList.remove('hidden'); chip.dataset.kind = m.kind;
+    $('miniChipIcon').textContent = def.icon; $('miniChipName').textContent = def.name; $('miniChipDesc').textContent = def.desc;
+    $('miniChipTime').textContent = mmss(left); $('miniChipPhase').textContent = `Мини-событие · осталось ${mmss(left)}`;
+    const d = Math.round(Math.hypot(m.x - dispMe.x, m.y - dispMe.y) / 10);
+    let info = `До места: ${d} м`;
+    if (m.kind === 'chest') info += ` · рядом: ${m.near || 0} · замок ${Math.min(100, Math.round((m.prog || 0) / Math.max(1, m.need) * 100))} %`;
+    $('miniChipInfo').textContent = info;
+  }
+  // ---- boss
+  function setBoss(d) {
+    if (!d) { bossState = null; updateBossUi(); return; }
+    const now = performance.now(), prev = bossState;
+    bossState = { phase: d.phase, x: d.x, y: d.y, px: prev ? bossPos(now).x : d.x, py: prev ? bossPos(now).y : d.y, at: now, hp: d.hp, max: d.max, startAt: now + (d.in || 0), endAt: now + (d.in || 0) + (d.phase === 'announce' ? d.dur : d.left), r: d.r || C.BOSS.r };
+    if (d.phase === 'active') bossState.endAt = now + d.left;
+    updateBossUi();
+  }
+  function syncBoss(bs, now) {
+    if (!bossState || !bs) return;
+    const p = bossPos(now); bossState.px = p.x; bossState.py = p.y; bossState.x = bs[0]; bossState.y = bs[1]; bossState.at = now; bossState.hp = bs[2]; bossState.max = bs[3];
+    if (bossState.phase !== 'active') { bossState.phase = 'active'; updateBossUi(); }
+  }
+  function bossPos(now) { const b = bossState, k = Math.min(1, (now - b.at) / G.TICK_MS); return { x: b.px + (b.x - b.px) * k, y: b.py + (b.y - b.py) * k }; }
+  function bossSolid() { if (!bossState || bossState.phase !== 'active') return []; const p = bossPos(performance.now()); return [{ k: 'circle', x: p.x, y: p.y, r: bossState.r }]; }
+  socket.on('boss', d => { if (!joined) return; const was = bossState; setBoss(d); if (d && d.phase === 'announce' && !was) toast(`👹 Через ${Math.ceil((d.in || 0) / 1000)} с появится босс «${C.BOSS.name}»! Он отмечен на радаре.`, 'ok'); if (d && d.phase === 'active') toast('👹 Босс на арене! Толкайте его, чтобы нанести урон.', 'ok'); });
+  socket.on('boss:ring', d => { if (!joined || !d) return; bossRings.push(Object.assign({}, d, { at: performance.now() + d.warn })); });
+  socket.on('boss:hit', d => { if (!joined || !d) return; floaters.push({ x: dispMe.x, y: dispMe.y - 40, text: `−${d.dmg} HP`, color: '#ff7a8a', start: performance.now(), big: true }); });
+  socket.on('boss:end', d => {
+    bossState = null; bossRings.length = 0; updateBossUi();
+    if (!joined || !d) return;
+    const box = $('evResult'); box.textContent = ''; box.dataset.kind = 'boss';
+    const head = document.createElement('div'); head.className = 'evr-head';
+    const h = document.createElement('b'); h.textContent = d.killed ? `👹 Босс повержен!` : '👹 Босс ушёл…';
+    const x = document.createElement('button'); x.type = 'button'; x.className = 'close'; x.setAttribute('aria-label', 'Закрыть'); x.textContent = '✕'; x.onclick = evResultHide;
+    head.append(h, x); box.appendChild(head);
+    const you = document.createElement('div'); you.className = 'evr-you';
+    if (d.you) { you.innerHTML = `Вы: ${Number(d.you.place) | 0}-е место · урон ${fmt(d.you.dmg)} (${Number(d.you.share) | 0} %)` + (d.you.reward ? ` · награда ${rewardText(d.you.reward)}` : ''); you.classList.add('ok'); }
+    else you.textContent = d.killed ? 'Вы не нанесли урона — в следующий раз!' : 'Его не успели победить за 3 минуты.';
+    box.appendChild(you);
+    if (d.results && d.results.length) {
+      const ol = document.createElement('ol'); ol.className = 'evr-list';
+      for (const r of d.results) { const li = document.createElement('li'); const n = document.createElement('span'); n.textContent = r.name; const v = document.createElement('b'); v.innerHTML = fmt(r.dmg) + ' урона' + (r.reward ? ' ' + rewardText(r.reward) : ''); li.append(n, v); if (r.name === myName) li.className = 'me'; ol.appendChild(li); }
+      box.appendChild(ol);
+    }
+    box.classList.remove('hidden'); clearTimeout(evResultTimer); evResultTimer = setTimeout(evResultHide, 12000);
+  });
+  function updateBossUi() {
+    const bar = $('bossBar'), chip = $('bossChip'), b = bossState, now = performance.now();
+    document.body.classList.toggle('boss-on', !!(joined && b && b.phase === 'active'));
+    if (!joined || !b) { bar.classList.add('hidden'); chip.classList.add('hidden'); chip.classList.remove('open'); return; }
+    chip.classList.remove('hidden'); chip.dataset.phase = b.phase;
+    const ann = b.phase === 'announce', left = ann ? b.startAt - now : b.endAt - now;
+    $('bossChipTime').textContent = (ann ? 'через ' : '') + mmss(left);
+    $('bossChipName').textContent = `Босс «${C.BOSS.name}»`; $('bossChipDesc').textContent = C.BOSS.desc;
+    $('bossChipPhase').textContent = ann ? `Появится через ${Math.ceil(left / 1000)} с` : `На арене · уйдёт через ${mmss(left)}`;
+    const p = bossPos(now); $('bossChipInfo').textContent = `До босса: ${Math.round(Math.hypot(p.x - dispMe.x, p.y - dispMe.y) / 10)} м (1-я зона)` + (ann ? '' : ` · HP ${fmt(b.hp)} / ${fmt(b.max)}`);
+    if (ann) { bar.classList.add('hidden'); return; }
+    bar.classList.remove('hidden'); $('bossName').textContent = C.BOSS.name; $('bossTime').textContent = mmss(left);
+    $('bossHpFill').style.width = Math.max(0, Math.min(100, b.hp / Math.max(1, b.max) * 100)) + '%';
+    $('bossHpText').textContent = `${fmt(Math.max(0, b.hp))} / ${fmt(b.max)} HP`;
+  }
+  for (const id of ['miniChip', 'bossChip']) {
+    $(id + 'Btn').addEventListener('click', ev => { ev.stopPropagation(); for (const o of ['evChip', 'wkChip', 'miniChip', 'bossChip']) if (o !== id) $(o).classList.remove('open'); $(id).classList.toggle('open'); });
+    $(id).addEventListener('pointerdown', ev => ev.stopPropagation());
+  }
+  document.addEventListener('pointerdown', ev => { for (const id of ['miniChip', 'bossChip']) if (!$(id).contains(ev.target)) $(id).classList.remove('open'); });
+  setInterval(() => { if (!joined) return; updateMiniChip(); updateBossUi(); updateRoomBar(); }, 200);
+  // world layer
+  function drawBonusRoom(t) {
+    const R = G.BONUS_ROOM;
+    if (R.x > cam.x + VW || R.x + R.w < cam.x || R.y > cam.y + VH || R.y + R.h < cam.y) return;
+    ctx.save();
+    const g = ctx.createLinearGradient(R.x, R.y, R.x + R.w, R.y + R.h); g.addColorStop(0, 'rgba(70,30,120,0.35)'); g.addColorStop(1, 'rgba(20,70,140,0.35)');
+    ctx.fillStyle = g; ctx.fillRect(R.x, R.y, R.w, R.h);
+    ctx.strokeStyle = `rgba(190,140,255,${0.7 + 0.2 * Math.sin(t * 3)})`; ctx.lineWidth = 5; ctx.shadowColor = '#b48cff'; ctx.shadowBlur = 18; ctx.strokeRect(R.x, R.y, R.w, R.h); ctx.shadowBlur = 0;
+    ctx.font = '800 28px Segoe UI, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(220,200,255,0.5)'; ctx.fillText('🌀 Бонусная комната', R.x + R.w / 2, R.y + 42);
+    ctx.restore();
+  }
+  function drawMiniWorld(t, now) {
+    const m = miniState; if (!m) return;
+    if (m.x < cam.x - 300 || m.x > cam.x + VW + 300 || m.y < cam.y - 300 || m.y > cam.y + VH + 300) return;
+    ctx.save(); ctx.translate(m.x, m.y);
+    if (m.kind === 'goldrain') {
+      const r = m.r || C.MINI.goldrain.radius;
+      ctx.strokeStyle = 'rgba(255,214,90,0.55)'; ctx.lineWidth = 3; ctx.setLineDash([10, 9]); ctx.lineDashOffset = -t * 30;
+      ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+      const gr = ctx.createRadialGradient(0, 0, 0, 0, 0, r); gr.addColorStop(0, 'rgba(255,220,100,0.16)'); gr.addColorStop(1, 'rgba(255,200,60,0)'); ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
+    } else if (m.kind === 'chest') {
+      const def = C.MINI.chest, k = Math.min(1, (m.prog || 0) / Math.max(1, m.need || def.duoMs));
+      ctx.strokeStyle = 'rgba(255,204,51,0.35)'; ctx.lineWidth = 2; ctx.setLineDash([8, 8]); ctx.beginPath(); ctx.arc(0, 0, def.openR, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+      ctx.shadowColor = '#ffcc33'; ctx.shadowBlur = 16 + 8 * Math.sin(t * 4);
+      ctx.fillStyle = '#8a5a2b'; ctx.fillRect(-30, -16, 60, 36); ctx.fillStyle = '#a8703a'; ctx.beginPath(); ctx.moveTo(-30, -16); ctx.quadraticCurveTo(0, -42, 30, -16); ctx.closePath(); ctx.fill();
+      ctx.shadowBlur = 0; ctx.fillStyle = '#ffcc33'; ctx.fillRect(-30, -4, 60, 6); ctx.fillRect(-4, -18, 8, 38);
+      ctx.fillStyle = '#d9d9e6'; ctx.fillRect(-8, 2, 16, 13); ctx.strokeStyle = '#d9d9e6'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(0, 2, 6, Math.PI, 0); ctx.stroke(); // padlock
+      ctx.strokeStyle = '#5dff8f'; ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.beginPath(); ctx.arc(0, -2, 52, -Math.PI / 2, -Math.PI / 2 + k * Math.PI * 2); ctx.stroke();
+      ctx.font = '800 14px Segoe UI, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.fillStyle = '#ffe08a';
+      const solo = (m.need || 0) > def.duoMs, label = solo ? 'Сундук: стойте рядом 8 с' : `Сундук: нужно 2 игрока (${m.near || 0}/2)`;
+      ctx.strokeText(label, 0, 76); ctx.fillText(label, 0, 76);
+    } else if (m.kind === 'portal') {
+      const r = C.MINI.portal.r;
+      for (let i = 0; i < 4; i++) { ctx.strokeStyle = `hsla(${270 + i * 25},100%,${65 + i * 5}%,${0.8 - i * 0.15})`; ctx.lineWidth = 6 - i; ctx.beginPath(); ctx.ellipse(0, 0, r - i * 9, (r - i * 9) * 0.92, t * (1.5 + i * 0.6), 0.3, Math.PI * 1.75); ctx.stroke(); }
+      const gr = ctx.createRadialGradient(0, 0, 2, 0, 0, r); gr.addColorStop(0, 'rgba(255,255,255,0.9)'); gr.addColorStop(0.4, 'rgba(170,110,255,0.45)'); gr.addColorStop(1, 'rgba(90,40,200,0)');
+      ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
+      ctx.font = '800 14px Segoe UI, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.fillStyle = '#e2ccff';
+      ctx.strokeText('Бонусный портал', 0, r + 22); ctx.fillText('Бонусный портал', 0, r + 22);
+    }
+    ctx.restore();
+  }
+  function drawBoss(t, now) {
+    for (let i = bossRings.length - 1; i >= 0; i--) { // shockwave rings: dashed warning, then the expanding wave
+      const r = bossRings[i], rr = (now - r.at) / 1000 * r.speed;
+      if (rr > r.max) { bossRings.splice(i, 1); continue; }
+      ctx.save();
+      if (rr < 0) { ctx.strokeStyle = `rgba(255,70,90,${0.4 + 0.3 * Math.sin(now / 60)})`; ctx.lineWidth = 3; ctx.setLineDash([10, 8]); ctx.beginPath(); ctx.arc(r.x, r.y, r.max, 0, Math.PI * 2); ctx.stroke(); }
+      else { ctx.strokeStyle = `rgba(255,80,110,${0.85 * (1 - rr / r.max) + 0.15})`; ctx.lineWidth = r.w; ctx.shadowColor = '#ff3355'; ctx.shadowBlur = 20; ctx.beginPath(); ctx.arc(r.x, r.y, Math.max(1, rr), 0, Math.PI * 2); ctx.stroke(); }
+      ctx.restore();
+    }
+    const b = bossState; if (!b) return;
+    const p = bossPos(now), R = b.r;
+    if (p.x < cam.x - 200 || p.x > cam.x + VW + 200 || p.y < cam.y - 200 || p.y > cam.y + VH + 200) return;
+    ctx.save(); ctx.translate(p.x, p.y);
+    if (b.phase === 'announce') { // summoning circle
+      ctx.strokeStyle = `rgba(255,60,90,${0.5 + 0.3 * Math.sin(t * 5)})`; ctx.lineWidth = 4; ctx.setLineDash([14, 10]); ctx.lineDashOffset = -t * 40;
+      ctx.beginPath(); ctx.arc(0, 0, R + 20, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+      ctx.font = '800 16px Segoe UI, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#ff9aa6'; ctx.fillText(`Босс через ${Math.max(0, Math.ceil((b.startAt - now) / 1000))} с`, 0, 6);
+      ctx.restore(); return;
+    }
+    const spikes = 14; ctx.rotate(t * 0.4);
+    ctx.shadowColor = '#ff2b6a'; ctx.shadowBlur = 30;
+    ctx.beginPath(); for (let i = 0; i <= spikes * 2; i++) { const a = i / (spikes * 2) * Math.PI * 2, rr = i % 2 ? R : R * 1.16 + 3 * Math.sin(t * 6 + i); ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr); }
+    const gr = ctx.createRadialGradient(-R * 0.3, -R * 0.3, R * 0.1, 0, 0, R * 1.2); gr.addColorStop(0, '#ff9ad0'); gr.addColorStop(0.45, '#b0185e'); gr.addColorStop(1, '#3a0626');
+    ctx.fillStyle = gr; ctx.fill(); ctx.shadowBlur = 0; ctx.rotate(-t * 0.4);
+    for (const s of [-1, 1]) { ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.ellipse(s * R * 0.32, -R * 0.15, R * 0.17, R * 0.13, s * 0.4, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#ff2040'; ctx.beginPath(); ctx.arc(s * R * 0.32 + (dispMe.x - p.x) / 200, -R * 0.15 + (dispMe.y - p.y) / 200, R * 0.07, 0, Math.PI * 2); ctx.fill(); }
+    ctx.fillStyle = '#1a0010'; ctx.beginPath(); ctx.ellipse(0, R * 0.3, R * 0.38, R * 0.14 + 4 * Math.abs(Math.sin(t * 3)), 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff'; for (let i = -3; i <= 3; i++) { ctx.beginPath(); ctx.moveTo(i * R * 0.1 - 5, R * 0.2); ctx.lineTo(i * R * 0.1 + 5, R * 0.2); ctx.lineTo(i * R * 0.1, R * 0.3); ctx.fill(); }
+    // small HP bar above
+    const w = R * 2; ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(-w / 2, -R - 30, w, 9); ctx.fillStyle = '#ff3355'; ctx.fillRect(-w / 2, -R - 30, w * Math.max(0, b.hp / Math.max(1, b.max)), 9);
+    ctx.restore();
+  }
+  // ---- achievements
+  const achProfile = p => ({ total: p.total, stats: p.stats || {}, codesUsed: p.codesUsed || 0, liveMs: 0 });
+  socket.on('ach', d => {
+    const a = d && C.ACH_BY_ID[d.id]; if (!a) return;
+    toast(`🏆 Достижение «${a.name}»! ${C.rewardText(d.reward)}${a.title ? ` · титул «${a.title}» (🏆 → выбрать)` : ''}`, 'ok');
+  });
+  function renderAch() {
+    if (!profile) return;
+    const p = achProfile(profile), got = (profile.stats && profile.stats.ach) || {}, list = $('achList'); list.textContent = '';
+    $('achCount').textContent = `${Object.keys(got).length} / ${C.ACH.length}`;
+    const sorted = C.ACH.slice().sort((x, y) => (!!got[y.id] - !!got[x.id]) || (C.achValue(y, p) / y.goal - C.achValue(x, p) / x.goal));
+    for (const a of sorted) {
+      const v = Math.min(a.goal, C.achValue(a, p)), done = !!got[a.id];
+      const el = document.createElement('div'); el.className = 'ach-item' + (done ? ' done' : ''); el.dataset.id = a.id;
+      const ic = document.createElement('div'); ic.className = 'ach-ic'; ic.textContent = a.icon;
+      const body = document.createElement('div'); body.className = 'ach-body';
+      const nm = document.createElement('b'); nm.textContent = a.name + (done ? ' ✓' : '');
+      const ds = document.createElement('div'); ds.className = 'ach-desc'; ds.textContent = a.desc;
+      const bar = document.createElement('div'); bar.className = 'ach-bar'; const fill = document.createElement('i'); fill.style.width = (v / a.goal * 100) + '%'; bar.appendChild(fill);
+      const meta = document.createElement('div'); meta.className = 'ach-meta';
+      meta.textContent = `${fmt(v)} / ${fmt(a.goal)}${a.unit ? ' ' + a.unit : ''} · награда: ${C.rewardText(a.reward)}${a.title ? ` · титул «${a.title}»` : ''}`;
+      body.append(nm, ds, bar, meta); el.append(ic, body); list.appendChild(el);
+    }
+    const sel = $('titleSel'); sel.textContent = '';
+    const none = document.createElement('option'); none.value = ''; none.textContent = '— без титула —'; sel.appendChild(none);
+    for (const a of C.ACH) if (a.title && got[a.id]) { const o = document.createElement('option'); o.value = a.id; o.textContent = a.title; sel.appendChild(o); }
+    sel.value = profile.stats && profile.stats.title && got[profile.stats.title] ? profile.stats.title : '';
+    $('titleMsg').textContent = sel.options.length > 1 ? '' : 'Титулы дают некоторые достижения.';
+  }
+  $('titleSel').addEventListener('change', () => {
+    socket.emit('title:set', $('titleSel').value || null, r => { if (r && r.ok) { setProfile(r.profile); toast(r.profile.title ? `Титул «${r.profile.title}» показан рядом с ником` : 'Титул снят', 'ok'); } else toast((r && r.error) || 'Ошибка', 'err'); });
+  });
+  // ---- daily quests + boosts
+  socket.on('quest', d => {
+    if (!d) return;
+    if (d.all) { toast(`📜 Все задания дня выполнены! Серия: ${d.streak} 🔥 · ${C.rewardText(d.reward)}`, 'ok'); return; }
+    const q = C.QUEST_BY_ID[d.id]; if (q) toast(`📜 Задание выполнено: «${q.text}» · ${C.rewardText(d.reward)}`, 'ok');
+  });
+  const streakNow = st => (st && st.streakDay != null && st.streakDay >= C.dayKey() - 1 ? st.streak || 0 : 0);
+  function updateQuestTracker() {
+    const el = $('qTrack'), d = profile && profile.stats && profile.stats.daily;
+    if (!d || !Array.isArray(d.q)) { el.classList.add('hidden'); return; }
+    el.classList.remove('hidden');
+    const n = d.q.filter(q => q.done).length;
+    el.textContent = '';
+    const h = document.createElement('div'); h.className = 'qt-head'; h.textContent = `📜 Задания ${n}/${d.q.length}` + (streakNow(profile.stats) ? ` · 🔥${streakNow(profile.stats)}` : ''); el.appendChild(h);
+    for (const q of d.q) {
+      const def = C.QUEST_BY_ID[q.id]; if (!def) continue;
+      const row = document.createElement('div'); row.className = 'qt-row' + (q.done ? ' done' : '');
+      row.textContent = `${q.done ? '✅' : '▫️'} ${def.text} ${q.done ? '' : `${fmt(q.p)}/${fmt(def.goal)}`}`; el.appendChild(row);
+    }
+  }
+  function renderQuests() {
+    if (!profile) return;
+    const d = profile.stats && profile.stats.daily, list = $('qList'); list.textContent = '';
+    $('qStreak').textContent = `🔥 Серия: ${streakNow(profile.stats)}`;
+    const ms = C.resetIn(Date.now()), hh = Math.floor(ms / 3600000), mm = Math.floor(ms / 60000) % 60;
+    $('qReset').textContent = `3 новых задания каждый день в 00:00 по Москве (через ${hh} ч ${mm} мин). Выполните все три — бонус и +1 к серии.`;
+    if (!d) return;
+    for (const q of d.q) {
+      const def = C.QUEST_BY_ID[q.id]; if (!def) continue;
+      const el = document.createElement('div'); el.className = 'q-item' + (q.done ? ' done' : ''); el.dataset.diff = def.diff;
+      const top = document.createElement('div'); top.className = 'q-top';
+      const nm = document.createElement('b'); nm.textContent = (q.done ? '✅ ' : '') + def.text;
+      const df = document.createElement('span'); df.className = 'q-diff'; df.textContent = '★'.repeat(def.diff) + '☆'.repeat(3 - def.diff);
+      top.append(nm, df);
+      const bar = document.createElement('div'); bar.className = 'ach-bar'; const fill = document.createElement('i'); fill.style.width = Math.min(100, q.p / def.goal * 100) + '%'; bar.appendChild(fill);
+      const meta = document.createElement('div'); meta.className = 'ach-meta'; meta.textContent = `${fmt(q.p)} / ${fmt(def.goal)} · награда: ${C.rewardText(q.rw)}`;
+      el.append(top, bar, meta); list.appendChild(el);
+    }
+    const st = profile.stats, next = st.streakDay === d.day ? st.streak : streakNow(st) + 1;
+    $('qBonus').innerHTML = d.bonus ? `🎉 Бонус за все задания получен! Серия: <b>${fmt(st.streak || 0)}</b> 🔥` : `Бонус за все 3: <b>${esc(C.rewardText(C.allDoneBonus(next)))}</b> (растёт с серией)`;
+  }
+  function updateBoostsHud() {
+    const el = $('hudBoosts'), b = profile && profile.stats && profile.stats.boosts, now = Date.now();
+    const on = b ? Object.keys(C.BOOSTS).filter(k => b[k] > now) : [];
+    el.classList.toggle('hidden', !on.length);
+    el.textContent = on.map(k => `${C.BOOSTS[k].icon} ${C.BOOSTS[k].name} · ${mmss(b[k] - now)}`).join('  ');
+  }
+  setInterval(() => { if (joined && profile) updateBoostsHud(); }, 1000);
+  function layoutContentHud() { // quest tracker under the stats panel; on phones the boss bar goes below the top panels
+    if (!joined) return;
+    const st = document.querySelector('#hud .stats').getBoundingClientRect(), tp = document.querySelector('#hud .top').getBoundingClientRect();
+    $('qTrack').style.top = Math.round(st.bottom + 8) + 'px';
+    const q = $('qTrack').getBoundingClientRect();
+    $('bossBar').style.top = mobileUI() ? Math.round(Math.max(st.bottom, tp.bottom, q.height ? q.bottom : 0) + 6) + 'px' : '';
+  }
+  setInterval(layoutContentHud, 500); addEventListener('resize', layoutContentHud);
+
   // ------------------------------------------------------------ orb legend (help «?» popover)
   function renderOrbHelp() {
     const box = $('orbHelpList'); if (box.childElementCount) return;
@@ -1728,6 +2003,8 @@
     if (id === 'ups') renderUps();
     if (id === 'inv') renderInv();
     if (id === 'lb') loadLb();
+    if (id === 'ach') renderAch();
+    if (id === 'quests') renderQuests();
     if (id === 'games') { if (!mgRunning) showGamesList(); updateGameButtons(); }
     updateHud();
   }
@@ -2014,7 +2291,7 @@
     }
   }
   // «Лавка осколков»: exclusives for legendary shards only (+ optional shard → orb exchange)
-  const shardCount = () => (profile ? profile.inventory.reduce((n, s) => n + (s.id === G.SHARD_ID ? s.q : 0), 0) : 0);
+  const shardCount = () => (profile ? profile.shards || 0 : 0); // shards are a currency (profile.shards)
   function renderShardShop(grid) {
     const have = shardCount(), X = G.SHARD_EXCHANGE;
     const head = document.createElement('div'); head.className = 'shard-head'; head.id = 'shardHead';
@@ -2221,6 +2498,9 @@
     pruneHidden('profile');
     addPreview($('pfAvatar'), Object.assign({}, p.equipped), 'all', { owner: 'profile', size: 120, r: 28, name: p.name });
     $('pfName').textContent = p.name;
+    $('pfTitle').textContent = p.title ? '« ' + p.title + ' »' : '';
+    $('pfShards').innerHTML = shardsH(p.shards || 0);
+    $('pfAch').textContent = `${Object.keys((p.stats && p.stats.ach) || {}).length} / ${C.ACH.length}`;
     $('pfEq').replaceChildren(...G.CATEGORIES.map(c => {
       const id = p.equipped[c.key], def = G.ITEM_BY_ID[id];
       const chip = iconEl(id, 'sm'); chip.title = `${c.name}: ${def ? def.name : '—'}`; chip.dataset.cat = c.key;
@@ -2568,7 +2848,7 @@
   function chatLine(m) {
     const el = document.createElement('div');
     el.className = 'chat-msg' + (m.sys ? ' sys' : '') + (m.notice ? ' notice' : '') + (m.n && m.n === myName ? ' mine' : '');
-    if (m.n) { const n = document.createElement('span'); n.className = 'n'; n.textContent = String(m.n); nameColorize(n, m.c); el.append(n, ': '); }
+    if (m.n) { if (m.ti) { const ti = document.createElement('span'); ti.className = 'ti'; ti.textContent = '[' + String(m.ti) + '] '; el.appendChild(ti); } const n = document.createElement('span'); n.className = 'n'; n.textContent = String(m.n); nameColorize(n, m.c); el.append(n, ': '); }
     const t = document.createElement('span'); t.className = 't'; t.textContent = String(m.t == null ? '' : m.t); el.appendChild(t);
     return el;
   }

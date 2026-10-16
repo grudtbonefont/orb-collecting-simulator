@@ -463,7 +463,7 @@ async function eventSuite(URL) {
   A.s.on('s', st => { for (const a of st.oa) if (a[4]) evOrbs.add(a[0]); if (st.rn) rn.push(st.rn); });
   const last = (k, e) => { const l = log[k].filter(x => x[0] === e); return l.length ? l[l.length - 1][1] : null; };
   const waitEv = (k, e, n, ms) => waitFor(() => log[k].filter(x => x[0] === e).length >= n, ms);
-  const shards = c => c.profile.inventory.filter(x => x.id === G.SHARD_ID).reduce((n, x) => n + x.q, 0);
+  const shards = c => c.profile.shards || 0; // shards are a currency balance
   // rain
   let r = await A.emit('test:event', { kind: 'rain', announceMs: 300, durationMs: 4000 });
   ok(r.ok && r.event.kind === 'rain' && r.event.phase === 'announce' && await waitEv('B', 'ev:announce', 1, 1000), 'event announced to every player (ev:announce)');
@@ -495,9 +495,8 @@ async function eventSuite(URL) {
   ok(placeOk && JSON.stringify((first === A ? ke : kc).you.reward) === JSON.stringify(rw[0]) && JSON.stringify((first === A ? kc : ke).you.reward) === JSON.stringify(rw[1]),
     `koth rewards by score: 1st ${rw[0].orbs} ◉ + ${rw[0].shards} 💎, 2nd ${rw[1].orbs} ◉ + ${rw[1].shards} 💎 (scores ${ke && ke.you && ke.you.score}/${kc && kc.you && kc.you.score})`);
   const paidOk = placeOk && first.profile.balance - (first === A ? a0.A : a0.C) >= rw[0].orbs && second.profile.balance - (second === A ? a0.A : a0.C) >= rw[1].orbs && // ≥: stray orbs picked up on the way
-    shards(first) - (first === A ? a0.sA : a0.sC) === rw[0].shards && shards(second) - (second === A ? a0.sA : a0.sC) === rw[1].shards &&
-    first.profile.inventory.some(x => x.id === G.SHARD_ID && x.src === 'event');
-  ok(paidOk, 'koth rewards paid server-side: orbs to the balance, shards via grantItem (source "event")');
+    shards(first) - (first === A ? a0.sA : a0.sC) === rw[0].shards && shards(second) - (second === A ? a0.sA : a0.sC) === rw[1].shards;
+  ok(paidOk, 'koth rewards paid server-side: orbs and shards to their balances');
   ok(kb && kb.you === null && kb.results.length >= 2 && kb.results.every(x => JSON.stringify(Object.keys(x)) === '["name","score","reward"]'), 'B (outside) gets the public results (name/score/reward only) and no reward');
   // treasure: one next to A, one far away; A grabs the near one
   const sA0 = shards(A), bA0 = A.profile.balance;
@@ -628,7 +627,7 @@ async function codesSuite(URL) {
   console.log('--- promo codes');
   const A = makeClient(URL), B = makeClient(URL), C = makeClient(URL);
   await A.register('CodeA' + rnd()); await B.register('CodeB' + rnd()); await C.register('CodeC' + rnd());
-  const units = (P, id) => P.profile.inventory.filter(x => x.id === id).reduce((n, x) => n + x.q, 0);
+  const units = (P, id) => (id === G.SHARD_ID ? P.profile.shards || 0 : P.profile.inventory.filter(x => x.id === id).reduce((n, x) => n + x.q, 0));
   const bal = A.profile.balance, tot = A.profile.total;
   let r = await A.emit('code:redeem', '  test-gift ');
   const lime = A.profile.inventory.find(x => x.id === 'c_lime');
@@ -640,10 +639,10 @@ async function codesSuite(URL) {
   ok(!nf.ok && nf.error === 'Код не найден или уже использован' && !ex.ok && ex.code === 'expired', 'unknown code → generic error; expired code → ' + ex.error);
   const o1 = await A.emit('code:redeem', 'TEST-ONCE'), o2 = await B.emit('code:redeem', 'test-once');
   ok(o1.ok && !o2.ok && o2.code === 'invalid', 'maxUses: 1 → the second account is refused');
-  await C.emit('test:grant', { id: G.SHARD_ID, qty: 448, source: 'event' });
+  await C.emit('test:grant', { id: 'c_coral', qty: 448, source: 'event' }); // shards are a currency now and take no inventory space
   const cb = C.profile.balance;
   r = await C.emit('code:redeem', 'TEST-GIFT');
-  ok(!r.ok && r.code === 'full' && C.profile.balance === cb && units(C, G.SHARD_ID) === 448 && !units(C, 'c_lime'), 'rewards that do not fit into 450 units → refused, nothing given: ' + r.error);
+  ok(!r.ok && r.code === 'full' && C.profile.balance === cb && units(C, 'c_coral') === 448 && !units(C, G.SHARD_ID) && !units(C, 'c_lime'), 'rewards that do not fit into 450 units → refused, nothing given: ' + r.error);
   const rs = [];
   for (let i = 0; i < 5; i++) rs.push(await C.emit('code:redeem', 'BRUTE' + i));
   ok(rs.slice(0, 4).every(x => x.code === 'invalid') && rs[4].code === 'rate', 'rate limit: the 6th attempt within a minute is refused (' + rs[4].error + ')');
@@ -782,7 +781,7 @@ async function shardShopSuite(URL) {
   console.log('--- «Лавка осколков»');
   const S = makeClient(URL), W = makeClient(URL);
   await S.register('Shards' + rnd()); await W.register('Look' + rnd());
-  const shards = () => S.profile.inventory.filter(x => x.id === G.SHARD_ID).reduce((n, x) => n + x.q, 0);
+  const shards = () => S.profile.shards || 0;
   let r = await S.emit('shard:buy', 'c_void');
   ok(!r.ok && r.code === 'shards' && /нужно 40, у вас 0/.test(r.error), 'not enough shards → refused: ' + r.error);
   await S.emit('test:orbs', 100000);
@@ -814,10 +813,10 @@ async function shardShopSuite(URL) {
   ok(r.ok && r.spent === 3 * 50 && r.qty === 3 && shards() === have - 150 && S.profile.inventory.filter(x => x.id === 'n_shard').reduce((n, x) => n + x.q, 0) === 3, 'shard shop ×3 «Осколочный ник»: exactly 150 shards spent, 3 copies stacked');
   // over-cap account (e.g. migrated): items kept, every grant refused until under the cap
   const INV = require('../lib/inventory');
-  const big = { inventory: { v: 1, slots: [{ id: G.SHARD_ID, q: 99 }, { id: G.SHARD_ID, q: 99 }, { id: G.SHARD_ID, q: 99 }, { id: G.SHARD_ID, q: 99 }, { id: G.SHARD_ID, q: 99 }, { id: 'c_coral', q: 5 }] }, owned: [], equipped: {} };
+  const big = { inventory: { v: 1, slots: [{ id: 'c_coral', q: 99 }, { id: 'c_coral', q: 99 }, { id: 'c_coral', q: 99 }, { id: 'c_coral', q: 99 }, { id: 'c_coral', q: 99 }, { id: 'c_coral', q: 5 }, { id: G.SHARD_ID, q: 40 }] }, owned: [], equipped: {}, stats: {} };
   INV.migrateAccount(big);
-  const gb = INV.grantItem(big, G.SHARD_ID, 1, 'event');
-  ok(INV.unitsUsed(big) === 500 && !gb.ok && gb.code === 'full' && INV.roomFor(big, G.ITEM_BY_ID.c_lime) === 0 && /500 \/ 450/.test(gb.error), `migration keeps an over-cap inventory (500 / ${G.INV_CAP}); grants refused: ${gb.error}`);
+  const gb = INV.grantItem(big, 'c_lime', 1, 'event'), gs = INV.grantItem(big, G.SHARD_ID, 1, 'event');
+  ok(INV.unitsUsed(big) === 500 && !gb.ok && gb.code === 'full' && INV.roomFor(big, G.ITEM_BY_ID.c_lime) === 0 && /500 \/ 450/.test(gb.error) && gs.ok && big.stats.shards === 41, `migration keeps an over-cap inventory (500 / ${G.INV_CAP}); item grants refused (${gb.error}); shards moved to the balance and still granted (41)`);
   const shop = await (await fetch(URL + '/api/shop')).json();
   ok(shop.shardExchange.orbs === G.SHARD_EXCHANGE.orbs && shop.items.filter(i => i.exclusive).length === G.ITEMS.filter(i => i.exclusive).length && shop.events.koth.name === 'Царь горы', '/api/shop lists exclusives, events and the exchange rate');
   S.close(); W.close();
@@ -1628,6 +1627,11 @@ async function runCycleMode() {
     const tmp = path.join(os.tmpdir(), `ocs-u4-${process.pid}.json`);
     const srv = await startServer(3101, { DATA_FILE: tmp, OCS_TEST_HOOKS: '1' });
     await runnerCatchSuite(srv.url); await codesSuite(srv.url); await upgradeSuite(srv.url);
+    await srv.stop(); fs.rmSync(tmp, { force: true });
+  } else if (process.env.OCS_TEST_ONLY === 'shards') { // suites whose shard checks changed (shards are a currency now)
+    const tmp = path.join(os.tmpdir(), `ocs-shards-${process.pid}.json`);
+    const srv = await startServer(3101, { DATA_FILE: tmp, OCS_TEST_HOOKS: '1' });
+    await tiersSuite(srv.url); await eventSuite(srv.url); await codesSuite(srv.url); await shardShopSuite(srv.url);
     await srv.stop(); fs.rmSync(tmp, { force: true });
   } else if (process.env.OCS_TEST_ONLY === 'codes') {
     const tmp = path.join(os.tmpdir(), `ocs-codes-${process.pid}.json`);

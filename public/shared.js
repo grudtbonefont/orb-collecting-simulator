@@ -389,7 +389,11 @@
   // stall. «Ускорение» gives at most +2 % push strength per level. A light knockback (≤ PUSH.maxKnock px/tick, decays)
   // pops the shoved player away. Everything stays inside the world.
   const PUSH = { knock: 2.5, maxKnock: 5, decay: 0.7, speedEdge: 0.02, passes: 2 };
-  const clampP = p => { p.x = Math.min(WORLD.w - PLAYER_R, Math.max(PLAYER_R, p.x)); p.y = Math.min(WORLD.h - PLAYER_R, Math.max(PLAYER_R, p.y)); };
+  // «Бонусный портал»: a small room outside the arena (below zone 1); whoever is in it stays in it until the server moves them back
+  const BONUS_ROOM = { x: 400, y: WORLD.h + 600, w: 1100, h: 800 };
+  const inBonusRoom = p => p.y > WORLD.h + 100;
+  const clampRoom = p => { p.x = Math.min(BONUS_ROOM.x + BONUS_ROOM.w - PLAYER_R, Math.max(BONUS_ROOM.x + PLAYER_R, p.x)); p.y = Math.min(BONUS_ROOM.y + BONUS_ROOM.h - PLAYER_R, Math.max(BONUS_ROOM.y + PLAYER_R, p.y)); };
+  const clampP = p => { if (inBonusRoom(p)) return clampRoom(p); p.x = Math.min(WORLD.w - PLAYER_R, Math.max(PLAYER_R, p.x)); p.y = Math.min(WORLD.h - PLAYER_R, Math.max(PLAYER_R, p.y)); };
   // list: [{ x, y, mx, my (movement this tick), lvl (speed level), kx, ky }] — mutated in place
   function separatePlayers(list) {
     const D = PLAYER_R * 2, ref = BASE_SPEED * STEP_DT;
@@ -428,6 +432,7 @@
     if (len > 1) { dx /= len; dy /= len; }
     pos.x += dx * speed * STEP_DT;
     pos.y += dy * speed * STEP_DT;
+    if (inBonusRoom(pos)) { clampRoom(pos); return; }
     if (pos.x < PLAYER_R) pos.x = PLAYER_R;
     if (pos.y < PLAYER_R) pos.y = PLAYER_R;
     if (pos.x > WORLD.w - PLAYER_R) pos.x = WORLD.w - PLAYER_R;
@@ -438,7 +443,7 @@
     WORLD, ZONE_W, ZONE_H, DOOR, DOOR_COST, ZONE2_WEIGHTS, zoneOf, zoneGate, PLAYER_R, BASE_SPEED, TICK_MS, STEP_DT, ORB_TYPES, ORB_RANK, ORB_LEGEND, POOL_WEIGHTS, RAIN_WEIGHTS, rollOrbType, expectedOrbValue, CATEGORIES, INV_CATEGORIES, RARITIES, ITEMS, ITEM_BY_ID, INV_SLOTS, INV_CAP, BUY_MAX_QTY, PAINTS,
     DEFAULT_EQUIPPED, DEFAULT_OWNED, UPGRADES, UPGRADE_KEYS, UPGRADE_REFUND_PRICES, upLevel, upValue, jackpotChance, upgradeText, orbReward, skillPrize, compassTargets, SENSE_EPIC_RANGE, RADAR, radarBlips, PUSH, separatePlayers,
     EVENTS, EVENT_KEYS, AUTO_EVENT_KEYS, EVENT_SCHEDULE, luckyWeights, OBSTACLES, laserAngle, resolveObstacles, laserHits, laserPenalty, robotPenalty, WEEKEND, weekendInfo, SHARD_ID, SHARD_EXCHANGE,
-    MINIGAMES, REACTION_PRIZES, rushPrize, memoryPrize, memoryShowMs, shellFinal, shellShuffleMs, throwPos, throwPoints, throwPrize, chainPrize, minigameMinMs, speedFor, pickupFor, applyInput,
+    MINIGAMES, REACTION_PRIZES, rushPrize, memoryPrize, memoryShowMs, shellFinal, shellShuffleMs, throwPos, throwPoints, throwPrize, chainPrize, minigameMinMs, speedFor, pickupFor, applyInput, BONUS_ROOM, inBonusRoom,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.G = api;

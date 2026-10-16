@@ -48,7 +48,7 @@
       <span><i class="dot l"></i>Легендарная&nbsp;+25</span>
       <span><i class="dot m"></i>Мифическая&nbsp;+50</span>
     </div>
-    <div class="hint">Управление: <b>WASD</b> / <b>стрелки</b>, или зажмите мышь / палец — персонаж идёт за курсором.<br>Горячие клавиши: <b>P</b> — профиль, <b>I</b> — инвентарь, <b>B</b> — магазин, <b>U</b> — улучшения, <b>M</b> — мини-игры, <b>L</b> — рейтинг, <b>H</b> — виды сфер, <b>Enter</b> / <b>T</b> — чат.</div>
+    <div class="hint">Управление: <b>WASD</b> / <b>стрелки</b>, или зажмите мышь / палец — персонаж идёт за курсором.<br>Горячие клавиши: <b>P</b> — профиль, <b>I</b> — инвентарь, <b>B</b> — магазин, <b>U</b> — улучшения, <b>M</b> — мини-игры, <b>L</b> — рейтинг, <b>Q</b> — задания, <b>J</b> — достижения, <b>H</b> — виды сфер, <b>Enter</b> / <b>T</b> — чат.</div>
     <div class="mini-lb"><h3>🏆 Лучшие сборщики</h3><ol id="startLb"><li class="muted">Загрузка…</li></ol></div>
   </div>
 </div>
@@ -61,6 +61,7 @@
       <canvas id="pfAvatar" width="240" height="240" aria-label="Ваш персонаж"></canvas>
       <div class="pf-id">
         <div id="pfName" class="pf-name"></div>
+        <div id="pfTitle" class="pf-title"></div>
         <div id="pfRankLine" class="pf-rank"></div>
         <div id="pfSince" class="muted"></div>
         <div id="pfEq" class="pf-eq" aria-label="Надето"></div>
@@ -68,6 +69,8 @@
     </div>
     <div class="pf-stats">
       <div><span>Баланс</span><b id="pfBalance">0</b></div>
+      <div><span>Осколки</span><b id="pfShards">0</b></div>
+      <div><span>Достижения</span><b id="pfAch">0</b></div>
       <div><span>Собрано за всё время</span><b id="pfTotal">0</b></div>
       <div><span>Место в рейтинге</span><b id="pfRank">—</b></div>
       <div><span>Время в игре</span><b id="pfTime">0 мин</b></div>
@@ -93,11 +96,14 @@
 <div id="hud" class="hidden">
   <div class="panel stats">
     <div class="balance"><i class="cur-orb" aria-hidden="true"></i><span id="hudBalance">0</span><small>сфер</small></div>
+    <div class="balance shard-bal" title="Осколки — вторая валюта: «Лавка осколков» в магазине"><i class="cur-shard" aria-hidden="true"></i><span id="hudShards">0</span><small>осколков</small></div>
+    <div id="hudBoosts" class="row boosts hidden"></div>
     <div class="row">Всего собрано: <b id="hudTotal">0</b></div>
     <div class="row">За сессию: <b id="hudSession">0</b></div>
     <div class="row online"><i class="live"></i>Онлайн: <b id="hudOnline">1</b></div>
     <div class="row who"><button type="button" id="hudName" class="link-btn name-btn" title="Профиль (P)"></button><button type="button" id="logoutBtn" class="link-btn">Выйти</button></div>
   </div>
+  <button type="button" id="qTrack" class="panel qtrack" data-open="quests" title="Задания дня (Q)"></button>
   <div class="panel top">
     <h4>Топ арены</h4>
     <ol id="hudTop"></ol>
@@ -107,7 +113,9 @@
     <button class="btn" data-open="ups" id="upsBtn" title="Улучшения (U)"><i>⚡</i><span>Улучшения</span></button>
     <button class="btn" data-open="inv" title="Инвентарь (I)"><i>🎒</i><span>Инвентарь</span></button>
     <button class="btn" data-open="games" title="Мини-игры (M)"><i>🎮</i><span>Мини-игры</span></button>
-    <button class="btn" data-open="lb" title="Рейтинг (L)"><i>🏆</i><span>Рейтинг</span></button>
+    <button class="btn" data-open="quests" id="questsBtn" title="Задания дня (Q)"><i>📜</i><span>Задания</span></button>
+    <button class="btn" data-open="ach" id="achBtn" title="Достижения (J)"><i>🏆</i><span>Достижения</span></button>
+    <button class="btn" data-open="lb" title="Рейтинг (L)"><i>📊</i><span>Рейтинг</span></button>
   </div>
   <div id="radar" class="radar"><canvas id="minimap" width="150" height="150" aria-label="Радар"></canvas><button id="radarToggle" class="radar-toggle" type="button" title="Свернуть / развернуть радар">–</button></div>
   <div class="zoom-btns"><button type="button" id="zoomIn" title="Приблизить (колесо мыши / два пальца)" aria-label="Приблизить">+</button><button type="button" id="zoomOut" title="Отдалить" aria-label="Отдалить">−</button></div>
@@ -139,6 +147,16 @@
     <div id="evChipTime" class="ev-chip-time"></div>
     <div id="evChipPop" class="ev-chip-pop" role="status"><b id="evChipName"></b><div id="evChipPhase" class="ev-chip-phase"></div><div id="evChipDesc" class="ev-chip-desc"></div><div id="evChipInfo" class="ev-chip-info"></div></div>
   </div>
+  <div id="bossChip" class="ev-chip hidden" data-kind="boss">
+    <button type="button" id="bossChipBtn" class="ev-chip-btn" aria-label="Босс"><span>👹</span></button>
+    <div id="bossChipTime" class="ev-chip-time"></div>
+    <div id="bossChipPop" class="ev-chip-pop" role="status"><b id="bossChipName"></b><div id="bossChipPhase" class="ev-chip-phase"></div><div id="bossChipDesc" class="ev-chip-desc"></div><div id="bossChipInfo" class="ev-chip-info"></div></div>
+  </div>
+  <div id="miniChip" class="ev-chip hidden">
+    <button type="button" id="miniChipBtn" class="ev-chip-btn mini" aria-label="Мини-событие"><span id="miniChipIcon"></span></button>
+    <div id="miniChipTime" class="ev-chip-time"></div>
+    <div id="miniChipPop" class="ev-chip-pop" role="status"><b id="miniChipName"></b><div id="miniChipPhase" class="ev-chip-phase"></div><div id="miniChipDesc" class="ev-chip-desc"></div><div id="miniChipInfo" class="ev-chip-info"></div></div>
+  </div>
   <div id="wkChip" class="ev-chip hidden" data-kind="weekend">
     <button type="button" id="wkChipBtn" class="ev-chip-btn" aria-label="Выходные"><span>🎉</span></button>
     <div id="wkChipTime" class="ev-chip-time"></div>
@@ -146,6 +164,9 @@
   </div>
   </div>
   <div id="evResult" class="ev-result hidden" role="status" aria-live="polite"></div>
+  <!-- boss HP bar + bonus-room timer -->
+  <div id="bossBar" class="boss-bar hidden" role="status"><div class="bb-head"><b>👹 <span id="bossName"></span></b><span id="bossTime"></span></div><div class="bb"><i id="bossHpFill"></i></div><div id="bossHpText" class="bb-text"></div></div>
+  <div id="roomBar" class="room-bar hidden" role="status"></div>
 </div>
 
 <div id="toasts"></div>
@@ -291,6 +312,25 @@
   </div>
 </div>
 
+<!-- Achievements -->
+<div id="ach" class="modal hidden">
+  <div class="modal-card wide">
+    <div class="modal-head"><h2>🏆 Достижения</h2><div class="pill" id="achCount">0 / 0</div><button class="close" aria-label="Закрыть">✕</button></div>
+    <div class="ach-title"><label for="titleSel">Титул рядом с ником:</label> <select id="titleSel"></select> <span id="titleMsg" class="muted"></span></div>
+    <div id="achList" class="ach-list"></div>
+  </div>
+</div>
+
+<!-- Daily quests -->
+<div id="quests" class="modal hidden">
+  <div class="modal-card">
+    <div class="modal-head"><h2>📜 Задания дня</h2><div class="pill" id="qStreak">🔥 0</div><button class="close" aria-label="Закрыть">✕</button></div>
+    <p class="muted note" id="qReset"></p>
+    <div id="qList" class="q-list"></div>
+    <div id="qBonus" class="q-bonus"></div>
+  </div>
+</div>
+
 <!-- Leaderboard -->
 <div id="lb" class="modal hidden">
   <div class="modal-card">
@@ -303,6 +343,7 @@
 
 <script src="/socket.io/socket.io.js"></script>
 <script src="shared.js"></script>
+<script src="content.js"></script>
 <script src="rules.js"></script>
 <script src="client.js"></script>
 </body>

@@ -456,3 +456,68 @@ canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: blo
 /* menu music toggle (only outside the arena) */
 .music-btn { position: fixed; left: calc(12px + env(safe-area-inset-left)); bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 60; width: 44px; height: 44px; border-radius: 50%; border: 1px solid rgba(160,140,255,.6); background: rgba(16,14,40,.85); font-size: 20px; line-height: 1; cursor: pointer; padding: 0; }
 body.in-game .music-btn { display: none; }
+
+/* ---- content update: shards balance, boosts, quest tracker, boss / mini-event, achievements, quests */
+.shard-bal { font-size: 15px; font-weight: 800; color: #9de8ff; margin-top: 2px; }
+.hud-boosts { margin-top: 4px; font-size: 12px; color: #b9ffcf; font-weight: 700; }
+.hud-boosts.hidden, .qtrack.hidden, .boss-bar.hidden, .room-bar.hidden { display: none; }
+.qtrack { position: absolute; left: 12px; top: 150px; width: 230px; pointer-events: auto; cursor: pointer; text-align: left; color: #fff; font: inherit; font-size: 12px;
+  background: rgba(10, 14, 30, .72); border: 1px solid rgba(255, 210, 110, .35); border-radius: 12px; padding: 7px 10px; }
+.qtrack .qt-head { font-weight: 800; color: #ffd76a; margin-bottom: 2px; }
+.qtrack .qt-row { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: .92; }
+.qtrack .qt-row.done { opacity: .55; text-decoration: line-through; }
+.boss-bar { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); width: min(460px, 60vw); z-index: 6; text-align: center;
+  background: rgba(30, 6, 16, .82); border: 2px solid rgba(255, 60, 100, .7); border-radius: 12px; padding: 5px 10px 7px; box-shadow: 0 0 18px rgba(255, 40, 90, .4); }
+.boss-bar .bb-top { display: flex; justify-content: space-between; font-weight: 800; font-size: 13px; color: #ffb3c0; }
+.boss-hp { position: relative; height: 14px; border-radius: 7px; background: rgba(0, 0, 0, .55); overflow: hidden; margin-top: 4px; }
+.boss-hp i { position: absolute; inset: 0 auto 0 0; background: linear-gradient(90deg, #ff2b55, #ff7a3d); transition: width .2s; }
+.boss-hp span { position: relative; font-size: 10.5px; font-weight: 800; line-height: 14px; }
+.room-bar { position: absolute; left: 50%; top: 70px; transform: translateX(-50%); z-index: 6; font-weight: 800; color: #e2ccff;
+  background: rgba(40, 20, 80, .85); border: 2px solid #b48cff; border-radius: 12px; padding: 6px 14px; }
+.ev-chip[data-kind=goldrain] .ev-chip-btn { border-color: #ffd24a; box-shadow: 0 0 14px rgba(255, 210, 74, .55); }
+.ev-chip[data-kind=chest] .ev-chip-btn { border-color: #ffb347; box-shadow: 0 0 14px rgba(255, 179, 71, .5); }
+.ev-chip[data-kind=portal] .ev-chip-btn { border-color: #b48cff; box-shadow: 0 0 14px rgba(180, 140, 255, .6); }
+#bossChip .ev-chip-btn { border-color: #ff3355; box-shadow: 0 0 16px rgba(255, 51, 85, .6); }
+.chat-msg .ti { color: #ffd76a; font-weight: 700; }
+.ach-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.ach-list, .q-list { display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow-y: auto; }
+.ach-item { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 12px; background: rgba(255, 255, 255, .05); border: 1px solid rgba(255, 255, 255, .08); }
+.ach-item.done { background: rgba(255, 210, 90, .1); border-color: rgba(255, 210, 90, .45); }
+.ach-ic { font-size: 28px; width: 40px; text-align: center; flex: none; }
+.ach-item:not(.done) .ach-ic { filter: grayscale(.8); opacity: .7; }
+.ach-body { flex: 1; min-width: 0; }
+.ach-desc { font-size: 12.5px; opacity: .8; }
+.ach-bar { height: 8px; border-radius: 4px; background: rgba(0, 0, 0, .45); overflow: hidden; margin: 5px 0 3px; }
+.ach-bar i { display: block; height: 100%; background: linear-gradient(90deg, #3ee0ff, #5dff8f); border-radius: 4px; }
+.ach-item.done .ach-bar i, .q-item.done .ach-bar i { background: linear-gradient(90deg, #ffcc33, #ffe08a); }
+.ach-meta { font-size: 11.5px; opacity: .75; }
+.q-item { padding: 10px 12px; border-radius: 12px; background: rgba(255, 255, 255, .05); border: 1px solid rgba(255, 255, 255, .1); }
+.q-item.done { border-color: rgba(93, 255, 143, .5); background: rgba(93, 255, 143, .08); }
+.q-top { display: flex; justify-content: space-between; gap: 8px; }
+.q-diff { color: #ffd76a; white-space: nowrap; }
+.q-bonus { margin-top: 10px; padding: 8px 12px; border-radius: 12px; background: rgba(255, 210, 90, .1); font-size: 13.5px; }
+.q-sub { font-size: 12.5px; opacity: .8; margin-bottom: 8px; }
+@media (max-width: 640px) {
+  .menu-buttons { gap: 4px; }
+  .menu-buttons .btn { width: 50px; font-size: 9.5px; padding: 6px 1px 5px; }
+  .menu-buttons .btn i { font-size: 18px; }
+  .qtrack { left: 8px; width: 140px; font-size: 10.5px; padding: 5px 7px; }
+  .qtrack .qt-row { display: none; }
+  .boss-bar { width: 62vw; padding: 3px 8px 5px; }
+  .boss-bar .bb-top { font-size: 11px; }
+  body.boss-on .chat-toast { top: calc(56px + env(safe-area-inset-top)); }
+  .shard-bal { font-size: 13px; }
+}
+.boosts { margin-top: 4px; font-size: 12px; color: #b9ffcf; font-weight: 700; }
+.boosts.hidden { display: none; }
+.boss-bar .bb-head { display: flex; justify-content: space-between; gap: 10px; font-weight: 800; font-size: 13px; color: #ffb3c0; }
+.boss-bar .bb { position: relative; height: 12px; border-radius: 6px; background: rgba(0, 0, 0, .55); overflow: hidden; margin-top: 4px; }
+.boss-bar .bb i { position: absolute; inset: 0 auto 0 0; background: linear-gradient(90deg, #ff2b55, #ff7a3d); transition: width .2s; }
+.boss-bar .bb-text { font-size: 10.5px; font-weight: 800; margin-top: 2px; }
+.ach-title { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 10px; font-size: 13.5px; }
+.ach-title select { background: #131a36; color: #fff; border: 1px solid rgba(120,150,255,.4); border-radius: 8px; padding: 5px 8px; font: inherit; }
+@media (max-width: 640px) { .boss-bar .bb-head { font-size: 11px; } }
+@media (min-width: 641px) { /* 7 menu buttons: compact icon-over-label tiles so they stay clear of chat and radar */
+  .menu-buttons .btn { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 74px; padding: 6px 2px; font-size: 11.5px; }
+  .menu-buttons .btn i { margin: 0; font-size: 20px; line-height: 1.1; }
+}

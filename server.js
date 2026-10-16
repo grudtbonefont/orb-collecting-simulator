@@ -10,6 +10,8 @@ const R = require('./public/rules.js');
 const { createStore } = require('./lib/storage');
 const INV = require('./lib/inventory');
 const CODES = require('./lib/codes');
+const C = require('./public/content.js');
+const createFeatures = require('./lib/features');
 
 const PORT = parseInt(process.env.PORT, 10) || 3000;
 const SESSION_TTL_MS = 30 * 24 * 3600 * 1000;
@@ -66,7 +68,7 @@ function newAccount(name, passHash) {
 // Only what the owner may see about their own account (never the hash/key).
 function ownProfile(a) {
   const { pwResetMark, ...stats } = a.stats || {}; // internal marker stays server-side
-  return { name: a.name, balance: a.balance, total: a.total, equipped: a.equipped, upgrades: a.upgrades, stats, mustChangePw: !!(a.stats && a.stats.mustChangePw),
+  return { name: a.name, balance: a.balance, shards: (a.stats && a.stats.shards) || 0, codesUsed: (a.codes || []).length, title: C.titleOf(a.stats), total: a.total, equipped: a.equipped, upgrades: a.upgrades, stats, mustChangePw: !!(a.stats && a.stats.mustChangePw),
     inventory: a.inventory.slots.map(s => ({ id: s.id, q: s.q, src: s.src })), slots: G.INV_CAP, cap: G.INV_CAP, used: INV.unitsUsed(a), createdAt: a.createdAt };
 }
 async function loadAccount(key) {
@@ -107,6 +109,7 @@ const orbs = new Map();     // id -> {id,x,y,t,cell,expires?}
 let nextOrbId = 1;
 let pendingAdds = [], pendingDels = [];
 let io = null;
+let FX = null; // lib/features.js: mini-events, achievements, daily quests, boss
 
 function newPublicId() { let id; do { id = crypto.randomInt(1, 2 ** 31 - 1); } while (players.has(id)); return id; }
 
@@ -269,10 +272,11 @@ function inObstacleOne(o, x, y, pad) { return o.k === 'rect' ? Math.abs(x - o.x)
 // a laser touch costs penaltyPct of the balance (capped), then invulnMs of immunity; up to dropMax of the lost orbs fall nearby
 function laserHit(pl, o, now, src = 'laser') {
   pl.zapUntil = now + OB.invulnMs;
-  const loss = src === 'robot' ? G.robotPenalty(pl.acc.balance) : G.laserPenalty(pl.acc.balance);
+  const loss = src === 'boss' ? C.bossPenalty(pl.acc.balance) : src === 'robot' ? G.robotPenalty(pl.acc.balance) : G.laserPenalty(pl.acc.balance);
+  FX.onZap(pl);
   if (!loss) return;
   pl.acc.balance -= loss; markDirty(pl.acc);
-  const drops = Math.min(OB.dropMax, src === 'robot' ? Math.ceil(loss / 2) : loss); // robot: about half of the loss drops
+  const drops = Math.min(OB.dropMax, src !== 'laser' ? Math.ceil(loss / 2) : loss); // robot: about half of the loss drops
   for (let i = 0; i < drops; i++) {
     const a = rand(0, Math.PI * 2), d = rand(70, 160), x = Math.round(Math.max(30, Math.min(G.WORLD.w - 30, pl.x + Math.cos(a) * d))), y = Math.round(Math.max(30, Math.min(G.WORLD.h - 30, pl.y + Math.sin(a) * d)));
     if (G.zoneOf(x) !== G.zoneOf(pl.x) || inObstacle(x, y, 10)) continue;
@@ -428,7 +432,7 @@ function startEvent(now) {
 }
 function catchRunner(R, pl) {
   const def = G.EVENTS.runner, sc = evScore(pl); sc.score++; sc.reward = addReward(sc.reward, def.reward); R.caught = pl.acc.name;
-  payReward(pl, def.reward);
+  payReward(pl, def.reward); FX.onRunner(pl);
   io.to('arena').emit('ev:runner', { name: pl.acc.name, left: ev.runners.filter(r => !r.caught).length });
   if (ev.runners.every(r => r.caught)) ev.endAt = Date.now();
 }
@@ -488,7 +492,7 @@ function eventTick(now, dt) {
   if (!ev) {
     if (EV_EVERY === 0 || !players.size) return; // the clock only runs while someone is online
     evClock += dt;
-    if (evClock >= evGap) { // legendaries on the field don't hold events back
+    if (evClock >= evGap && !FX.bossBusy()) { // legendaries on the field don't hold events back; the boss does
       const kinds = G.AUTO_EVENT_KEYS.filter(k => k !== lastEvKind);
       announceEvent(kinds[Math.floor(Math.random() * kinds.length)]);
     }
@@ -539,7 +543,7 @@ function endEvent(now, reason) {
   }
   list.forEach((x, i) => {
     x.place = i + 1;
-    const st = x.pl.acc.stats; st.eventsPlayed = (st.eventsPlayed || 0) + 1;
+    const st = x.pl.acc.stats; st.eventsPlayed = (st.eventsPlayed || 0) + 1; FX.onEventPlayed(x.pl);
     if (i === 0 || ((e.kind === 'treasure' || e.kind === 'runner') && x.score > 0)) st.eventWins = (st.eventWins || 0) + 1;
     markDirty(x.pl.acc); emitProfile(x.pl); // stats changed
   });
@@ -556,7 +560,7 @@ function endEvent(now, reason) {
 }
 
 // Public data about a player: public id, nickname, cosmetics, position. Nothing else.
-function playerMeta(pl) { return { id: pl.id, name: pl.acc.name, eq: pl.acc.equipped, x: pl.x, y: pl.y }; }
+function playerMeta(pl) { return { id: pl.id, name: pl.acc.name, eq: pl.acc.equipped, x: pl.x, y: pl.y, ti: C.titleOf(pl.acc.stats) }; }
 function emitProfile(pl) { pl.socket.emit('profile', ownProfile(pl.acc)); }
 // after an account change made from any socket: refresh the arena player of that account (if any)
 function accountChanged(acc, opts = {}) {
@@ -641,7 +645,7 @@ app.get('/api/leaderboard', async (req, res) => {
   try { res.json(await leaderboard(limit, req.query.name)); }
   catch (e) { console.error('leaderboard failed:', e.message); res.status(503).json({ error: 'unavailable' }); }
 });
-app.get('/api/health', (req, res) => res.json({ ok: true, online: players.size, orbs: orbs.size, targetOrbs: targetOrbs(), event: ev ? ev.kind + ':' + ev.phase : null, eventsEnabled: EV_EVERY !== 0, weekend: weekendState().on, obstacles: obstacles.length, world: G.WORLD,
+app.get('/api/health', (req, res) => res.json({ ok: true, online: players.size, orbs: orbs.size, targetOrbs: targetOrbs(), event: ev ? ev.kind + ':' + ev.phase : null, eventsEnabled: EV_EVERY !== 0, weekend: weekendState().on, obstacles: obstacles.length, mini: FX.miniNow() ? FX.miniNow().kind : null, boss: FX.bossNow() ? FX.bossNow().phase : null, world: G.WORLD,
   storage: store.mode, version: VERSION, uptimeSec: Math.round(process.uptime()) }));
 app.get('/api/shop', (req, res) => res.json({ items: G.ITEMS, upgrades: G.UPGRADES, minigames: G.MINIGAMES, orbs: G.ORB_TYPES, events: G.EVENTS, shardExchange: G.SHARD_EXCHANGE }));
 app.use((req, res) => res.status(404).type('text').send('Not found'));
@@ -649,6 +653,8 @@ app.use((err, req, res, next) => { console.error('http error:', err && err.messa
 
 const server = http.createServer(app);
 io = new Server(server, { maxHttpBufferSize: 10 * 1024, pingInterval: 10000, pingTimeout: 20000, serveClient: true });
+FX = createFeatures({ io: () => io, players, orbs, addOrb, removeOrb, pickSpot, inObstacle, payReward, markDirty, emitProfile, systemChat, flushSoon,
+  penalize: (pl, now, src) => laserHit(pl, null, now, src), mainEventBusy: () => !!ev, testHooks: TEST_HOOKS });
 
 // ---------------------------------------------------------------- auth helpers
 // Cyrillic letters that look like Latin ones (typed on a Russian phone keyboard)
@@ -687,6 +693,7 @@ async function newSession(key) {
 function removePlayer(pl, opts = {}) {
   if (!pl || !players.has(pl.id)) return;
   if (pl.mg) finishMinigame(pl, { aborted: true });
+  FX.onLeave(pl);
   players.delete(pl.id);
   if (byKey.get(pl.acc.key) === pl) byKey.delete(pl.acc.key);
   pl.socket.leave('arena');
@@ -765,7 +772,7 @@ function finishMinigame(pl, info) {
   pl.acc.total += prize;
   s.minigames = (s.minigames || 0) + 1;
   markDirty(pl.acc);
-  if (!info.aborted) { pl.socket.emit('mg:result', result); emitProfile(pl); }
+  if (!info.aborted) { FX.onMinigame(pl); pl.socket.emit('mg:result', result); emitProfile(pl); }
 }
 
 function startMinigame(pl, kind) {
@@ -954,6 +961,7 @@ io.on('connection', socket => {
     socket.join('arena');
     socket.to('arena').emit('pjoin', playerMeta(pl));
     if (!existing) systemChat(`${acc.name} зашёл(ла) на арену`);
+    FX.onJoin(pl);
     console.log(`join: ${acc.name}, online ${players.size}`);
     return {
       you: pl.id, profile: ownProfile(acc), world: G.WORLD,
@@ -963,6 +971,7 @@ io.on('connection', socket => {
       event: publicEvent(),
       obstacles: publicObstacles(),
       weekend: weekendState().left,
+      ...FX.joinState(),
     };
   }
 
@@ -1126,7 +1135,7 @@ io.on('connection', socket => {
     if (clean.text.toLowerCase() === pl.lastChat && now - last < 15000) return ack({ ok: false, error: 'Не повторяйте одно и то же сообщение.' });
     pl.chatTimes.push(now);
     pl.lastChat = clean.text.toLowerCase();
-    pushChat({ n: pl.acc.name, c: nameColorOf(pl.acc), t: clean.text }, true);
+    pushChat({ n: pl.acc.name, c: nameColorOf(pl.acc), ti: C.titleOf(pl.acc.stats) || undefined, t: clean.text }, true);
     ack({ ok: true, masked: clean.masked });
   });
 
@@ -1225,10 +1234,10 @@ io.on('connection', socket => {
     const have = INV.countItem(a, G.SHARD_ID), cost = def.shardPrice * q;
     if (have < cost) return ack({ ok: false, error: `Не хватает осколков: нужно ${cost}, у вас ${have}`, code: 'shards' });
     // all-or-nothing: spend the shards, grant the item; if the item does not fit, the shards are put back exactly as they were
-    const snap = { inv: JSON.stringify(a.inventory), owned: a.owned.slice(), eq: Object.assign({}, a.equipped) };
+    const snap = { inv: JSON.stringify(a.inventory), owned: a.owned.slice(), eq: Object.assign({}, a.equipped), shards: a.stats.shards };
     const r = INV.removeItem(a, G.SHARD_ID, cost, 'shard_shop');
     const g = r.ok ? INV.grantItem(a, def.id, q, 'shard_shop') : r;
-    if (!g.ok) { a.inventory = JSON.parse(snap.inv); a.owned = snap.owned; a.equipped = snap.eq; return ack({ ok: false, error: g.error, code: g.code }); }
+    if (!g.ok) { a.inventory = JSON.parse(snap.inv); a.owned = snap.owned; a.equipped = snap.eq; a.stats.shards = snap.shards; return ack({ ok: false, error: g.error, code: g.code }); }
     accountChanged(a);
     try { await flush(); } catch (_) { /* stays dirty, retried by the periodic flush */ }
     ack({ ok: true, spent: cost, qty: q, profile: ownProfile(a) });
@@ -1249,7 +1258,7 @@ io.on('connection', socket => {
     if (CODES.isExpired(c, now)) return ack({ ok: false, error: 'Срок действия кода истёк', code: 'expired' });
     const rw = c.rewards || {}, grants = (rw.items || []).map(x => ({ id: x.id, qty: x.qty || 1 }));
     if (rw.shards > 0) grants.push({ id: G.SHARD_ID, qty: rw.shards });
-    const units = grants.reduce((n, x) => n + x.qty, 0);
+    const units = grants.reduce((n, x) => n + (x.id === G.SHARD_ID ? 0 : x.qty), 0); // shards are a currency, not inventory units
     if (units > G.INV_CAP - INV.unitsUsed(a)) return ack({ ok: false, error: `Награда не помещается в инвентарь (${INV.unitsUsed(a)} / ${G.INV_CAP}, нужно ещё ${units}). Освободите место.`, code: 'full' });
     a._redeeming = true;
     try {
@@ -1296,6 +1305,15 @@ io.on('connection', socket => {
     accountChanged(a);
     try { await flush(); } catch (_) { /* retried later */ }
     ack({ ok: true, orbs: got, profile: ownProfile(a) });
+  });
+
+  // earned title shown next to the nickname (world, chat, profile); null = none
+  socket.on('title:set', (id, ack) => {
+    ack = safeAck(ack);
+    if (!acct) return ack({ ok: false, error: 'Сначала войдите в аккаунт' });
+    const r = FX.setTitle(acct.acc, typeof id === 'string' ? id : null);
+    if (r.ok) accountChanged(acct.acc, { looks: true });
+    ack(Object.assign(r, { profile: ownProfile(acct.acc) }));
   });
 
   socket.on('upgrade', (key, ack) => {
@@ -1369,6 +1387,43 @@ io.on('connection', socket => {
       list.forEach((t, i) => { const a = -Math.PI / 2 + i * 2 * Math.PI / list.length; const o = addOrb(t, { x: clampW(cx + Math.cos(a) * ring * 1.6), y: clampW(cy + Math.sin(a) * ring) });
         if (o && d.noExpiry) delete o.expires; else if (o && Number(d.lifeMs) > 0) o.expires = Date.now() + Number(d.lifeMs); }); // test: old orb without a lifetime / short life
       ack({ ok: true, n: list.length });
+    });
+    // content update hooks: force a mini-event / boss, patch numeric stats (achievement / quest tests), set today's quests
+    socket.on('test:mini', (d, ack) => {
+      ack = safeAck(ack);
+      if (!acct || !isObj(d)) return ack({ ok: false });
+      if (d.end) { FX.endMini('forced'); return ack({ ok: true }); }
+      if (!has(C.MINI, d.kind) || !C.MINI_KEYS.includes(d.kind)) return ack({ ok: false });
+      FX.startMini(d.kind, { x: Number(d.x), y: Number(d.y), durationMs: Number(d.durationMs) || 0 });
+      ack({ ok: true, mini: FX.publicMini() });
+    });
+    socket.on('test:boss', (d, ack) => {
+      ack = safeAck(ack);
+      if (!acct || !isObj(d)) return ack({ ok: false });
+      if (d.end) { FX.endBoss(false); return ack({ ok: true }); }
+      if (FX.bossNow()) FX.endBoss(false);
+      FX.announceBoss({ announceMs: Number.isFinite(d.announceMs) ? d.announceMs : undefined, lifeMs: Number(d.lifeMs) || 0, hp: Number(d.hp) || 0, x: Number.isFinite(d.x) ? d.x : undefined, y: Number.isFinite(d.y) ? d.y : undefined });
+      ack({ ok: true, boss: FX.publicBoss() });
+    });
+    socket.on('test:stats', (d, ack) => {
+      ack = safeAck(ack);
+      if (!acct || !isObj(d)) return ack({ ok: false });
+      const other = typeof d.name === 'string' ? byKey.get(d.name.toLowerCase()) : null; // {name}: patch another online player (UI screenshots)
+      if (typeof d.name === 'string' && !other) return ack({ ok: false });
+      const acct2 = other ? { acc: other.acc } : acct; d = Object.assign({}, d); delete d.name;
+      const st = acct2.acc.stats;
+      for (const [k, v] of Object.entries(d)) if (!['total', 'dayShift', 'playMsAdd', 'resetAch'].includes(k) && /^[a-zA-Z0-9]{1,30}$/.test(k) && (typeof v === 'number' || typeof v === 'boolean' || v === null)) { if (v === null) delete st[k]; else st[k] = v; }
+      if (typeof d.title === 'string') FX.setTitle(acct2.acc, d.title);
+      if (d.resetAch) st.ach = {};
+      if (Array.isArray(d.quests)) { st.daily = { day: C.dayKey(), q: d.quests.filter(q => isObj(q) && has(C.QUEST_BY_ID, q.id)).slice(0, 3).map(q => ({ id: q.id, p: 0, done: false, rw: isObj(q.rw) ? q.rw : { orbs: 10 } })), bonus: false }; }
+      if (Number.isFinite(d.dayShift) && st.daily) st.daily.day += d.dayShift;
+      if (Number.isFinite(d.playMsAdd)) st.playMs = (st.playMs || 0) + d.playMsAdd;
+      if (Number.isFinite(d.total)) acct2.acc.total = d.total;
+      const pl2 = byKey.get(acct2.acc.key);
+      if (pl2) FX.checkAch(acct2.acc, pl2);
+      accountChanged(acct2.acc, { looks: true });
+      if (other) other.socket.emit('profile', ownProfile(acct2.acc));
+      ack({ ok: true, profile: ownProfile(acct2.acc) });
     });
     socket.on('test:orbs', (n, ack) => {
       ack = safeAck(ack);
@@ -1449,7 +1504,7 @@ function collectAround(pl, radius, now) {
       if (ev && ev.kind === 'treasure' && ev.phase === 'active') {
         const def = G.EVENTS.treasure, sc = evScore(pl);
         sc.score++; sc.reward = addReward(sc.reward, def.reward); ev.treasureLeft--;
-        payReward(pl, def.reward);
+        payReward(pl, def.reward); FX.onTreasure(pl);
         io.to('arena').emit('ev:treasure', { name: pl.acc.name, left: ev.treasureLeft });
         if (!ev.treasureLeft) ev.endAt = now;
       }
@@ -1457,6 +1512,8 @@ function collectAround(pl, radius, now) {
     }
     const rw = G.orbReward(ot.value, pl.acc.upgrades, pl, Math.random, o.t);
     if (weekendOn(now)) { const f = (pl.wkFrac || 0) + rw.value * (G.WEEKEND.mult - 1), whole = Math.floor(f + 1e-9); pl.wkFrac = f - whole; rw.value += whole; } // «Выходные»: ×1.5 (fraction carried) // «находка», luck ×2, multiplier (fraction in pl.frac) — server-side only
+    if (C.boostMult(pl.acc.stats, 'orbs', now) > 1) { const f = (pl.bFrac || 0) + rw.value * (C.BOOSTS.orbs.mult - 1), whole = Math.floor(f + 1e-9); pl.bFrac = f - whole; rw.value += whole; } // quest boost «Сферы ×1.5»
+    FX.onCollect(pl, o, rw.value);
     if (rw.lucky) pl.lucky++;
     if (rw.jackpot) pl.jackpots++;
     pl.gained += rw.value;
@@ -1482,7 +1539,8 @@ function tick() {
     pl.x0 = pl.x; pl.y0 = pl.y;
     pl.budget = Math.min(pl.budget + 1, 6);
     while (pl.inputs.length > 12) pl.lastSeq = pl.inputs.shift().s; // keep latency bounded
-    const speed = G.speedFor(pl.acc.upgrades.speed);
+    const speed = G.speedFor(pl.acc.upgrades.speed) * C.boostMult(pl.acc.stats, 'speed', now);
+    const solid = FX.solids();
     const radius = G.pickupFor(pl.acc.upgrades.magnet);
     while (pl.budget >= 1 && pl.inputs.length) {
       const inp = pl.inputs.shift();
@@ -1490,7 +1548,7 @@ function tick() {
       const px = pl.x;
       G.applyInput(pl, inp.x, inp.y, speed);
       G.zoneGate(pl, px, pl.acc.stats.unlockedDoor2 === true);
-      G.resolveObstacles(pl, obstacles);
+      G.resolveObstacles(pl, obstacles); if (solid.length) G.resolveObstacles(pl, solid);
       pl.lastSeq = inp.s;
       collectAround(pl, radius, now);
     }
@@ -1511,13 +1569,15 @@ function tick() {
   spawnTick(now);
   eventTick(now, dt);
   obstacleTick(now);
+  FX.tick(now, dt);
   const p = [];
   for (const pl of players.values()) p.push([pl.id, Math.round(pl.x * 100) / 100, Math.round(pl.y * 100) / 100, pl.lastSeq]);
   const st = { t: now, p, oa: pendingAdds, od: pendingDels };
   if (ev && ev.runners && ev.phase === 'active') st.rn = ev.runners.filter(r => !r.caught).map(r => [r.id, Math.round(r.x), Math.round(r.y)]); // «Раннеры» positions
   const rb = obstacles.filter(o => o.k === 'robot');
   if (rb.length) st.rb = rb.map(o => [o.id, +o.face.toFixed(3), o.aim ? 1 : 0, o.aim ? Math.round(o.aim.x) : 0, o.aim ? Math.round(o.aim.y) : 0]); // robots: facing, aiming (telegraph)
-  if (shots.length) st.pj = shots.map(b => [b.id, Math.round(b.x), Math.round(b.y), Math.round(b.vx), Math.round(b.vy)]);
+  const bp = FX.state(st);
+  if (shots.length || bp.length) st.pj = shots.map(b => [b.id, Math.round(b.x), Math.round(b.y), Math.round(b.vx), Math.round(b.vy)]).concat(bp);
   io.to('arena').emit('s', st);
   pendingAdds = []; pendingDels = [];
 }
@@ -1528,6 +1588,7 @@ function everySecond() {
   io.to('arena').emit('top', { online: players.size, top, wk: weekendState().left }); // wk: ms until Monday 00:00 MSK (0 = no weekend bonus)
   const now = Date.now();
   for (const pl of players.values()) pl.socket.emit('sping', now);
+  FX.everySecond(now);
 }
 
 // ---------------------------------------------------------------- startup / shutdown

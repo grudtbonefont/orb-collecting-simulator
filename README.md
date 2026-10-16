@@ -132,6 +132,14 @@ Exclusive cosmetics that **cannot be bought with orbs**, only with «Леген�
 
 All 8 together: 1 020 shards. Exchange: **1 shard → 40 orbs** (balance only, not the all-time total; up to 99 per trade). Shard income (estimate): legendary orbs ≈ up to 30/h if you catch every one, mythic orbs ≈ 7/h server-wide, events ≈ 2–4/h → a typical active player gets ≈ 15–35 shards/h, so the top item takes ≈ 8–20 h of play. Socket: `shard:buy(itemId)`, `shard:exchange(qty)` (rate limited 8 / 5 s).
 
+## Content: mini-events, boss, achievements, daily quests (`public/content.js`, `lib/features.js`)
+- **Shards are a currency** (`stats.shards`, shown in the HUD). One-time migration `stats.shardMigrationV1` moves old shard inventory items into the balance; `INV.grantItem/removeItem/countItem(SHARD_ID)` route to the balance.
+- **Mini-events** every 60–120 s (one at a time, small chip + radar marker): «Золотой дождь» (24 valuable orbs, 25 s), «Сундук с замком» (2 players near for 3 s, or solo 8 s; 100 orbs + 2 shards split, min 30 each), «Бонусный портал» (30 s in a bonus room, then back to where you were).
+- **Boss** «Пожиратель сфер» every 50–70 min of online play, 25 s announcement, zone 1, 3 min. HP 300 + 250 × players (cap 6000), 10 per bump (0.6 s cooldown). Rings + shots take 3 % orbs (max 60). Kill reward 150–500 orbs + 1–2 shards by damage share; top damage +100 orbs + 2 shards. Never overlaps an arena event.
+- **20 achievements** (15 give titles shown next to the nick in the world, chat and profile), backfilled from existing stats.
+- **Daily quests**: 3 per day (difficulty ★/★★/★★★), reset 00:00 MSK, rewards are orbs / shards / ×1.5 orbs or +10 % speed boosts / sometimes a cosmetic; all 3 → bonus 100 + 25 per streak day (max +250) + 1 shard.
+- Env overrides for testing: `MINI_EVERY_MS`, `MINI_DURATION_MS`, `MINI_ROOM_MS`, `BOSS_EVERY_MS`, `BOSS_ANNOUNCE_MS`, `BOSS_LIFE_MS`. Tests: `node test/content-test.js` (`CT_ONLY=shards,migration,ach,quests,mini,boss,sched`), `node test/screenshot-content.js`.
+
 ## Promo codes (shop tab «Коды»)
 Codes live in **`lib/codes.js`** (the shipped list is empty; three `TEST-*` codes exist only with `OCS_TEST_HOOKS=1`). To add a code, append an entry and redeploy:
 ```js
