@@ -50,10 +50,10 @@ const ROOT = process.cwd(), PORT = 3145, URL = 'http://localhost:' + PORT, sleep
   ok((await em(A, 'emote', 'e_crown')).ok === false, 'unowned emote rejected');
   await em(A, 'test:tp', { x: 900, y: 900, orbs: 5000 }); await sleep(400);
   const buy = await em(A, 'buy', 'e_crown'); ok(buy && buy.ok, 'buy emote in shop');
-  await A.click('[data-open=shop]'); await sleep(300); await A.click('#shopTabs [data-tab=emote]'); await sleep(300); ok((await A.$$('#shopGrid .item')).length === 9, 'shop tab Эмоции lists 9 emotes');
+  await A.click('[data-open=shop]'); await sleep(300); await A.click('#shopTabs [data-tab=emote]'); await sleep(300); ok((await A.$$('#shopGrid .item')).length === 23, 'shop tab Эмоции lists 23 emotes');
   await A.evaluate(() => document.querySelectorAll('.modal').forEach(m => m.classList.add('hidden')));
   await em(A, 'test:tp', { name: 'BobTest', x: 1060, y: 1000 }); await sleep(500);
-  await A.click('#emoteBtn'); await sleep(300); ok((await A.$$('#emotePicker .emo')).length === 11 && (await A.$$('#emotePicker .emo.locked')).length === 8, 'picker: free + owned unlocked');
+  await A.click('#emoteBtn'); await sleep(300); ok((await A.$$('#emotePicker .emo')).length === 26 && (await A.$$('#emotePicker .emo.locked')).length === 22, 'picker: free + owned unlocked');
   await A.click('#emotePicker [data-emote=e_crown]'); await sleep(300);
   const rl = await em(A, 'emote', 'e_wave'); ok(rl.ok === false, 'emote rate limit');
   await sleep(2600); ok((await em(B, 'emote', 'e_wave')).ok, 'free emote usable');
