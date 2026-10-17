@@ -1959,12 +1959,23 @@
     const q = C.QUEST_BY_ID[d.id]; if (q) toastC('quests', `📜 Задание выполнено: «${q.text}» · ${C.rewardText(d.reward)}`, 'ok');
   });
   const streakNow = st => (st && st.streakDay != null && st.streakDay >= C.dayKey() - 1 ? st.streak || 0 : 0);
+  // tracker collapse (localStorage): ▾ → tiny 📜 n/3 chip; tap the chip to expand
+  let qtMin = store.get('ocs_qt_min') === '1';
+  $('qTrack').addEventListener('click', e => {
+    const fold = e.target.closest && e.target.closest('.qt-x');
+    if (!fold && !qtMin) return; // normal click opens the quests modal
+    e.stopImmediatePropagation(); e.preventDefault();
+    qtMin = !!fold; store.set('ocs_qt_min', qtMin ? '1' : '0'); updateQuestTracker();
+  });
   function updateQuestTracker() {
     const el = $('qTrack'), d = profile && profile.stats && profile.stats.daily;
     if (!d || !Array.isArray(d.q)) { el.classList.add('hidden'); return; }
     el.classList.remove('hidden');
     const n = d.q.filter(q => q.done).length;
-    el.textContent = '';
+    el.textContent = ''; el.classList.toggle('qt-min', qtMin);
+    if (qtMin) { el.textContent = `📜 ${n}/${d.q.length}`; el.title = 'Развернуть задания'; return; }
+    el.title = 'Задания дня (Q)';
+    const x = document.createElement('span'); x.className = 'qt-x'; x.textContent = '▾'; x.title = 'Свернуть'; x.setAttribute('role', 'button'); el.appendChild(x);
     const h = document.createElement('div'); h.className = 'qt-head'; h.textContent = `📜 Задания ${n}/${d.q.length}` + (streakNow(profile.stats) ? ` · 🔥${streakNow(profile.stats)}` : ''); el.appendChild(h);
     for (const q of d.q) {
       const def = C.QUEST_BY_ID[q.id]; if (!def) continue;

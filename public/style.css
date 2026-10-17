@@ -548,3 +548,7 @@ body.in-game .music-btn { display: none; }
 .set-sec small { font-weight: 400; opacity: .7; color: #fff; }
 .set-cats { max-height: 56vh; overflow-y: auto; }
 .set-card { max-width: 440px; }
+.qtrack { padding-right: 26px; }
+.qtrack .qt-x { position: absolute; top: 2px; right: 3px; width: 22px; height: 22px; line-height: 22px; text-align: center; border-radius: 6px; color: #ffd76a; font-size: 14px; background: rgba(255,255,255,.06); }
+.qtrack .qt-x:hover { background: rgba(255,255,255,.16); }
+.qtrack.qt-min { width: auto; padding: 4px 9px; font-weight: 800; color: #ffd76a; border-radius: 14px; }
