@@ -2191,7 +2191,7 @@
       const nm = document.createElement('b'); nm.textContent = (q.done ? '✅ ' : '') + def.text;
       const df = document.createElement('span'); df.className = 'q-diff'; df.textContent = '🗓'; top.append(nm, df);
       const bar = document.createElement('div'); bar.className = 'ach-bar'; const fill = document.createElement('i'); fill.style.width = Math.min(100, q.p / def.goal * 100) + '%'; bar.appendChild(fill);
-      const meta = document.createElement('div'); meta.className = 'ach-meta'; meta.textContent = `${fmt(Math.floor(q.p))} / ${fmt(def.goal)} · награда: ${C.rewardText(def.rw)}`;
+      const meta = document.createElement('div'); meta.className = 'ach-meta'; meta.textContent = `${fmt(Math.floor(q.p))} / ${fmt(def.goal)} · награда: ${C.rewardText(Object.assign({ potion: 1 }, def.rw))}`;
       el.append(top, bar, meta); list.appendChild(el);
     }
   }
@@ -2213,7 +2213,7 @@
       const df = document.createElement('span'); df.className = 'q-diff'; df.textContent = '★'.repeat(def.diff) + '☆'.repeat(3 - def.diff);
       top.append(nm, df);
       const bar = document.createElement('div'); bar.className = 'ach-bar'; const fill = document.createElement('i'); fill.style.width = Math.min(100, q.p / def.goal * 100) + '%'; bar.appendChild(fill);
-      const meta = document.createElement('div'); meta.className = 'ach-meta'; meta.textContent = `${fmt(q.p)} / ${fmt(def.goal)} · награда: ${C.rewardText(q.rw)}`;
+      const meta = document.createElement('div'); meta.className = 'ach-meta'; meta.textContent = `${fmt(q.p)} / ${fmt(def.goal)} · награда: ${C.rewardText(Object.assign({ potion: 1 }, q.rw))}`;
       el.append(top, bar, meta); list.appendChild(el);
     }
     const st = profile.stats, next = st.streakDay === d.day ? st.streak : streakNow(st) + 1;

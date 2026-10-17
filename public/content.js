@@ -141,6 +141,8 @@
     if (rw.shards) parts.push(`+${rw.shards} оск.`);
     if (rw.boost) parts.push(`${BOOSTS[rw.boost].name} на ${rw.min} мин`);
     if (rw.item) { const it = G.ITEM_BY_ID[rw.item]; parts.push(`предмет «${it ? it.name : rw.item}»`); }
+    if (rw.potion) { const it = G.ITEM_BY_ID[rw.potion]; parts.push(it ? `+ 🧪 «${it.name}»` : '+ 🧪 зелье'); } // potion: 1 (label) or the rolled item id (notification)
+    if (rw.potionPending) parts.push('🧪 зелье ждёт места в инвентаре');
     return parts.join(', ');
   }
   const boostMult = (stats, kind, now = Date.now()) => (stats && stats.boosts && stats.boosts[kind] > now ? BOOSTS[kind].mult : 1);

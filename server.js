@@ -77,8 +77,27 @@ async function loadAccount(key) {
   if (!acc) return null;
   if (profiles.has(key)) return profiles.get(key); // loaded concurrently
   profiles.set(key, acc);
+  progressWipeV1(acc);
   if (FX) FX.achReset(acc); // one-time achievement reset (stats.achResetV2)
   return acc;
+}
+// One-time progress wipe, explicitly confirmed by the owner for exactly these accounts (exact names, case-sensitive).
+// Resets all game progress to a fresh account; keeps the account, name, password hash, creation date, admin status (name-based),
+// ban / mute / warn flags, password-reset markers and used promo codes. A backup of the old progress (no hash / tokens) is logged first.
+const WIPE_V1 = ['DragonzTV', 'Simbobeze_2', 'DragonzMobile'];
+function progressWipeV1(acc) {
+  if (!acc || !WIPE_V1.includes(acc.name) || (acc.stats && acc.stats.wipeV1)) return false;
+  const { passHash, ...rest } = acc;
+  console.log('[wipeV1] backup ' + JSON.stringify(rest));
+  const old = acc.stats || {}, fresh = newAccount(acc.name, acc.passHash);
+  const keep = {};
+  for (const k of ['ban', 'muteUntil', 'warns', 'mustChangePw', 'pwResetMark']) if (old[k] !== undefined) keep[k] = old[k];
+  acc.balance = 0; acc.total = 0; acc.inventory = fresh.inventory; acc.owned = fresh.owned; acc.equipped = fresh.equipped; acc.upgrades = fresh.upgrades;
+  acc.stats = Object.assign(fresh.stats, keep, { shards: 0, shardMigrationV1: true, wipeV1: Date.now() });
+  INV.migrateAccount(acc);
+  markDirty(acc); lbCache.clear();
+  console.log('[wipeV1] wiped progress of ' + acc.name);
+  return true;
 }
 
 let flushing = Promise.resolve();
@@ -2048,6 +2067,8 @@ process.on('unhandledRejection', e => console.error('Unhandled rejection:', e &&
   if (TEST_HOOKS) console.warn('WARNING: OCS_TEST_HOOKS=1 — test-only socket events are enabled');
   await store.purgeExpiredSessions(Date.now());
   await applyPasswordReset();
+  for (const n of WIPE_V1) { try { await loadAccount(n.toLowerCase()); } catch (e) { console.error('[wipeV1] load failed:', e.message); } }
+  await flush();
   setInterval(tick, G.TICK_MS);
   setInterval(everySecond, 1000);
   setInterval(flush, FLUSH_MS);
