@@ -500,7 +500,7 @@
     if (!open) { ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,204,51,0.75)'; ctx.beginPath(); for (let y = y0; y < y1; y += 28) { ctx.moveTo(Z - 20, y); ctx.lineTo(Z + 20, y); } ctx.stroke(); }
     else { ctx.strokeStyle = 'rgba(93,255,143,0.35)'; ctx.lineWidth = 2; ctx.setLineDash([12, 16]); ctx.lineDashOffset = -t * 40; ctx.beginPath(); ctx.moveTo(Z, y0); ctx.lineTo(Z, y1); ctx.stroke(); ctx.setLineDash([]); }
     ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = '700 18px system-ui, sans-serif';
-    for (let y = Math.max(300, Math.floor(cam.y / 700) * 700 + 350); y < Math.min(H - 100, cam.y + VH + 350); y += 700) {
+    for (let y = Math.max(350, Math.floor((cam.y - 400) / 1400) * 1400 + 350); y < Math.min(H - 100, cam.y + VH + 350); y += 1400) { // every 1 400 px (half as many labels)
       ctx.fillText(open ? '🚪 Зона 2 — проход открыт' : `🔒 Дверь: ${fmt(G.DOOR_COST)} сфер`, Z, y);
       ctx.font = '600 14px system-ui, sans-serif'; ctx.fillStyle = 'rgba(200,215,255,0.8)'; ctx.fillText('больше редких сфер →', Z + 130, y + 26); ctx.font = '700 18px system-ui, sans-serif'; ctx.fillStyle = '#fff';
     }
