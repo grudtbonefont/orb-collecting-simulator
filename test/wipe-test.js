@@ -5,7 +5,7 @@ const up = async () => { for (let i = 0; i < 100; i++) { try { if ((await fetch(
 const reg = async n => { const r = await fetch(URL + '/api/register', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: n, password: 'demo-pass-123' }) }); return r.status; };
 (async () => {
   try { fs.unlinkSync('/tmp/wipe.json'); } catch (_) {}
-  const base = { inventory: { v: 1, slots: [] }, owned: [], equipped: {}, upgrades: { speed: 0 }, stats: {}, balance: 0, total: 0, createdAt: 1, lastSeen: 1, codes: [] };
+  const base = { inventory: { v: 1, slots: [] }, owned: [], equipped: {}, upgrades: { magnet: 0, speed: 0, mult: 0, luck: 0, sense: 0, skill: 0 }, stats: { upgradeRefundV1: true, upgradeRefundAmount: 0, shardMigrationV1: true, achV2: true, achResetV2: 1, achBase: {} }, balance: 0, total: 0, createdAt: 1, lastSeen: 1, codes: [] };
   const names = ['DragonzTV', 'Simbobeze_2', 'DragonzMobile', 'Dragonz', 'Simbobeze_1', 'dragonztv2'];
   fs.writeFileSync('/tmp/wipe.json', JSON.stringify({ version: 2, sessions: {}, accounts: Object.fromEntries(names.map(n => [n.toLowerCase(), Object.assign(JSON.parse(JSON.stringify(base)), { key: n.toLowerCase(), name: n, passHash: 'h-' + n })])) }));
   let p;
