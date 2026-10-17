@@ -78,6 +78,7 @@ async function loadAccount(key) {
   if (profiles.has(key)) return profiles.get(key); // loaded concurrently
   profiles.set(key, acc);
   progressWipeV1(acc);
+  codesWipeV1(acc);
   if (FX) FX.achReset(acc); // one-time achievement reset (stats.achResetV2)
   return acc;
 }
@@ -85,6 +86,16 @@ async function loadAccount(key) {
 // Resets all game progress to a fresh account; keeps the account, name, password hash, creation date, admin status (name-based),
 // ban / mute / warn flags, password-reset markers and used promo codes. A backup of the old progress (no hash / tokens) is logged first.
 const WIPE_V1 = ['DragonzTV', 'Simbobeze_2', 'DragonzMobile'];
+// One-time (owner-confirmed): clear the used promo codes of the same 3 accounts and give their activations back to the global counters.
+function codesWipeV1(acc) {
+  if (!acc || !WIPE_V1.includes(acc.name) || !acc.stats || acc.stats.wipeCodesV1) return false;
+  const old = Array.isArray(acc.codes) ? acc.codes.slice() : [];
+  console.log('[wipeCodesV1] backup ' + JSON.stringify({ name: acc.name, codes: old }));
+  acc.codes = []; acc.stats.wipeCodesV1 = Date.now(); markDirty(acc);
+  for (const c of new Set(old)) store.releaseCodeUse(c).catch(e => console.error('[wipeCodesV1] release failed:', e.message));
+  console.log(`[wipeCodesV1] cleared ${old.length} used codes of ${acc.name}`);
+  return true;
+}
 function progressWipeV1(acc) {
   if (!acc || !WIPE_V1.includes(acc.name) || (acc.stats && acc.stats.wipeV1)) return false;
   const { passHash, ...rest } = acc;
