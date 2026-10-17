@@ -42,8 +42,8 @@
   const pointer = { down: false, x: 0, y: 0 };
 
   const itemVal = id => (G.ITEM_BY_ID[id] || {}).value;
-  let selfFx = { spd: 1, frozen: false, god: false }; // admin effects on this player (server-authoritative; mirrored for prediction)
-  const mySpeed = () => G.speedFor(profile ? profile.upgrades.speed : 0) * C.boostMult(profile && profile.stats, 'speed', Date.now() + srvSkew) * (selfFx.frozen ? 0 : selfFx.spd || 1); // quest boost «Скорость +10 %»
+  let selfFx = { spd: 1, frozen: false, god: false, invis: false }, cevSpd = 1, lastSnapIds = null; // admin effects on this player (server-authoritative; mirrored for prediction)
+  const mySpeed = () => G.speedFor(profile ? profile.upgrades.speed : 0) * C.boostMult(profile && profile.stats, 'speed', Date.now() + srvSkew) * (selfFx.frozen ? 0 : selfFx.spd || 1) * (cevSpd || 1) * funSpeedMult(); // quest boost «Скорость +10 %»
   let srvSkew = 0;
   const myPickup = () => G.pickupFor(profile ? profile.upgrades.magnet : 0);
   const fmt = n => Number(n).toLocaleString('ru-RU');
@@ -239,7 +239,7 @@
     $('hudName').textContent = '👤 ' + myName;
     resetChat(res.chat || []);
     runners.clear(); evResultHide(); setEvent(res.event || null); setObstacles(res.obstacles || []); setWeekend(res.weekend || 0);
-    setFx(res.fx || null, true); $('admBtn').classList.toggle('hidden', !res.admin); isAdminMe = !!res.admin; selfFx = { spd: 1, frozen: false, god: false };
+    setFx(res.fx || null, true); setFun(res.fun || null); pollS = res.poll || null; myVote = null; renderPoll(); $('admBtn').classList.toggle('hidden', !res.admin); isAdminMe = !!res.admin; selfFx = { spd: 1, frozen: false, god: false, invis: false };
     setMini(res.mini || null); setBoss(res.boss || null); roomUntil = 0; bossRings.length = 0; updateRoomBar();
     updateHud();
     if (!reconnect) toastC('other', `Добро пожаловать, ${myName}! Собирайте сферы.`, 'ok');
@@ -310,12 +310,12 @@
   socket.on('kicked', msg => { paused = true; stage = 'auth'; hideGameUi(); showResume(msg, true); });
 
   function addPlayer(p) {
-    players.set(p.id, { id: p.id, name: p.name, eq: p.eq, trail: [], dir: { x: 1, y: 0 }, pos: { x: p.x, y: p.y }, last: { x: p.x, y: p.y } });
+    players.set(p.id, { id: p.id, name: p.name, eq: p.eq, sz: p.sz || 1, trail: [], dir: { x: 1, y: 0 }, pos: { x: p.x, y: p.y }, last: { x: p.x, y: p.y } });
   }
   socket.on('pjoin', p => { if (!players.has(p.id)) addPlayer(p); });
   socket.on('pleave', id => players.delete(id));
   socket.on('chat', m => addChat(m, true));
-  socket.on('pmeta', p => { const pl = players.get(p.id); if (pl) { pl.eq = p.eq; pl.name = p.name; } });
+  socket.on('pmeta', p => { const pl = players.get(p.id); if (pl) { pl.eq = p.eq; pl.name = p.name; pl.sz = p.sz || 1; } else if (p.id !== myId) addPlayer(p); });
   socket.on('sping', v => socket.emit('spong', v));
   socket.on('announce', a => toastC('rare', '✨ ' + a.text));
   // ------------------------------------------------------------ temporary obstacles + rotating lasers (server-run)
@@ -442,6 +442,7 @@
     if (!joined) return;
     const now = performance.now();
     const map = new Map();
+    lastSnapIds = new Set(st.p.map(r => r[0]));
     for (const [id, x, y, ack] of st.p) {
       map.set(id, [x, y]);
       if (id === myId) reconcile(x, y, ack);
@@ -1423,13 +1424,18 @@
       if (pl.trailVis && (itemVal(pl.eq.trail) || 'none') !== 'none') onScreen++;
     }
     fxLod = onScreen > 22 || fpsEma < 30 ? 0 : onScreen > 10 || fpsEma < 45 || mobileUI() ? 1 : 2;
-    for (const pl of players.values()) if (pl.trailVis) drawTrail(ctx, pl, t, now);
+    drawFunUnder(ctx, t);
+    for (const pl of players.values()) if (pl.trailVis && (pl.id === myId || !lastSnapIds || lastSnapIds.has(pl.id))) drawTrail(ctx, pl, t, now);
     const order = Array.from(players.values()).sort((p, q) => (p.id === myId) - (q.id === myId));
     for (const pl of order) {
       if (!pl.pos) continue;
       if (pl.pos.x < cam.x - 120 || pl.pos.x > cam.x + VW + 120 || pl.pos.y < cam.y - 120 || pl.pos.y > cam.y + VH + 120) continue;
-      drawAvatar(ctx, pl.pos.x, pl.pos.y, G.PLAYER_R, pl.eq, t, { name: pl.name, dir: pl.dir, isMe: pl.id === myId, phase: pl.id });
+      if (pl.id !== myId && lastSnapIds && !lastSnapIds.has(pl.id)) continue; // invisible (admin) or not in the latest update
+      const ghost = pl.id === myId && selfFx.invis; if (ghost) ctx.globalAlpha = 0.4;
+      drawAvatar(ctx, pl.pos.x, pl.pos.y, G.PLAYER_R * (pl.sz || 1), pl.eq, t, { name: pl.name, dir: pl.dir, isMe: pl.id === myId, phase: pl.id });
+      if (ghost) ctx.globalAlpha = 1;
     }
+    drawFunOver(ctx, t);
     // floating texts
     for (let i = floaters.length - 1; i >= 0; i--) {
       const f = floaters[i], k = (now - f.start) / 900;
@@ -1524,7 +1530,7 @@
     const R = G.RADAR, S = mm.width, c = S / 2, k = (c - 4) / R.range;
     if (now - radarSnap.at >= R.periodMs) { // new pulse: snapshot what the wave will reveal
       radarSnap = { at: now, me: { x: dispMe.x, y: dispMe.y }, blips: G.radarBlips(orbs.values(), dispMe),
-        pls: Array.from(players.values()).filter(p => p.pos && p.id !== myId && Math.hypot(p.pos.x - dispMe.x, p.pos.y - dispMe.y) <= R.range).map(p => ({ x: p.pos.x, y: p.pos.y, d: Math.hypot(p.pos.x - dispMe.x, p.pos.y - dispMe.y), col: colorOf(p.eq, 0) })) };
+        pls: Array.from(players.values()).filter(p => p.pos && p.id !== myId && (!lastSnapIds || lastSnapIds.has(p.id)) && Math.hypot(p.pos.x - dispMe.x, p.pos.y - dispMe.y) <= R.range).map(p => ({ x: p.pos.x, y: p.pos.y, d: Math.hypot(p.pos.x - dispMe.x, p.pos.y - dispMe.y), col: colorOf(p.eq, 0) })) };
     }
     const age = now - radarSnap.at, wave = age / R.sweepMs; // wave: 0 → 1 while it crosses the radar
     mctx.clearRect(0, 0, S, S);
@@ -1646,7 +1652,7 @@
     $('evChipPhase').textContent = ann ? `Начнётся через ${sec} с` : `Идёт · осталось ${mmss}`;
     if (ann) $('evChipInfo').textContent = '';
   }
-  for (const id of ['discoChip', 'x2Chip']) { $(id + 'Btn').addEventListener('click', ev => { ev.stopPropagation(); $(id).classList.toggle('open'); }); document.addEventListener('pointerdown', ev => { if (!$(id).contains(ev.target)) $(id).classList.remove('open'); }); }
+  for (const id of ['discoChip', 'x2Chip', 'cevChip']) { $(id + 'Btn').addEventListener('click', ev => { ev.stopPropagation(); $(id).classList.toggle('open'); }); document.addEventListener('pointerdown', ev => { if (!$(id).contains(ev.target)) $(id).classList.remove('open'); }); }
   for (const id of ['evChip', 'wkChip']) {
     $(id + 'Btn').addEventListener('click', ev => { ev.stopPropagation(); for (const o of ['evChip', 'wkChip']) if (o !== id) $(o).classList.remove('open'); $(id).classList.toggle('open'); });
     $(id).addEventListener('pointerdown', ev => ev.stopPropagation());
@@ -3040,11 +3046,13 @@
   });
 
   // ------------------------------------------------------------ admin effects (disco, x2), announcements, admin panel
-  let isAdminMe = false, discoEnd = 0, x2End = 0, discoWas = false;
+  let isAdminMe = false, discoEnd = 0, x2End = 0, discoWas = false, cev = null, weatherNow = '', nightNow = false, restartEnd = 0;
   function setFx(f, silent) {
     f = f || {}; const now = performance.now();
     const wasDisco = discoEnd > now;
     discoEnd = f.disco > 0 ? now + f.disco : 0; x2End = f.x2 > 0 ? now + f.x2 : 0;
+    cev = f.custom ? Object.assign({}, f.custom, { end: now + f.custom.left }) : null; weatherNow = f.weather || ''; nightNow = !!f.night; restartEnd = f.restart > 0 ? now + f.restart : 0;
+    if (!silent && cev && !f._seen) toastC('events', `⭐ Событие «${cev.name}»!`, 'ok');
     if (!silent && !wasDisco && discoEnd) toastC('disco', '🪩 Диско-ивент! Сферы ×1,5 и удача ×1,5', 'ok');
     updateFx();
   }
@@ -3055,22 +3063,33 @@
     if (d) { $('discoChipTime').textContent = fmtLeft(dl); $('discoChipPhase').textContent = 'Осталось ' + fmtLeft(dl); }
     if (joined && xl > 0) { $('x2ChipTime').textContent = fmtLeft(xl); $('x2ChipPhase').textContent = 'Осталось ' + fmtLeft(xl); }
     $('discoFx').classList.toggle('hidden', !d);
+    const cl = cev ? cev.end - now : 0, ce = joined && cl > 0; cevSpd = ce ? cev.spd : 1;
+    $('cevChip').classList.toggle('hidden', !ce);
+    if (ce) { $('cevChipTime').textContent = fmtLeft(cl); $('cevChipName').textContent = '⭐ ' + cev.name; $('cevChipPhase').textContent = 'Осталось ' + fmtLeft(cl); $('cevChipDesc').textContent = `Сферы ×${cev.orb}, удача ×${cev.luck}, скорость ×${cev.spd}`; }
+    const wx = $('weatherFx'); wx.className = 'weather-fx' + (joined && weatherNow ? ' ' + weatherNow : ' hidden');
+    $('nightFx').classList.toggle('hidden', !(joined && nightNow));
+    const rl = restartEnd - now; $('restartBar').classList.toggle('hidden', !(rl > 0)); if (rl > 0) $('restartBar').textContent = `⚠️ Перезапуск сервера через ${fmtLeft(rl)}`;
     if (d !== discoWas) { discoWas = d; music.setDisco(d); if (!d && joined && discoEnd) toastC('disco', '🪩 Диско закончилось', ''); }
     const go = $('admDiscoGo'); if (go) go.textContent = dl > 0 ? '⏹ Выключить диско' : '🪩 Включить диско';
   }
   setInterval(updateFx, 500);
   socket.on('fx', f => setFx(f));
-  socket.on('adm:self', s => { if (s) selfFx = { spd: Number(s.spd) || 1, frozen: !!s.frozen, god: !!s.god }; });
+  socket.on('adm:self', s => { if (s) selfFx = { spd: Number(s.spd) || 1, frozen: !!s.frozen, god: !!s.god, invis: !!s.invis }; });
   socket.on('chat:clear', () => { chatLog.textContent = ''; });
   let annT = null;
+  socket.on('adm:warn', w => {
+    if (!w) return; $('annOverlay').classList.add('warn'); $('annTitle').textContent = `⚠️ Предупреждение от администратора (${w.n})`;
+    $('annText').textContent = String(w.r) + (w.muted ? ' — чат отключён на 10 мин.' : ''); $('annOverlay').classList.remove('hidden');
+    clearTimeout(annT); annT = setTimeout(() => $('annOverlay').classList.add('hidden'), 8000);
+  });
   socket.on('adm:announce', a => {
-    if (!a || !a.t) return;
+    if (!a || !a.t) return; $('annOverlay').classList.remove('warn'); $('annTitle').textContent = '📢 Объявление';
     $('annText').textContent = String(a.t); $('annOverlay').classList.remove('hidden');
     clearTimeout(annT); annT = setTimeout(() => $('annOverlay').classList.add('hidden'), 6000);
   });
   $('annOverlay').addEventListener('click', () => $('annOverlay').classList.add('hidden'));
 
-  const adm = (d, cb) => socket.emit('adm', d, r => { r = r || { ok: false, error: 'Нет ответа' }; const m = $('admMsg'); m.textContent = r.ok ? '✔ ' + (r.msg || 'Готово') : '✖ ' + (r.error || 'Ошибка'); m.classList.toggle('err', !r.ok); if (r.players) admPlayers(r.players); if (r.bans) admBans(r.bans); if (cb) cb(r); });
+  const adm = (d, cb) => socket.emit('adm', d, r => { r = r || { ok: false, error: 'Нет ответа' }; const m = $('admMsg'); m.textContent = r.ok ? '✔ ' + (r.msg || 'Готово') : '✖ ' + (r.error || 'Ошибка'); m.classList.toggle('err', !r.ok); if (r.players) admPlayers(r.players); if (r.bans) admBans(r.bans); if (r.codes) admCodes(r.codes); if (cb) cb(r); });
   const opt = (sel, list) => { sel.textContent = ''; for (const [v, t] of list) { const o = document.createElement('option'); o.value = v; o.textContent = t; sel.appendChild(o); } };
   const mkBtn = (txt, fn, cls) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'btn' + (cls ? ' ' + cls : ''); b.textContent = txt; b.addEventListener('click', fn); return b; };
   function admPlayers(list) {
@@ -3085,7 +3104,7 @@
       }
       box.appendChild(row);
     }
-    opt($('admGivePl'), list.map(p => [p.name, p.name]));
+    opt($('admGivePl'), list.map(p => [p.name, p.name])); opt($('admPl2'), list.map(p => [p.name, p.name]));
   }
   function admBans(list) {
     const box = $('admBans'); box.textContent = '';
@@ -3099,7 +3118,8 @@
       if (!r.ok) return;
       const ev = $('admEvents'); ev.textContent = ''; for (const e of r.events) ev.appendChild(mkBtn(e.name, () => adm({ a: 'event', kind: e.k })));
       const mi = $('admMinis'); mi.textContent = ''; for (const e of r.minis) mi.appendChild(mkBtn(e.icon + ' ' + e.name, () => adm({ a: 'mini', kind: e.k })));
-      opt($('admRarity'), r.rarities.map(x => [x.k, x.name])); opt($('admGiveItem'), r.items.map(x => [x.id, x.name]));
+      opt($('admRarity'), r.rarities.map(x => [x.k, x.name])); opt($('admRainT'), r.rarities.map(x => [x.k, x.name])); opt($('admGiveItem'), r.items.map(x => [x.id, x.name])); opt($('admCodeItem'), [['', 'без предмета']].concat(r.items.map(x => [x.id, x.name])));
+      if (r.players) admPlayers(r.players);
       $('admMsg').textContent = '';
     });
   }
@@ -3108,6 +3128,8 @@
     for (const x of document.querySelectorAll('.adm-tab')) x.classList.toggle('active', x === t);
     for (const s of document.querySelectorAll('.adm-sec')) s.classList.toggle('hidden', s.dataset.sec !== t.dataset.sec);
     if (t.dataset.sec === 'pl') { adm({ a: 'players' }); adm({ a: 'bans' }); }
+    if (t.dataset.sec === 'codes') adm({ a: 'codes' });
+    if (t.dataset.sec === 'log') admLoadLog();
   });
   $('admin').addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter' && e.target.id === 'admCmd') $('admCmdGo').click(); });
   $('admBoss').addEventListener('click', () => adm({ a: 'boss' }));
@@ -3119,5 +3141,86 @@
   $('admBanGo').addEventListener('click', () => { const n = $('admBanName').value.trim(); if (n && confirm('Забанить ' + n + '?')) adm({ a: 'ban', name: n }); });
   $('admCmdGo').addEventListener('click', () => { const t = $('admCmd').value.trim(); if (t) adm({ a: 'cmd', text: t }, r => { if (r.ok) $('admCmd').value = ''; }); });
   $('admDiscoGo').addEventListener('click', () => adm({ a: 'disco', min: Number($('admDiscoMin').value) }));
-  window.OCSFx = () => ({ disco: discoEnd > performance.now(), x2: x2End > performance.now(), overlay: !$('discoFx').classList.contains('hidden'), admin: isAdminMe, btn: !$('admBtn').classList.contains('hidden'), selfFx });
+  function admCodes(list) {
+    const box = $('admCodes'); box.textContent = ''; if (!list.length) { box.textContent = 'Нет'; return; }
+    for (const c of list) { const row = document.createElement('div'); row.className = 'adm-pl'; const n = document.createElement('b'); const rw = c.rewards || {};
+      n.textContent = `${c.code} · ${[rw.orbs ? rw.orbs + ' сфер' : '', rw.shards ? rw.shards + ' оск.' : '', rw.items ? rw.items.map(i => i.id).join(',') : ''].filter(Boolean).join(', ')} · ${c.uses}/${c.maxUses || '∞'}${c.expiresAt ? ' · до ' + new Date(c.expiresAt).toLocaleDateString('ru-RU') : ''}${c.disabled ? ' · ВЫКЛ' : ''}`;
+      row.append(n, mkBtn(c.disabled ? 'Включить' : 'Отключить', () => adm({ a: 'code:toggle', code: c.code }))); box.appendChild(row); }
+  }
+  function admLoadLog() { socket.emit('adm', { a: 'log' }, r => { const box = $('admLog'); box.textContent = ''; if (!r || !r.ok) return; for (const e of r.log) { const d = document.createElement('div'); d.textContent = `${new Date(e.at).toLocaleTimeString('ru-RU')} ${e.by}: ${e.action} ${e.d || ''}`; box.appendChild(d); } }); }
+  $('admBossTimer').addEventListener('click', () => adm({ a: 'bosstimer' }));
+  $('admCevGo').addEventListener('click', () => adm({ a: 'custom', name: $('admCevName').value, orb: $('admCevOrb').value, luck: $('admCevLuck').value, spd: $('admCevSpd').value, min: $('admCevMin').value }));
+  $('admRainGo').addEventListener('click', () => adm({ a: 'rain', t: $('admRainT').value, n: Number($('admRainN').value), sec: Number($('admRainSec').value) }));
+  $('admInfoGo').addEventListener('click', () => adm({ a: 'info', name: $('admPl2').value }, r => { const i = r.info; $('admInfo').textContent = !r.ok ? '' : `${i.name}${i.online ? ' (онлайн)' : ''}\nБаланс: ${i.balance} · всего ${i.total} · осколки ${i.shards}\nПредметы: ${i.items} (ячеек ${i.slots}) · в игре ${i.playMin} мин\nПредупреждения: ${i.warns.length}${i.warns.length ? ' — ' + i.warns.slice(-3).map(w => w.r).join('; ') : ''}\nБан: ${i.banned ? 'да' : 'нет'} · мут: ${i.mutedMin ? i.mutedMin + ' мин' : 'нет'}`; }));
+  $('admWarnGo').addEventListener('click', () => adm({ a: 'warn', name: $('admPl2').value, reason: $('admWarnReason').value }, r => { if (r.ok) $('admWarnReason').value = ''; }));
+  $('admTrSizeGo').addEventListener('click', () => adm({ a: 'troll', name: $('admPl2').value, size: Number($('admTrSize').value), sec: Number($('admTrSec').value) }));
+  $('admTrColorGo').addEventListener('click', () => adm({ a: 'troll', name: $('admPl2').value, color: $('admTrColor').value, sec: Number($('admTrSec').value) }));
+  for (const b of document.querySelectorAll('#admin [data-w]')) b.addEventListener('click', () => adm({ a: 'weather', w: b.dataset.w }));
+  $('admNight').addEventListener('click', () => adm({ a: 'night' }));
+  $('admInvis').addEventListener('click', () => adm({ a: 'invis' }));
+  $('admGiftGo').addEventListener('click', () => { if (confirm('Подарить всем онлайн?')) adm({ a: 'gift', what: $('admGiftWhat').value, n: Number($('admGiftN').value) }); });
+  $('admRestartGo').addEventListener('click', () => adm({ a: 'restart', sec: Number($('admRestartSec').value) }));
+  $('admRestartOff').addEventListener('click', () => adm({ a: 'restart', sec: 0 }));
+  $('admCodeGo').addEventListener('click', () => adm({ a: 'code:create', code: $('admCode').value, orbs: $('admCodeOrbs').value, shards: $('admCodeShards').value, item: $('admCodeItem').value, maxUses: $('admCodeMax').value, days: $('admCodeDays').value }, r => { if (r.ok) $('admCode').value = ''; }));
+  $('admLogRefresh').addEventListener('click', admLoadLog);
+  window.OCSFx = () => ({ cev: !!cev && cev.end > performance.now(), weather: weatherNow, night: nightNow, restart: restartEnd > performance.now(), disco: discoEnd > performance.now(), x2: x2End > performance.now(), overlay: !$('discoFx').classList.contains('hidden'), admin: isAdminMe, btn: !$('admBtn').classList.contains('hidden'), selfFx });
+
+  // ------------------------------------------------------------ admin fun events (hunt, giant orb, chaos, lava, ghost, map freeze, chest, poll)
+  let funS = {}, funAt = performance.now(), pollS = null, myVote = null;
+  function setFun(f) { funS = f || {}; funAt = performance.now(); updateFunBar(); }
+  const funLeft = ms => Math.max(0, ms - (performance.now() - funAt));
+  function funSpeedMult() { if (isAdminMe) return 1; if (funS.freeze) return 0; return funS.chaos && funLeft(funS.chaos) > 0 ? -1 : 1; }
+  function updateFunBar() {
+    const parts = [];
+    if (funS.hunt && funLeft(funS.hunt.left) > 0) parts.push(`🏃 Охота на админа ${fmtLeft(funLeft(funS.hunt.left))}`);
+    if (funS.giant) parts.push(`🟣 Гигантская сфера ${fmtLeft(funLeft(funS.giant.left))} · коснулись ${funS.giant.n}`);
+    if (funS.chaos && funLeft(funS.chaos) > 0) parts.push(`🌀 Хаос ${fmtLeft(funLeft(funS.chaos))}`);
+    if (funS.lava && funLeft(funS.lava.left) > 0) parts.push(`🌋 Лава ${fmtLeft(funLeft(funS.lava.left))}`);
+    if (funS.ghost) parts.push('👻 Призрак на охоте');
+    if (funS.freeze) parts.push('🧊 Карта заморожена');
+    if (funS.chest) parts.push('🎁 Сундук спрятан');
+    const b = $('funBar'); b.textContent = parts.join('  ·  '); b.classList.toggle('hidden', !(joined && parts.length));
+    $('lavaFx').classList.toggle('hidden', !(joined && funS.lava && funLeft(funS.lava.left) > 0));
+  }
+  setInterval(updateFunBar, 500);
+  socket.on('fun', setFun);
+  function drawFunUnder(g, t) {
+    if (funS.lava && funLeft(funS.lava.left) > 0) for (const i of funS.lava.islands) { g.beginPath(); g.arc(i.x, i.y, i.r, 0, Math.PI * 2); g.fillStyle = 'rgba(80,255,160,.18)'; g.fill(); g.lineWidth = 4; g.strokeStyle = 'rgba(120,255,180,.8)'; g.stroke(); }
+  }
+  function drawFunOver(g, t) {
+    if (funS.giant) { const p = funS.giant, k = 1 + Math.sin(t * 3) * 0.04; g.save(); g.shadowColor = '#c46bff'; g.shadowBlur = 40; g.beginPath(); g.arc(p.x, p.y, p.r * k, 0, Math.PI * 2);
+      const gr = g.createRadialGradient(p.x - 20, p.y - 20, 8, p.x, p.y, p.r); gr.addColorStop(0, '#fff'); gr.addColorStop(0.3, '#e0a8ff'); gr.addColorStop(1, '#7a2bd6'); g.fillStyle = gr; g.fill(); g.restore();
+      g.font = '800 16px Segoe UI, sans-serif'; g.textAlign = 'center'; g.fillStyle = '#fff'; g.fillText(`${p.total} сфер на всех`, p.x, p.y - p.r - 12); }
+    if (funS.chest) { const c = funS.chest; g.font = '44px Segoe UI Emoji, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('🎁', c.x, c.y + Math.sin(t * 4) * 4); g.textBaseline = 'alphabetic'; }
+    const hl = (id, col) => { const p = players.get(id); if (!p || !p.pos) return; g.beginPath(); g.arc(p.pos.x, p.pos.y, G.PLAYER_R * (p.sz || 1) + 10 + Math.sin(t * 6) * 3, 0, Math.PI * 2); g.lineWidth = 3; g.strokeStyle = col; g.stroke(); };
+    if (funS.ghost) { hl(funS.ghost, 'rgba(255,80,110,.9)'); const p = players.get(funS.ghost); if (p && p.pos) { g.font = '26px Segoe UI Emoji, sans-serif'; g.textAlign = 'center'; g.fillText('👻', p.pos.x, p.pos.y - 44); } }
+    if (funS.hunt && funLeft(funS.hunt.left) > 0) for (const p of players.values()) if (p.name === 'DragonzTV') hl(p.id, 'rgba(255,220,60,.95)');
+  }
+  // poll
+  function renderPoll() {
+    const box = $('pollBox'); if (!pollS || !joined) { box.classList.add('hidden'); return; }
+    box.classList.remove('hidden'); $('pollQ').textContent = '📊 ' + pollS.q + (pollS.done ? ' — итоги' : '');
+    const tot = pollS.counts.reduce((a, b) => a + b, 0) || 1, list = $('pollOpts'); list.textContent = '';
+    pollS.opts.forEach((o, i) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'poll-opt' + (myVote === i ? ' mine' : ''); b.disabled = !!pollS.done;
+      const bar = document.createElement('i'); bar.style.width = Math.round(pollS.counts[i] / tot * 100) + '%'; const tx = document.createElement('span'); tx.textContent = `${o} — ${pollS.counts[i]}`; b.append(bar, tx);
+      b.addEventListener('click', () => socket.emit('poll:vote', { id: pollS.id, i }, r => { if (r && r.ok) { myVote = i; renderPoll(); } })); list.appendChild(b); });
+  }
+  socket.on('poll', p => { if (p && (!pollS || pollS.id !== p.id)) myVote = null; pollS = p; renderPoll(); if (p && p.done) setTimeout(() => { if (pollS && pollS.id === p.id && pollS.done) { pollS = null; renderPoll(); } }, 10000); });
+  $('pollClose').addEventListener('click', () => $('pollBox').classList.add('hidden'));
+  // panel: fun tab
+  const fv = id => $(id).value;
+  $('admHuntGo').addEventListener('click', () => adm({ a: 'fun', kind: 'hunt', o: { orbs: fv('admHuntOrbs'), shards: fv('admHuntShards'), min: fv('admHuntMin') } }));
+  $('admGiantGo').addEventListener('click', () => adm({ a: 'fun', kind: 'giant', o: { total: fv('admGiantTotal'), sec: fv('admGiantSec') } }));
+  $('admChaosGo').addEventListener('click', () => adm({ a: 'fun', kind: 'chaos', o: { sec: 60 } }));
+  $('admLavaGo').addEventListener('click', () => adm({ a: 'fun', kind: 'lava', o: { sec: fv('admLavaSec') } }));
+  $('admGhostGo').addEventListener('click', () => adm({ a: 'fun', kind: 'ghost', o: { sec: fv('admGhostSec') } }));
+  $('admFreezeAllGo').addEventListener('click', () => adm({ a: 'fun', kind: 'freeze' }));
+  $('admChestGo').addEventListener('click', () => adm({ a: 'fun', kind: 'chest', o: { orbs: fv('admChestOrbs'), shards: fv('admChestShards'), min: 10 } }));
+  $('admPollGo').addEventListener('click', () => adm({ a: 'fun', kind: 'poll', o: { q: fv('admPollQ'), opts: fv('admPollOpts').split('|').map(x => x.trim()).filter(Boolean), sec: fv('admPollSec') } }));
+  $('admPollEnd').addEventListener('click', () => adm({ a: 'fun', kind: 'endpoll' }));
+  window.OCSAdm = d => new Promise(r => socket.emit('adm', d, r)); // test/automation helper; the server authorizes every call
+  window.OCSDebugSnap = () => (lastSnapIds ? Array.from(lastSnapIds) : null);
+  window.OCSDebugPl = name => { for (const p of players.values()) if (p.name === name) return { sz: p.sz || 1, eq: p.eq }; return null; };
+  window.OCSDebugMe = () => ({ x: me.x, y: me.y });
+  window.OCSFun = () => ({ fun: funS, poll: pollS, mult: funSpeedMult(), bar: $('funBar').textContent, pollShown: !$('pollBox').classList.contains('hidden') });
 })();

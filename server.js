@@ -220,12 +220,24 @@ const weekendOn = now => weekendState(now).on;
 // ---------------------------------------------------------------- admin (exactly one account, checked server-side by the logged-in account name as stored)
 const ADMIN_NAME = 'DragonzTV';
 const isAdmin = acc => !!acc && acc.name === ADMIN_NAME;
-const adminLog = (acc, action, detail) => console.log(`[admin] ${acc ? acc.name : '?'}: ${action}${detail ? ' ' + JSON.stringify(detail).slice(0, 300) : ''}`); // no IPs / tokens
+const adminLog = (acc, action, detail) => { const d = detail ? JSON.stringify(detail).slice(0, 300) : ''; console.log(`[admin] ${acc ? acc.name : '?'}: ${action}${d ? ' ' + d : ''}`); adminLogBuf.push({ at: Date.now(), by: acc ? acc.name : '?', action, d }); while (adminLogBuf.length > 200) adminLogBuf.shift(); }; // no IPs / tokens
 const DISCO = { orbMult: 1.5, luckMult: 1.5, rareMult: 1.5, defMin: 3, maxMin: 30 };
+// admin expansion: action log (memory, last 200), custom event, weather / night, restart countdown, admin promo codes (DB)
+const adminLogBuf = [];
+let customEv = null, customTimer = null, weather = '', night = false, restartAt = 0;
+const adminCodes = new Map(); // CODE -> { code, rewards{orbs,shards,items[]}, maxUses, expiresAt, disabled, createdAt, by }
+const findAdminCode = input => { const k = CODES.norm(input); const c = k && adminCodes.get(k); return c && !c.disabled ? c : null; };
+function setCustomEv(o) {
+  clearTimeout(customTimer);
+  if (o) { customEv = o; customTimer = setTimeout(() => { customEv = null; pushFx(); systemChat(`⭐ Событие «${o.name}» закончилось`); }, o.until - Date.now()); systemChat(`⭐ Событие «${o.name}»: сферы ×${o.orb}, удача ×${o.luck}, скорость ×${o.spd}`); }
+  else { if (customEv) systemChat(`⭐ Событие «${customEv.name}» закончилось`); customEv = null; }
+  pushFx();
+}
+const customOn = (now = Date.now()) => !!customEv && customEv.until > now;
 let discoUntil = 0, x2Until = 0, discoTimer = null, x2Timer = null;
 const discoOn = (now = Date.now()) => discoUntil > now;
 const x2On = (now = Date.now()) => x2Until > now;
-function fxState(now = Date.now()) { return { disco: Math.max(0, discoUntil - now), x2: Math.max(0, x2Until - now) }; }
+function fxState(now = Date.now()) { return { disco: Math.max(0, discoUntil - now), x2: Math.max(0, x2Until - now), custom: customOn(now) ? { name: customEv.name, left: customEv.until - now, orb: customEv.orb, luck: customEv.luck, spd: customEv.spd } : null, weather, night, restart: restartAt > now ? restartAt - now : 0 }; }
 function pushFx() { if (io) io.to('arena').emit('fx', fxState()); }
 function setDisco(min) { // min > 0: start / restart; 0: end now
   clearTimeout(discoTimer);
@@ -585,7 +597,7 @@ function endEvent(now, reason) {
 }
 
 // Public data about a player: public id, nickname, cosmetics, position. Nothing else.
-function playerMeta(pl) { return { id: pl.id, name: pl.acc.name, eq: pl.acc.equipped, x: pl.x, y: pl.y }; }
+function playerMeta(pl) { const tr = pl.troll && pl.troll.until > Date.now() ? pl.troll : null; return { id: pl.id, name: pl.acc.name, eq: tr && tr.color ? Object.assign({}, pl.acc.equipped, { color: tr.color }) : pl.acc.equipped, x: pl.x, y: pl.y, sz: tr && tr.size ? tr.size : 1 }; }
 function emitProfile(pl) { pl.socket.emit('profile', ownProfile(pl.acc)); }
 // after an account change made from any socket: refresh the arena player of that account (if any)
 function accountChanged(acc, opts = {}) {
@@ -998,7 +1010,7 @@ io.on('connection', socket => {
       event: publicEvent(),
       obstacles: publicObstacles(),
       weekend: weekendState().left,
-      fx: fxState(), admin: isAdmin(acc),
+      fx: fxState(), fun: funPublic(), poll: pollPublic(), admin: isAdmin(acc),
       ...FX.joinState(),
     };
   }
@@ -1289,11 +1301,11 @@ io.on('connection', socket => {
     if (tries.length >= 5) { codeTries.set(a.key, tries); return ack({ ok: false, error: 'Слишком много попыток. Подождите минуту.', code: 'rate' }); }
     tries.push(now); codeTries.set(a.key, tries);
     if (a._redeeming) return ack({ ok: false, error: 'Подождите…', code: 'busy' });
-    const c = CODES.findCode(input), NOPE = { ok: false, error: 'Код не найден или уже использован', code: 'invalid' };
+    const c = CODES.findCode(input) || findAdminCode(input), NOPE = { ok: false, error: 'Код не найден или уже использован', code: 'invalid' };
     if (!c) return ack(NOPE);
     const key = CODES.norm(c.code);
     if (a.codes.includes(key)) return ack(NOPE);
-    if (CODES.isExpired(c, now)) return ack({ ok: false, error: 'Срок действия кода истёк', code: 'expired' });
+    if (c.expiresAt && c.expiresAt <= now || CODES.isExpired(c, now)) return ack({ ok: false, error: 'Срок действия кода истёк', code: 'expired' });
     const rw = c.rewards || {}, grants = (rw.items || []).map(x => ({ id: x.id, qty: x.qty || 1 }));
     if (rw.shards > 0) grants.push({ id: G.SHARD_ID, qty: rw.shards });
     const units = grants.reduce((n, x) => n + (x.id === G.SHARD_ID ? 0 : x.qty), 0); // shards are a currency, not inventory units
@@ -1368,9 +1380,103 @@ io.on('connection', socket => {
     for (const a of profiles.values()) { if (a.stats && a.stats.ban) m.set(a.key, { key: a.key, name: a.name, at: a.stats.ban.at }); else m.delete(a.key); }
     return Array.from(m.values());
   }
-  const selfState = q => q.socket.emit('adm:self', { spd: q.spd || 1, frozen: !!q.frozen, god: !!q.god });
+  const selfState = q => q.socket.emit('adm:self', { spd: q.spd || 1, frozen: !!q.frozen, god: !!q.god, invis: !!q.invis });
   const placeNear = (x, y, ring) => { const a = Math.random() * Math.PI * 2, d = ring * Math.sqrt(Math.random()); return { x: Math.max(40, Math.min(G.WORLD.w - 40, Math.round(x + Math.cos(a) * d))), y: Math.max(40, Math.min(G.WORLD.h - 40, Math.round(y + Math.sin(a) * d))) }; };
   const minutes = (v, def, max) => { const n = v === undefined || v === '' ? def : Number(v); return Number.isFinite(n) && n > 0 ? Math.min(max, n) : null; };
+  function adminRain(t, n, sec) {
+    if (!has(G.ORB_TYPES, t) || t === 't') return { ok: false, error: 'Редкость: c u r e l m' };
+    n = Math.max(1, Math.min(300, Math.floor(n))); sec = Math.max(1, Math.min(60, sec));
+    let done = 0; const per = Math.ceil(n / (sec * 4));
+    const iv = setInterval(() => { for (let i = 0; i < per && done < n; i++, done++) { const o = addOrb(t, randomSpot(80), 'admin'); o.expires = Date.now() + 120000; } if (done >= n) clearInterval(iv); }, 250);
+    systemChat(`🌧️ Дождь из сфер «${G.ORB_TYPES[t].name}»!`);
+    return { ok: true, msg: `Дождь: ${n} × ${G.ORB_TYPES[t].name} за ${sec} с` };
+  }
+  function troll(q, o, sec) {
+    sec = Math.max(5, Math.min(600, Number(sec) || 60));
+    const prev = q.troll && q.troll.until > Date.now() ? q.troll : {};
+    q.troll = Object.assign({}, prev, o, { until: Date.now() + sec * 1000 });
+    clearTimeout(q.trollTimer); q.trollTimer = setTimeout(() => { q.troll = null; if (players.get(q.id) === q) io.to('arena').emit('pmeta', playerMeta(q)); }, sec * 1000);
+    io.to('arena').emit('pmeta', playerMeta(q));
+    return { ok: true, msg: `${q.acc.name}: ${o.size ? 'размер ×' + o.size : 'скин ' + o.color} на ${sec} с` };
+  }
+  async function playerInfo(name) {
+    const key = typeof name === 'string' ? name.trim().toLowerCase() : ''; if (!/^[a-z0-9_]{3,20}$/.test(key)) return { ok: false, error: 'Ник?' };
+    const t = await loadAccount(key); if (!t) return { ok: false, error: 'Аккаунт не найден' };
+    const q = byKey.get(key), st = t.stats || {}, now = Date.now();
+    return { ok: true, info: { name: t.name, online: !!q, balance: t.balance, total: t.total, shards: st.shards || 0, items: t.inventory.slots.reduce((n, s) => n + s.q, 0), slots: t.inventory.slots.length,
+      playMin: Math.round(((st.playMs || 0) + (q ? now - q.joinedAt : 0)) / 60000), warns: (st.warns || []).map(w => ({ at: w.at, r: w.r })), banned: !!st.ban, mutedMin: st.muteUntil > now ? Math.ceil((st.muteUntil - now) / 60000) : 0, createdAt: t.createdAt } };
+  }
+  const infoLine = i => `${i.name}${i.online ? ' (онлайн)' : ''}: ${i.balance} сфер, ${i.shards} оск., предметов ${i.items}, ${i.playMin} мин в игре, предупр. ${i.warns.length}${i.banned ? ', БАН' : ''}${i.mutedMin ? ', мут ' + i.mutedMin + ' мин' : ''}`;
+  function warnPlayer(q, reason) {
+    const st = q.acc.stats; st.warns = (st.warns || []).concat([{ at: Date.now(), r: reason }]).slice(-50);
+    const n = st.warns.length; let extra = '';
+    if (n % 3 === 0) { st.muteUntil = Date.now() + 10 * 60000; extra = ' Это 3-е предупреждение: чат отключён на 10 мин.'; }
+    markDirty(q.acc); flushSoon();
+    q.socket.emit('adm:warn', { r: reason, n, muted: n % 3 === 0 });
+    return { ok: true, msg: `${q.acc.name}: предупреждение ${n}${n % 3 === 0 ? ' → мут 10 мин' : ''}` };
+  }
+  function giftAll(what, n) {
+    let k = 0;
+    for (const q of players.values()) {
+      if (what === 'orbs') { q.acc.balance += n; q.socket.emit('bal', { b: q.acc.balance, t: q.acc.total, s: q.session }); }
+      else { const r = INV.grantItem(q.acc, G.SHARD_ID, Math.min(n, 999), 'admin'); if (!r.ok) continue; q.socket.emit('item', { id: G.SHARD_ID, qty: Math.min(n, 999), source: 'admin' }); }
+      accountChanged(q.acc); k++;
+    }
+    io.to('arena').emit('adm:announce', { t: `🎁 Подарок всем: +${n} ${what === 'orbs' ? 'сфер' : 'осколков'}!`, by: acct.acc.name });
+    return { ok: true, msg: `Подарок выдан ${k} игрокам` };
+  }
+  function startCustom(o) {
+    const name = String(o.name || '').replace(/[<>]/g, '').trim().slice(0, 30), num = (v, lo, hi, def) => { const x = v === undefined || v === '' ? def : Number(v); return Number.isFinite(x) ? Math.max(lo, Math.min(hi, x)) : def; };
+    if (!name) return { ok: false, error: 'Название?' };
+    const c = R.sanitizeChat(name); if (c.error) return { ok: false, error: 'Название: ' + c.error };
+    const ev2 = { name: c.text, orb: num(o.orb, 0.1, 5, 1), luck: num(o.luck, 0.1, 5, 1), spd: num(o.spd, 0.3, 3, 1), until: Date.now() + num(o.min, 0.5, 120, 5) * 60000 };
+    setCustomEv(ev2); return { ok: true, msg: `Событие «${ev2.name}» запущено` };
+  }
+  async function codeList() { const out = []; for (const c of adminCodes.values()) out.push(Object.assign({}, c, { uses: await store.codeUses(c.code) })); return out.sort((x, y) => y.createdAt - x.createdAt); }
+  async function createCode(o) {
+    const code = CODES.norm(o.code); if (!/^[A-Z0-9_-]{3,32}$/.test(code)) return { ok: false, error: 'Код: 3–32 символа A–Z 0–9 _ -' };
+    if (CODES.findCode(code) || adminCodes.has(code)) return { ok: false, error: 'Такой код уже есть' };
+    const int = (v, hi) => { const x = Math.floor(Number(v)); return Number.isFinite(x) && x > 0 ? Math.min(hi, x) : 0; };
+    const rewards = {}; if (int(o.orbs, 1e6)) rewards.orbs = int(o.orbs, 1e6); if (int(o.shards, 999)) rewards.shards = int(o.shards, 999);
+    if (o.item && has(G.ITEM_BY_ID, o.item) && o.item !== G.SHARD_ID) rewards.items = [{ id: o.item, qty: int(o.itemQty, 99) || 1 }];
+    if (!Object.keys(rewards).length) return { ok: false, error: 'Нужна награда' };
+    const c = { code, rewards, maxUses: int(o.maxUses, 1e6) || null, expiresAt: Number(o.days) > 0 ? Date.now() + Math.min(365, Number(o.days)) * 86400000 : null, disabled: false, createdAt: Date.now(), by: acct.acc.name };
+    await store.saveAdminCode(c); adminCodes.set(code, c);
+    return { ok: true, msg: `Код ${code} создан`, codes: await codeList() };
+  }
+  async function disableCode(code) {
+    const c = adminCodes.get(CODES.norm(code)); if (!c) return { ok: false, error: 'Код не найден (встроенные коды отключаются только в lib/codes.js)' };
+    c.disabled = !c.disabled; await store.saveAdminCode(c);
+    return { ok: true, msg: `${c.code} ${c.disabled ? 'отключён' : 'включён'}`, codes: await codeList() };
+  }
+  function funStart(kind, o) {
+    const now = Date.now(), int = (v, lo, hi, def) => { const x = Math.floor(Number(v)); return Number.isFinite(x) && x >= lo ? Math.min(hi, x) : def; };
+    const prize = () => ({ orbs: int(o.orbs, 0, 100000, 100), shards: int(o.shards, 0, 99, 0) });
+    const toggleOff = (k, msg) => { fun[k] = k === 'chaos' ? 0 : k === 'freeze' ? false : null; pushFun(); return { ok: true, msg, off: true }; };
+    switch (kind) {
+      case 'hunt': { if (fun.hunt) return toggleOff('hunt', 'Охота отменена'); if (!pl) return { ok: false, error: 'Войдите в игру' }; if (pl.invis) { pl.invis = false; selfState(pl); }
+        fun.hunt = { prize: prize(), until: now + int(o.min, 1, 30, 3) * 60000 }; io.to('arena').emit('adm:announce', { t: `🏃 Охота на админа! Первый, кто коснётся ${pl.acc.name}, получит ${prizeText(fun.hunt.prize)}` }); pushFun(); return { ok: true, msg: 'Охота началась' }; }
+      case 'giant': { if (fun.giant) { endGiant(); return { ok: true, msg: 'Гигантская сфера завершена', off: true }; } const at = pl ? { x: Math.round(pl.x), y: Math.round(pl.y) } : randomSpot(200);
+        fun.giant = { x: Math.max(100, Math.min(G.WORLD.w - 100, at.x)), y: Math.max(100, Math.min(G.WORLD.h - 100, at.y)), total: int(o.total, 1, 100000, 500), until: now + int(o.sec, 10, 300, 45) * 1000, touched: new Set() };
+        systemChat(`🟣 Гигантская сфера! Коснитесь её — ${fun.giant.total} сфер делятся между всеми`); pushFun(); return { ok: true, msg: 'Гигантская сфера создана' }; }
+      case 'chaos': { if (fun.chaos > now) return toggleOff('chaos', 'Хаос выключен'); fun.chaos = now + int(o.sec, 10, 300, 60) * 1000; setTimeout(pushFun, fun.chaos - now + 50); systemChat('🌀 Режим хаоса: управление инвертировано!'); pushFun(); return { ok: true, msg: 'Хаос включён' }; }
+      case 'lava': { if (fun.lava) return toggleOff('lava', 'Лава выключена');
+        const islands = []; for (const q of players.values()) if (!isAdmin(q.acc) && islands.length < 12) { const a = Math.random() * 6.283, d = 250 + Math.random() * 250; islands.push({ x: Math.round(Math.max(150, Math.min(G.WORLD.w - 150, q.x + Math.cos(a) * d))), y: Math.round(Math.max(150, Math.min(G.WORLD.h - 150, q.y + Math.sin(a) * d))), r: 160 }); }
+        if (pl) for (let i = 0; i < 3; i++) islands.push({ x: Math.round(Math.max(150, Math.min(G.WORLD.w - 150, pl.x + (i - 1) * 700))), y: Math.round(Math.max(150, Math.min(G.WORLD.h - 150, pl.y + 500))), r: 160 });
+        fun.lava = { islands, until: now + int(o.sec, 10, 300, 45) * 1000, lost: new Map() }; io.to('arena').emit('adm:announce', { t: '🌋 Пол — это лава! Бегите на безопасные островки (вне их теряются сферы, максимум 30)' }); pushFun(); return { ok: true, msg: `Лава: ${islands.length} островков` }; }
+      case 'ghost': { if (fun.ghost) return toggleOff('ghost', 'Призрак выключен'); if (!pl) return { ok: false, error: 'Войдите в игру' }; if (pl.invis) { pl.invis = false; selfState(pl); }
+        fun.ghost = { id: pl.id, until: now + int(o.sec, 10, 600, 90) * 1000 }; for (const q of players.values()) q.ghostLost = 0; io.to('arena').emit('adm:announce', { t: `👻 ${pl.acc.name} стал призраком! Убегайте — пойманные теряют немного сфер и оглушаются на 2 с` }); pushFun(); return { ok: true, msg: 'Вы призрак' }; }
+      case 'freeze': fun.freeze = !fun.freeze; systemChat(fun.freeze ? '🧊 Карта заморожена администратором' : '🧊 Карта разморожена'); pushFun(); return { ok: true, msg: fun.freeze ? 'Все заморожены' : 'Разморожено' };
+      case 'chest': { if (fun.chest) return toggleOff('chest', 'Сундук убран'); if (!pl) return { ok: false, error: 'Войдите в игру' };
+        fun.chest = { x: Math.round(pl.x), y: Math.round(pl.y), prize: prize(), until: now + int(o.min, 1, 60, 10) * 60000 }; systemChat('🎁 Где-то на карте спрятан бонусный сундук! Кто найдёт первым?'); pushFun(); return { ok: true, msg: 'Сундук поставлен на вашем месте' }; }
+      case 'poll': { if (!o.q || !o.opts || o.opts.length < 2) return { ok: false, error: '/poll Вопрос | вариант 1 | вариант 2' };
+        const clean = t => { const c = R.sanitizeChat(String(t).slice(0, 80)); return c.error ? null : c.text; }, q = clean(o.q), opts = o.opts.slice(0, 6).map(clean);
+        if (!q || opts.some(x => !x)) return { ok: false, error: 'Недопустимый текст' };
+        fun.poll = { id: ++pollSeq, q, opts, votes: new Map(), until: now + int(o.sec, 10, 600, 60) * 1000 }; pushPoll(); return { ok: true, msg: 'Опрос запущен' }; }
+      case 'endpoll': { if (!fun.poll) return { ok: false, error: 'Нет опроса' }; const r = pollPublic(); fun.poll = null; io.to('arena').emit('poll', Object.assign(r, { done: true })); return { ok: true, msg: 'Опрос завершён' }; }
+    }
+    return { ok: false, error: '?' };
+  }
   async function runCommand(text) {
     const [rawCmd, ...args] = text.slice(1).split(/\s+/), cmd = (rawCmd || '').toLowerCase(), a = acct.acc;
     adminLog(a, 'command /' + cmd, args.length ? { args: args.slice(0, 3) } : null);
@@ -1390,9 +1496,40 @@ io.on('connection', socket => {
       case 'god': { if (!pl) return { ok: false, error: 'Войдите в игру' }; pl.god = !pl.god; pl.zapUntil = pl.god ? Infinity : 0; selfState(pl); return { ok: true, msg: pl.god ? 'Неуязвимость включена' : 'Неуязвимость выключена' }; }
       case 'speed': { const v = Number(args[0]); if (!pl || !Number.isFinite(v) || v <= 0 || v > 5) return { ok: false, error: '/speed <0.1–5>' }; pl.spd = v; selfState(pl); return { ok: true, msg: `Скорость ×${v}` }; }
       case 'disco': { if (discoOn()) { setDisco(0); return { ok: true, msg: 'Диско выключено', disco: false }; } const m = minutes(args[0], DISCO.defMin, DISCO.maxMin); if (m === null) return { ok: false, error: '/disco [минуты]' }; setDisco(m); return { ok: true, msg: `Диско на ${m} мин`, disco: true }; }
+      case 'rain': { const t = (args[0] || 'r').toLowerCase(), n = Number(args[1]) || 60, sec = Number(args[2]) || 10; return adminRain(t, n, sec); }
+      case 'invis': { if (!pl) return { ok: false, error: 'Войдите в игру' }; pl.invis = !pl.invis; selfState(pl); if (!pl.invis) io.to('arena').emit('pmeta', playerMeta(pl)); return { ok: true, msg: pl.invis ? 'Невидимость включена' : 'Невидимость выключена' }; }
+      case 'size': { const q = need(), v = Number(args[1]), sec = Number(args[2]) || 60; if (!q || !(v >= 0.3 && v <= 3)) return { ok: false, error: '/size <ник> <0.3–3> [сек]' }; return troll(q, { size: v }, sec); }
+      case 'skin': { const q = need(), c = args[1] || ''; if (!q || !/^#[0-9a-fA-F]{6}$/.test(c)) return { ok: false, error: '/skin <ник> <#rrggbb> [сек]' }; return troll(q, { color: c }, Number(args[2]) || 60); }
+      case 'info': { const r = await playerInfo(args[0]); return r.ok ? { ok: true, msg: infoLine(r.info), info: r.info } : r; }
+      case 'warn': { const q = need(), reason = args.slice(1).join(' ').slice(0, 120); if (!q || !reason) return { ok: false, error: '/warn <ник> <причина>' }; return warnPlayer(q, reason); }
+      case 'gift': { const what = (args[0] || '').toLowerCase(), n = Math.floor(Number(args[1])); if (!['orbs', 'shards'].includes(what) || !(n >= 1 && n <= 100000)) return { ok: false, error: '/gift <orbs|shards> <кол-во>' }; return giftAll(what, n); }
+      case 'weather': { const w = (args[0] || '').toLowerCase(); if (!['rain', 'snow', 'off', 'none', ''].includes(w)) return { ok: false, error: '/weather <rain|snow|off>' }; weather = w === 'rain' || w === 'snow' ? w : ''; pushFx(); return { ok: true, msg: weather ? 'Погода: ' + (weather === 'rain' ? 'дождь' : 'снег') : 'Погода выключена' }; }
+      case 'night': night = !night; pushFx(); return { ok: true, msg: night ? 'Ночь включена' : 'Ночь выключена' };
+      case 'event': { if (args[0] === 'off' || (customOn() && !args.length)) { setCustomEv(null); return { ok: true, msg: 'Своё событие выключено' }; } const [name, orb, luck, spd, min] = args; return startCustom({ name, orb, luck, spd, min }); }
+      case 'bosstimer': { const g = FX.resetBossTimer(); return { ok: true, msg: `Таймер босса сброшен (следующий через ~${Math.round(g / 60000)} мин)` }; }
+      case 'restart': { const sec = args[0] === 'off' ? 0 : Math.max(10, Math.min(600, Number(args[0]) || 60)); restartAt = sec ? Date.now() + sec * 1000 : 0; pushFx(); if (sec) { io.to('arena').emit('adm:announce', { t: `Перезапуск сервера через ${sec} с`, by: a.name }); systemChat(`⚠️ Перезапуск сервера через ${sec} с`); } return { ok: true, msg: sec ? `Отсчёт перезапуска ${sec} с (только отображение)` : 'Отсчёт отменён' }; }
+      case 'code': { // /code <CODE> <orbs> [shards] [maxUses] [days]  ·  /code off <CODE>  ·  /code list
+        if (args[0] === 'list') { const l = await codeList(); return { ok: true, msg: l.map(c => `${c.code}${c.disabled ? ' (выкл)' : ''} ${c.uses}/${c.maxUses || '∞'}`).join(', ') || 'Нет кодов', codes: l }; }
+        if (args[0] === 'off') return disableCode(args[1]);
+        return createCode({ code: args[0], orbs: args[1], shards: args[2], maxUses: args[3], days: args[4] });
+      }
+      case 'hunt': return funStart('hunt', { orbs: args[0], shards: args[1], min: args[2] });
+      case 'giant': return funStart('giant', { total: args[0], sec: args[1] });
+      case 'chaos': return funStart('chaos', { sec: args[0] });
+      case 'lava': return funStart('lava', { sec: args[0] });
+      case 'ghost': return funStart('ghost', { sec: args[0] });
+      case 'freezeall': return funStart('freeze', {});
+      case 'chest': return funStart('chest', { orbs: args[0], shards: args[1], min: args[2] });
+      case 'poll': { const parts = args.join(' ').split('|').map(x => x.trim()).filter(Boolean); return funStart('poll', { q: parts[0], opts: parts.slice(1) }); }
+      case 'endpoll': return funStart('endpoll', {});
       default: return { ok: false, error: 'Неизвестная команда' };
     }
   }
+  socket.on('poll:vote', (d, ack) => {
+    ack = safeAck(ack);
+    if (!pl || !fun.poll || !isObj(d) || d.id !== fun.poll.id || !Number.isInteger(d.i) || d.i < 0 || d.i >= fun.poll.opts.length) return ack({ ok: false });
+    fun.poll.votes.set(pl.acc.key, d.i); pushPoll(); ack({ ok: true });
+  });
   socket.on('adm', async (d, ack) => {
     ack = safeAck(ack);
     const a = acct && acct.acc;
@@ -1400,7 +1537,7 @@ io.on('connection', socket => {
     if (!isObj(d) || typeof d.a !== 'string') return ack({ ok: false, error: 'Неверный запрос' });
     try {
       const now = Date.now(), here = pl || { x: G.ZONE_W / 2, y: G.ZONE_H / 2 };
-      if (d.a !== 'init' && d.a !== 'players' && d.a !== 'bans' && d.a !== 'cmd') adminLog(a, d.a, Object.assign({}, d, { a: undefined }));
+      if (!['init', 'players', 'bans', 'cmd', 'log', 'codes', 'info'].includes(d.a)) adminLog(a, d.a, Object.assign({}, d, { a: undefined }));
       switch (d.a) {
         case 'init': return ack({ ok: true, events: G.EVENT_KEYS.map(k => ({ k, name: G.EVENTS[k].name })), minis: C.MINI_KEYS.map(k => ({ k, name: C.MINI[k].name, icon: C.MINI[k].icon })),
           rarities: Object.keys(G.ORB_TYPES).filter(t => t !== 't').map(t => ({ k: t, name: G.ORB_TYPES[t].name })), items: G.ITEMS.map(it => ({ id: it.id, name: it.name })),
@@ -1450,6 +1587,22 @@ io.on('connection', socket => {
         }
         case 'cmd': { if (typeof d.text !== 'string' || !d.text.trim().startsWith('/')) return ack({ ok: false, error: 'Команда начинается с /' }); return ack(await runCommand(d.text.trim().slice(0, 200))); }
         case 'disco': return ack(await runCommand('/disco' + (Number(d.min) > 0 ? ' ' + Number(d.min) : '')));
+        case 'rain': return ack(adminRain(String(d.t), Number(d.n) || 60, Number(d.sec) || 10));
+        case 'invis': return ack(await runCommand('/invis'));
+        case 'troll': { const q = findOnline(d.name); if (!q) return ack({ ok: false, error: 'Игрок не в сети' }); const o = {}; if (Number(d.size) >= 0.3 && Number(d.size) <= 3 && Number(d.size) !== 1) o.size = Number(d.size); if (/^#[0-9a-fA-F]{6}$/.test(d.color || '')) o.color = d.color; if (!Object.keys(o).length) return ack({ ok: false, error: 'Размер 0.3–3 или цвет' }); return ack(troll(q, o, d.sec)); }
+        case 'info': return ack(await playerInfo(d.name));
+        case 'warn': { const q = findOnline(d.name), r = typeof d.reason === 'string' ? d.reason.trim().slice(0, 120) : ''; if (!q || !r) return ack({ ok: false, error: 'Игрок не в сети / причина?' }); return ack(warnPlayer(q, r)); }
+        case 'gift': { const n = Math.floor(Number(d.n)); if (!['orbs', 'shards'].includes(d.what) || !(n >= 1 && n <= 100000)) return ack({ ok: false, error: 'Количество?' }); return ack(giftAll(d.what, n)); }
+        case 'weather': return ack(await runCommand('/weather ' + (['rain', 'snow'].includes(d.w) ? d.w : 'off')));
+        case 'night': return ack(await runCommand('/night'));
+        case 'custom': if (d.off || customOn()) { setCustomEv(null); return ack({ ok: true, msg: 'Своё событие выключено' }); } return ack(startCustom(d));
+        case 'bosstimer': return ack(await runCommand('/bosstimer'));
+        case 'restart': return ack(await runCommand('/restart ' + (Number(d.sec) > 0 ? Number(d.sec) : 'off')));
+        case 'codes': return ack({ ok: true, codes: await codeList() });
+        case 'code:create': return ack(await createCode(d));
+        case 'code:toggle': return ack(await disableCode(d.code));
+        case 'log': return ack({ ok: true, log: adminLogBuf.slice(-200).reverse() });
+        case 'fun': { if (!['hunt', 'giant', 'chaos', 'lava', 'ghost', 'freeze', 'chest', 'poll', 'endpoll'].includes(d.kind)) return ack({ ok: false, error: '?' }); return ack(funStart(d.kind, isObj(d.o) ? Object.assign({}, d.o, { opts: Array.isArray(d.o.opts) ? d.o.opts.map(String) : undefined }) : {})); }
         default: return ack({ ok: false, error: 'Неизвестное действие' });
       }
     } catch (e) { console.error('admin error:', e.message); ack({ ok: false, error: 'Ошибка сервера' }); }
@@ -1640,8 +1793,9 @@ function collectAround(pl, radius, now) {
     const rw = G.orbReward(ot.value, pl.acc.upgrades, pl, Math.random, o.t);
     if (weekendOn(now)) { const f = (pl.wkFrac || 0) + rw.value * (G.WEEKEND.mult - 1), whole = Math.floor(f + 1e-9); pl.wkFrac = f - whole; rw.value += whole; } // «Выходные»: ×1.5 (fraction carried) // «находка», luck ×2, multiplier (fraction in pl.frac) — server-side only
     if (C.boostMult(pl.acc.stats, 'orbs', now) > 1) { const f = (pl.bFrac || 0) + rw.value * (C.BOOSTS.orbs.mult - 1), whole = Math.floor(f + 1e-9); pl.bFrac = f - whole; rw.value += whole; } // quest boost «Сферы ×1.5»
-    if (discoOn(now) && !rw.lucky) { const p = G.upValue('luck', pl.acc.upgrades.luck) / 100, extra = p > 0 && p < 1 ? p * (DISCO.luckMult - 1) / (1 - p) : 0; if (extra > 0 && Math.random() < extra) { rw.value *= 2; rw.lucky = true; } } // disco: luck chance ×1.5
-    { const xm = (discoOn(now) ? DISCO.orbMult : 1) * (x2On(now) ? 2 : 1); if (xm > 1) { const f = (pl.xFrac || 0) + rw.value * (xm - 1), whole = Math.floor(f + 1e-9); pl.xFrac = f - whole; rw.value += whole; } } // disco ×1.5, admin /x2 ×2 (stack multiplicatively with weekend / boosts)
+    const lm = (discoOn(now) ? DISCO.luckMult : 1) * (customOn(now) ? customEv.luck : 1);
+    if (lm > 1 && !rw.lucky) { const p = G.upValue('luck', pl.acc.upgrades.luck) / 100, extra = p > 0 && p < 1 ? Math.min(1, p * (lm - 1) / (1 - p)) : 0; if (extra > 0 && Math.random() < extra) { rw.value *= 2; rw.lucky = true; } } // disco: luck chance ×1.5
+    { const xm = (discoOn(now) ? DISCO.orbMult : 1) * (x2On(now) ? 2 : 1) * (customOn(now) ? customEv.orb : 1); if (xm > 1) { const f = (pl.xFrac || 0) + rw.value * (xm - 1), whole = Math.floor(f + 1e-9); pl.xFrac = f - whole; rw.value += whole; } } // disco ×1.5, admin /x2 ×2 (stack multiplicatively with weekend / boosts)
     FX.onCollect(pl, o, rw.value);
     if (rw.lucky) pl.lucky++;
     if (rw.jackpot) pl.jackpots++;
@@ -1661,6 +1815,81 @@ function collectAround(pl, radius, now) {
 }
 
 let lastTickAt = Date.now();
+// ---------------------------------------------------------------- admin fun events (all penalties small and capped)
+const FUN = { touch: G.PLAYER_R * 2 + 6, lavaLoss: 2, lavaCap: 30, ghostLoss: 10, ghostCap: 40, ghostStunMs: 2000, ghostCdMs: 5000, giantR: 70 };
+const fun = { hunt: null, giant: null, chaos: 0, lava: null, ghost: null, freeze: false, chest: null, poll: null };
+let pollSeq = 0;
+const adminPl = () => { for (const q of players.values()) if (isAdmin(q.acc)) return q; return null; };
+function funPublic(now = Date.now()) {
+  const left = u => Math.max(0, u - now);
+  return {
+    hunt: fun.hunt && fun.hunt.until > now ? { left: left(fun.hunt.until), prize: fun.hunt.prize } : null,
+    giant: fun.giant ? { x: fun.giant.x, y: fun.giant.y, r: FUN.giantR, left: left(fun.giant.until), n: fun.giant.touched.size, total: fun.giant.total } : null,
+    chaos: fun.chaos > now ? left(fun.chaos) : 0,
+    lava: fun.lava && fun.lava.until > now ? { islands: fun.lava.islands, left: left(fun.lava.until) } : null,
+    ghost: fun.ghost ? fun.ghost.id : null, freeze: fun.freeze,
+    chest: fun.chest ? { x: fun.chest.x, y: fun.chest.y, left: left(fun.chest.until) } : null,
+  };
+}
+function pushFun() { if (io) io.to('arena').emit('fun', funPublic()); }
+function payPrize(q, prize, src) {
+  if (prize.orbs > 0) { q.acc.balance += prize.orbs; q.socket.emit('bal', { b: q.acc.balance, t: q.acc.total, s: q.session }); }
+  if (prize.shards > 0) { const r = INV.grantItem(q.acc, G.SHARD_ID, prize.shards, 'admin'); if (r.ok) q.socket.emit('item', { id: G.SHARD_ID, qty: prize.shards, source: 'admin' }); }
+  accountChanged(q.acc);
+}
+const prizeText = p => [p.orbs ? p.orbs + ' сфер' : '', p.shards ? p.shards + ' оск.' : ''].filter(Boolean).join(' + ') || 'слава';
+function funSpeed(pl, now) { // non-admin movement multiplier from fun events
+  if (isAdmin(pl.acc)) return 1;
+  if (fun.freeze || pl.stunUntil > now) return 0;
+  return fun.chaos > now ? -1 : 1; // chaos: controls inverted
+}
+function endGiant() {
+  const g = fun.giant; if (!g) return; fun.giant = null;
+  const list = Array.from(g.touched).map(k => byKey.get(k)).filter(Boolean);
+  if (list.length) { const each = Math.max(1, Math.floor(g.total / list.length)); for (const q of list) payPrize(q, { orbs: each }); systemChat(`🟣 Гигантская сфера: ${list.length} игрок(ов) получили по ${each} сфер`); }
+  else systemChat('🟣 Гигантская сфера исчезла — никто её не коснулся');
+  pushFun();
+}
+function funTick(now) {
+  let changed = false;
+  const A = adminPl();
+  if (fun.hunt) {
+    if (fun.hunt.until <= now || !A) { fun.hunt = null; systemChat('🏃 Охота на админа закончилась — никто не поймал'); changed = true; }
+    else for (const q of players.values()) if (q !== A && Math.hypot(q.x - A.x, q.y - A.y) <= FUN.touch) { payPrize(q, fun.hunt.prize); io.to('arena').emit('adm:announce', { t: `🏆 ${q.acc.name} поймал(а) админа! Приз: ${prizeText(fun.hunt.prize)}` }); fun.hunt = null; changed = true; break; }
+  }
+  if (fun.giant) {
+    for (const q of players.values()) if (!isAdmin(q.acc) && Math.hypot(q.x - fun.giant.x, q.y - fun.giant.y) <= FUN.giantR + G.PLAYER_R) { if (!fun.giant.touched.has(q.acc.key)) { fun.giant.touched.add(q.acc.key); changed = true; } }
+    if (fun.giant.until <= now) endGiant();
+  }
+  if (fun.chest) {
+    if (fun.chest.until <= now) { fun.chest = null; systemChat('🎁 Бонусный сундук исчез'); changed = true; }
+    else for (const q of players.values()) if (!isAdmin(q.acc) && Math.hypot(q.x - fun.chest.x, q.y - fun.chest.y) <= 40 + G.PLAYER_R) { payPrize(q, fun.chest.prize); io.to('arena').emit('adm:announce', { t: `🎁 ${q.acc.name} нашёл(ла) бонусный сундук! ${prizeText(fun.chest.prize)}` }); fun.chest = null; changed = true; break; }
+  }
+  if (fun.ghost) {
+    const G2 = players.get(fun.ghost.id);
+    if (!G2 || fun.ghost.until <= now) { fun.ghost = null; systemChat('👻 Призрак-админ исчез'); changed = true; }
+    else for (const q of players.values()) {
+      if (q === G2 || q.ghostCd > now || Math.hypot(q.x - G2.x, q.y - G2.y) > FUN.touch) continue;
+      q.ghostCd = now + FUN.ghostCdMs; q.stunUntil = now + FUN.ghostStunMs; q.ghostLost = q.ghostLost || 0;
+      const loss = Math.min(FUN.ghostLoss, q.acc.balance, Math.max(0, FUN.ghostCap - q.ghostLost)); q.ghostLost += loss;
+      if (loss) { q.acc.balance -= loss; markDirty(q.acc); q.socket.emit('bal', { b: q.acc.balance, t: q.acc.total, s: q.session }); }
+      q.socket.emit('chat', { notice: true, t: `👻 Призрак поймал вас! −${loss} сфер, оглушение 2 с` });
+    }
+  }
+  if (fun.lava && fun.lava.until <= now) { fun.lava = null; systemChat('🌋 Пол больше не лава'); changed = true; }
+  if (changed) pushFun();
+}
+function lavaSecond(now) { // once per second: players outside every island lose a little (capped per event)
+  if (!fun.lava) return;
+  for (const q of players.values()) {
+    if (isAdmin(q.acc) || fun.lava.islands.some(i => Math.hypot(q.x - i.x, q.y - i.y) <= i.r)) continue;
+    const lost = fun.lava.lost.get(q.acc.key) || 0, loss = Math.min(FUN.lavaLoss, q.acc.balance, FUN.lavaCap - lost);
+    if (loss <= 0) continue;
+    fun.lava.lost.set(q.acc.key, lost + loss); q.acc.balance -= loss; markDirty(q.acc); q.socket.emit('bal', { b: q.acc.balance, t: q.acc.total, s: q.session });
+  }
+}
+function pollPublic() { const p = fun.poll; if (!p) return null; const c = p.opts.map(() => 0); for (const v of p.votes.values()) c[v]++; return { id: p.id, q: p.q, opts: p.opts, counts: c, left: Math.max(0, p.until - Date.now()) }; }
+function pushPoll() { if (io) io.to('arena').emit('poll', pollPublic()); }
 function tick() {
   const now = Date.now(), dt = Math.min(250, now - lastTickAt);
   lastTickAt = now;
@@ -1668,7 +1897,7 @@ function tick() {
     pl.x0 = pl.x; pl.y0 = pl.y;
     pl.budget = Math.min(pl.budget + 1, 6);
     while (pl.inputs.length > 12) pl.lastSeq = pl.inputs.shift().s; // keep latency bounded
-    const speed = G.speedFor(pl.acc.upgrades.speed) * C.boostMult(pl.acc.stats, 'speed', now) * (pl.frozen ? 0 : pl.spd || 1);
+    const speed = G.speedFor(pl.acc.upgrades.speed) * C.boostMult(pl.acc.stats, 'speed', now) * (pl.frozen ? 0 : pl.spd || 1) * (customOn(now) ? customEv.spd : 1) * funSpeed(pl, now);
     const solid = FX.solids();
     const radius = G.pickupFor(pl.acc.upgrades.magnet);
     while (pl.budget >= 1 && pl.inputs.length) {
@@ -1691,10 +1920,11 @@ function tick() {
   }
   if (players.size > 1) { // players push each other apart (G.separatePlayers)
     const list = [];
-    for (const pl of players.values()) { pl.mx = pl.x - pl.x0; pl.my = pl.y - pl.y0; pl.lvl = pl.acc.upgrades.speed || 0; list.push(pl); }
+    for (const pl of players.values()) { if (pl.invis) continue; pl.mx = pl.x - pl.x0; pl.my = pl.y - pl.y0; pl.lvl = pl.acc.upgrades.speed || 0; list.push(pl); }
     G.separatePlayers(list);
     for (const pl of list) { G.zoneGate(pl, pl.x0, pl.acc.stats.unlockedDoor2 === true); G.resolveObstacles(pl, obstacles); } // pushes never carry anyone through a wall
   }
+  funTick(now);
   spawnTick(now);
   eventTick(now, dt);
   obstacleTick(now);
@@ -1707,7 +1937,13 @@ function tick() {
   if (rb.length) st.rb = rb.map(o => [o.id, +o.face.toFixed(3), o.aim ? 1 : 0, o.aim ? Math.round(o.aim.x) : 0, o.aim ? Math.round(o.aim.y) : 0]); // robots: facing, aiming (telegraph)
   const bp = FX.state(st);
   if (shots.length || bp.length) st.pj = shots.map(b => [b.id, Math.round(b.x), Math.round(b.y), Math.round(b.vx), Math.round(b.vy)]).concat(bp);
-  io.to('arena').emit('s', st);
+  const hidden = Array.from(players.values()).filter(q => q.invis);
+  if (!hidden.length) io.to('arena').emit('s', st);
+  else { // invisible admin: only they get their own position; everyone else gets the list without them
+    const ids = new Set(hidden.map(q => q.id)), st2 = Object.assign({}, st, { p: p.filter(r => !ids.has(r[0])) });
+    io.to('arena').except(hidden.map(q => q.socket.id)).emit('s', st2);
+    for (const q of hidden) q.socket.emit('s', Object.assign({}, st2, { p: st2.p.concat([p.find(r => r[0] === q.id)]) }));
+  }
   pendingAdds = []; pendingDels = [];
 }
 
@@ -1718,6 +1954,8 @@ function everySecond() {
   const now = Date.now();
   for (const pl of players.values()) pl.socket.emit('sping', now);
   FX.everySecond(now);
+  lavaSecond(now);
+  if (fun.poll && fun.poll.until <= now) { const r = pollPublic(); fun.poll = null; io.to('arena').emit('poll', Object.assign(r, { done: true })); }
 }
 
 // ---------------------------------------------------------------- startup / shutdown
@@ -1744,6 +1982,7 @@ process.on('unhandledRejection', e => console.error('Unhandled rejection:', e &&
 
 (async () => {
   await store.init();
+  try { for (const c of await store.listAdminCodes()) adminCodes.set(c.code, c); } catch (e) { console.error('admin codes load failed:', e.message); }
   console.log(`Storage: ${store.describe()}, ${await store.countAccounts()} accounts`);
   if (TEST_HOOKS) console.warn('WARNING: OCS_TEST_HOOKS=1 — test-only socket events are enabled');
   await store.purgeExpiredSessions(Date.now());

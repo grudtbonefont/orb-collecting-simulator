@@ -607,3 +607,39 @@ body.in-game .music-btn { display: none; }
 @media (prefers-reduced-motion: reduce) { .disco-fx { opacity: .18; } .disco-fx i { animation-duration: 40s; } }
 .ev-chip[data-kind=disco] .ev-chip-btn { border-color: #ff4fd8; box-shadow: 0 0 14px rgba(255,79,216,.55); }
 .ev-chip[data-kind=x2] .ev-chip-btn { border-color: #ffcc33; font-size: 18px; }
+
+.adm-l { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: #b8c0e0; }
+.adm-l input[type=number] { width: 70px; }
+.adm-info { white-space: pre-wrap; font: 12px/1.5 ui-monospace, monospace; background: rgba(255,255,255,.05); border-radius: 8px; padding: 6px 8px; margin: 6px 0; min-height: 0; }
+.adm-info:empty { display: none; }
+.adm-log { max-height: 320px; font: 12px/1.4 ui-monospace, monospace; }
+.adm-log div { border-bottom: 1px solid rgba(255,255,255,.06); padding: 3px 0; overflow-wrap: anywhere; }
+.adm-tabs .adm-tab { flex: 0 0 auto; }
+@media (max-width: 760px) { .adm-tabs .adm-tab { flex: 1 1 22%; } .adm-l { flex: 1 1 45%; } }
+/* night: darkness with a soft light around the screen centre (the player) */
+.night-fx { position: fixed; inset: 0; z-index: 3; pointer-events: none; background: radial-gradient(circle at 50% 50%, transparent 0, transparent 140px, rgba(2,4,20,.55) 320px, rgba(2,4,20,.82) 75%); }
+.night-fx.hidden, .weather-fx.hidden, .restart-bar.hidden { display: none; }
+/* weather: tiled gradients scrolled with background-position (one layer, cheap) */
+.weather-fx { position: fixed; inset: 0; z-index: 3; pointer-events: none; opacity: .5; }
+.weather-fx.rain { background-image: repeating-linear-gradient(105deg, transparent 0 18px, rgba(170,200,255,.5) 18px 19px, transparent 19px 46px); background-size: 120px 120px; animation: wxRain .45s linear infinite; }
+.weather-fx.snow { opacity: .8; background-image: radial-gradient(circle, rgba(255,255,255,.9) 0 2px, transparent 3px), radial-gradient(circle, rgba(255,255,255,.7) 0 1.5px, transparent 2.5px); background-size: 90px 90px, 140px 140px; background-position: 0 0, 40px 60px; animation: wxSnow 7s linear infinite; }
+@keyframes wxRain { to { background-position: -30px 120px; } }
+@keyframes wxSnow { to { background-position: 30px 90px, 80px 200px; } }
+@media (prefers-reduced-motion: reduce) { .weather-fx { animation-duration: 3s !important; } }
+.restart-bar { position: fixed; top: calc(8px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); z-index: 35; background: rgba(200,40,60,.92); color: #fff; font: 800 15px system-ui, sans-serif; padding: 8px 16px; border-radius: 10px; box-shadow: 0 0 20px rgba(255,60,80,.5); pointer-events: none; white-space: nowrap; }
+.ev-chip[data-kind=custom] .ev-chip-btn { border-color: #ffe14f; box-shadow: 0 0 14px rgba(255,225,79,.5); }
+.ann-overlay.warn .ann-box { border-color: #ff5a6e; box-shadow: 0 0 40px rgba(255,90,110,.45); }
+.ann-overlay.warn .ann-title { color: #ff8a9a; }
+
+.fun-bar { position: fixed; top: calc(48px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); z-index: 8; background: rgba(20,14,50,.9); border: 1px solid rgba(255,200,80,.6); color: #ffe7a8; font: 700 13px system-ui, sans-serif; padding: 6px 12px; border-radius: 10px; pointer-events: none; max-width: 94vw; text-align: center; }
+.fun-bar.hidden, .lava-fx.hidden, .poll-box.hidden { display: none; }
+.lava-fx { position: fixed; inset: 0; z-index: 2; pointer-events: none; box-shadow: inset 0 0 120px 30px rgba(255,70,20,.55); animation: lavaPulse 1.6s ease-in-out infinite alternate; }
+@keyframes lavaPulse { from { opacity: .6; } to { opacity: 1; } }
+.poll-box { position: fixed; right: 12px; top: 40%; z-index: 9; width: min(300px, 86vw); background: rgba(14,18,44,.95); border: 1px solid rgba(120,160,255,.5); border-radius: 12px; padding: 10px; pointer-events: auto; }
+.poll-head { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; font-size: 14px; color: #fff; margin-bottom: 8px; }
+.poll-opts { display: flex; flex-direction: column; gap: 6px; }
+.poll-opt { position: relative; overflow: hidden; text-align: left; background: rgba(255,255,255,.07); color: #fff; border: 1px solid rgba(255,255,255,.15); border-radius: 8px; padding: 9px 10px; font: 600 13px system-ui, sans-serif; cursor: pointer; }
+.poll-opt i { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(91,108,255,.45); transition: width .3s; }
+.poll-opt span { position: relative; }
+.poll-opt.mine { border-color: #8fffb0; }
+@media (max-width: 640px) { .poll-box { top: auto; bottom: calc(240px + env(safe-area-inset-bottom)); left: 50%; right: auto; transform: translateX(-50%); } }
