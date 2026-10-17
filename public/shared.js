@@ -167,14 +167,14 @@
       desc: 'Выпадает из легендарных (1) и мифических (3) сфер и за события. Тратится в «Лавке осколков».', stackable: true, maxStack: 99, base: false, price: null,
       sources: ['arena', 'event', 'admin'] },
     // exclusives: only for legendary shards in «Лавка осколков» (never for orbs)
-    X('c_void', 'color', 'Пустота', 50, 'epic', 'void'),
-    X('n_shard', 'nameColor', 'Осколочный ник', 63, 'epic', 'shard'),
-    X('t_comet', 'trail', 'Хвост кометы', 88, 'epic', 'comet'),
-    X('s_crystal', 'shape', 'Кристалл', 113, 'epic', 'crystal'),
-    X('h_satellites', 'hat', 'Спутники', 150, 'legendary', 'satellites'),
-    X('t_crystal', 'trail', 'Кристальный след', 188, 'legendary', 'crystal'),
-    X('c_prism', 'color', 'Призма', 250, 'legendary', 'prism'),
-    X('h_shard_crown', 'hat', 'Осколочная корона', 375, 'legendary', 'shardcrown'),
+    X('c_void', 'color', 'Пустота', 90, 'epic', 'void'),
+    X('n_shard', 'nameColor', 'Осколочный ник', 65, 'epic', 'shard'),
+    X('t_comet', 'trail', 'Хвост кометы', 150, 'epic', 'comet'),
+    X('s_crystal', 'shape', 'Кристалл', 40, 'epic', 'crystal'),
+    X('h_satellites', 'hat', 'Спутники', 175, 'legendary', 'satellites'),
+    X('t_crystal', 'trail', 'Кристальный след', 225, 'legendary', 'crystal'),
+    X('c_prism', 'color', 'Призма', 275, 'legendary', 'prism'),
+    X('h_shard_crown', 'hat', 'Осколочная корона', 450, 'legendary', 'shardcrown'),
   ];
   const SHARD_ID = 'x_legend_shard';
   const SHARD_EXCHANGE = { orbs: 40, maxPerTrade: 99 }; // «Лавка осколков»: 1 shard → 40 orbs (balance only, not the all-time total)

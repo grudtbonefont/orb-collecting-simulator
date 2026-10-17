@@ -2312,7 +2312,6 @@
     ex.append(lab, inp, btn);
     head.append(ico, txt, ex); grid.appendChild(head);
     const list = G.ITEMS.filter(i => i.exclusive).sort((a, b2) => a.shardPrice - b2.shardPrice);
-    { const v = list.findIndex(i => i.id === 'c_void'), c = list.findIndex(i => i.id === 's_crystal'); if (v >= 0 && c >= 0) [list[v], list[c]] = [list[c], list[v]]; } // «Кристалл» shown first, «Пустота» in its place
     for (const it of list) {
       const owned = owns(it.id);
       const el = document.createElement('div'); el.className = 'item ex-item rar-' + it.rarity; el.dataset.item = it.id;
