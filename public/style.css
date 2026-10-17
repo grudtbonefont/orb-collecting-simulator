@@ -657,7 +657,7 @@ body.in-game .music-btn { display: none; }
 .hud-potions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
 .hud-potions.hidden, .emote-picker.hidden, .pcard.hidden { display: none; }
 .pot-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px 2px 4px; border-radius: 999px; background: rgba(140,80,255,.28); border: 1px solid rgba(199,139,255,.6); font: 700 12px system-ui, sans-serif; color: #f0e3ff; }
-.pot-chip i { font-style: normal; font-size: 15px; }
+.pot-chip img { width: 20px; height: 20px; }
 .emote-btn { position: absolute; right: 210px; bottom: 14px; z-index: 5; width: 44px; height: 44px; border-radius: 50%; border: 1px solid rgba(255,255,255,.25); background: rgba(14,18,40,.8); font-size: 22px; cursor: pointer; pointer-events: auto; }
 .emote-picker { position: absolute; right: 210px; bottom: 64px; z-index: 6; display: grid; grid-template-columns: repeat(4, 44px); gap: 6px; padding: 8px; border-radius: 14px; background: rgba(14,18,40,.95); border: 1px solid rgba(255,255,255,.18); pointer-events: auto; }
 .emote-picker .emo { width: 44px; height: 44px; font-size: 24px; border-radius: 10px; border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.06); cursor: pointer; position: relative; }

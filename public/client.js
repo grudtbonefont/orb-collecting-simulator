@@ -628,15 +628,67 @@
   socket.on('pots', l => { mapPots = Array.isArray(l) ? l : []; });
   socket.on('emote', d => { if (d && G.ITEM_BY_ID[d.e]) emotes.set(d.id, { e: G.ITEM_BY_ID[d.e].value, at: performance.now() }); });
   window.OCSPots = () => mapPots.slice();
+  // procedural potion bottles (own art, flat glass style): kind → shape + liquid colour; drawn in a ±32 box around (0,0)
+  const BOTTLES = {
+    speed: { shape: 'tube', liq: '#1e9bff', liq2: '#6fd3ff', cap: '#e8b878' },
+    orbs: { shape: 'jar', liq: '#ff9a1f', liq2: '#ffcf5a', cap: '#e8b878' },
+    luck: { shape: 'round', liq: '#2fc25b', liq2: '#8be86a', cap: '#e8b878' },
+    magnet: { shape: 'heart', liq: '#ff4f86', liq2: '#ff9bbd', cap: '#c9443f' },
+    shard: { shape: 'wide', liq: '#8a3cff', liq2: '#c193ff', cap: '#7b7f8c' },
+  };
+  function bottleBody(g, shape) { // body path (without neck/cork); returns {top, bottom, neckW, neckTop}
+    g.beginPath();
+    if (shape === 'tube') { g.moveTo(-7, -18); g.lineTo(7, -18); g.lineTo(7, 16); g.arc(0, 16, 7, 0, Math.PI); g.closePath(); return { top: -18, bot: 23, nw: 0, nt: -18, cw: 9, ct: -27 }; }
+    if (shape === 'jar') { g.roundRect(-19, -10, 38, 32, 9); return { top: -10, bot: 22, nw: 9, nt: -17, cw: 12, ct: -28 }; }
+    if (shape === 'round') { g.arc(0, 6, 18, 0, Math.PI * 2); return { top: -12, bot: 24, nw: 6, nt: -18, cw: 9, ct: -28 }; }
+    if (shape === 'heart') { g.moveTo(0, -8); g.bezierCurveTo(10, -16, 26, -10, 24, 2); g.bezierCurveTo(22, 12, 8, 18, 0, 24); g.bezierCurveTo(-8, 18, -22, 12, -24, 2); g.bezierCurveTo(-26, -10, -10, -16, 0, -8); g.closePath(); return { top: -12, bot: 24, nw: 7, nt: -18, cw: 10, ct: -28 }; }
+    g.ellipse(0, 7, 24, 15, 0, 0, Math.PI * 2); return { top: -8, bot: 22, nw: 7, nt: -16, cw: 11, ct: -27 }; // wide
+  }
+  function drawPotionBottle(g, kind, x, y, s, t = 0, shadow = true) {
+    const B = BOTTLES[kind] || BOTTLES.speed, line = '#16234a';
+    g.save(); g.translate(x, y); g.scale(s, s); g.lineJoin = 'round';
+    if (shadow) { g.fillStyle = 'rgba(5,8,20,0.45)'; g.beginPath(); g.ellipse(0, 27, B.shape === 'tube' ? 10 : 20, 4.5, 0, 0, Math.PI * 2); g.fill(); }
+    // neck
+    const m = bottleBody(g, B.shape);
+    if (m.nw) { g.fillStyle = 'rgba(160,225,255,0.85)'; g.strokeStyle = line; g.lineWidth = 2; g.beginPath(); g.roundRect(-m.nw, m.nt, m.nw * 2, m.top - m.nt + 4, 3); g.fill(); g.stroke(); }
+    // glass body
+    bottleBody(g, B.shape); g.fillStyle = 'rgba(150,215,255,0.78)'; g.fill();
+    // liquid (clipped to the body), lower ~60 %, lighter surface band + gentle wobble
+    g.save(); bottleBody(g, B.shape); g.clip();
+    const lv = m.top + (m.bot - m.top) * 0.4 + Math.sin(t * 3) * 0.8;
+    g.fillStyle = B.liq; g.fillRect(-30, lv, 60, 40);
+    g.fillStyle = B.liq2; g.beginPath(); g.ellipse(0, lv, 30, 3.2, 0, 0, Math.PI * 2); g.fill();
+    g.fillStyle = 'rgba(0,0,0,0.14)'; g.fillRect(8, lv, 30, 40); // flat side shade
+    g.restore();
+    bottleBody(g, B.shape); g.strokeStyle = line; g.lineWidth = 2.2; g.stroke();
+    // cork / cap
+    g.fillStyle = B.cap; g.strokeStyle = line; g.lineWidth = 2; g.beginPath(); g.roundRect(-m.cw, m.ct, m.cw * 2, 9, 3.5); g.fill(); g.stroke();
+    g.fillStyle = 'rgba(255,255,255,0.35)'; g.fillRect(-m.cw + 2.5, m.ct + 2, m.cw * 0.7, 2.2);
+    // gloss: white streak + dots
+    g.fillStyle = 'rgba(255,255,255,0.85)';
+    const hx = B.shape === 'tube' ? -3 : B.shape === 'jar' ? -12 : -11, hy = B.shape === 'tube' ? -10 : m.top + 6;
+    g.beginPath(); g.ellipse(hx, hy + 3, B.shape === 'tube' ? 1.6 : 3, B.shape === 'tube' ? 6 : 5, -0.3, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.arc(hx + (B.shape === 'tube' ? 0 : 3), hy + (B.shape === 'tube' ? 9 : 11), 1.6, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.arc(B.shape === 'tube' ? 3 : 10, m.bot - 7, 1.8, 0, Math.PI * 2); g.fillStyle = 'rgba(255,255,255,0.6)'; g.fill();
+    if (kind === 'shard') { // epic sparkle
+      for (let i = 0; i < 3; i++) {
+        const a = t * 1.7 + i * 2.1, sx = Math.cos(a) * 20, sy = 2 + Math.sin(a * 1.3) * 12, r = 2.2 + Math.sin(t * 5 + i) * 1.2;
+        g.fillStyle = 'rgba(255,240,255,0.95)'; g.beginPath(); g.moveTo(sx, sy - r * 2); g.lineTo(sx + r * 0.5, sy); g.lineTo(sx, sy + r * 2); g.lineTo(sx - r * 0.5, sy); g.closePath(); g.fill();
+        g.beginPath(); g.moveTo(sx - r * 2, sy); g.lineTo(sx, sy + r * 0.5); g.lineTo(sx + r * 2, sy); g.lineTo(sx, sy - r * 0.5); g.closePath(); g.fill();
+      }
+    }
+    g.restore();
+  }
+  window.OCSBottle = drawPotionBottle;
   function drawPotions(g, t) {
     for (const [, x, y, item] of mapPots) {
       if (x < cam.x - 60 || x > cam.x + VW + 60 || y < cam.y - 60 || y > cam.y + VH + 60) continue;
       const def = G.ITEM_BY_ID[item]; if (!def) continue;
-      const bob = Math.sin(t * 3 + x) * 3, r = G.POTION_MAP.r;
-      g.save(); g.shadowColor = '#c78bff'; g.shadowBlur = 16;
-      g.fillStyle = 'rgba(160,90,255,0.28)'; g.beginPath(); g.arc(x, y + bob, r + 4 + Math.sin(t * 5) * 2, 0, Math.PI * 2); g.fill();
-      g.shadowBlur = 0; g.font = `${r * 1.6}px system-ui, "Apple Color Emoji", "Segoe UI Emoji", sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
-      g.fillText('🧪', x, y + bob); g.font = `${r}px system-ui, "Apple Color Emoji", "Segoe UI Emoji", sans-serif`; g.fillText(def.icon, x + r * 0.8, y + bob - r * 0.8); g.restore();
+      const bob = Math.sin(t * 2.4 + x) * 3.5, r = G.POTION_MAP.r, col = (BOTTLES[def.potion] || BOTTLES.speed).liq;
+      g.save(); const gl = g.createRadialGradient(x, y + bob, 2, x, y + bob, r * 2.4); gl.addColorStop(0, col + '66'); gl.addColorStop(1, col + '00');
+      g.globalAlpha = 0.75 + Math.sin(t * 4 + x) * 0.25; g.fillStyle = gl; g.beginPath(); g.arc(x, y + bob, r * 2.4, 0, Math.PI * 2); g.fill(); g.restore();
+      g.save(); g.fillStyle = 'rgba(5,8,20,0.4)'; g.beginPath(); g.ellipse(x, y + r * 1.5, r * 1.1 - bob * 0.6, r * 0.25, 0, 0, Math.PI * 2); g.fill(); g.restore(); // shadow stays on the ground
+      drawPotionBottle(g, def.potion, x, y + bob - 6, r / 16, t, false);
     }
   }
   function drawEmotes(g) {
@@ -673,7 +725,7 @@
     const el = $('hudPotions'), p = profile && profile.stats && profile.stats.potions, now = Date.now() + srvSkew;
     const on = p ? Object.keys(G.POTIONS).filter(k => p[k] > now) : [];
     el.classList.toggle('hidden', !on.length);
-    el.innerHTML = on.map(k => { const def = G.ITEMS.find(i => i.potion === k); return `<span class="pot-chip" data-pot="${k}" title="${esc(def.name)}: ${esc(def.desc)}"><i>${def.icon}</i>${mmss(p[k] - now)}</span>`; }).join('');
+    el.innerHTML = on.map(k => { const def = G.ITEMS.find(i => i.potion === k); return `<span class="pot-chip" data-pot="${k}" title="${esc(def.name)}: ${esc(def.desc)}"><img src="${iconUrl(def.id)}" alt="">${mmss(p[k] - now)}</span>`; }).join('');
   }
   setInterval(() => { if (joined && profile) updatePotionHud(); }, 500);
   function drinkPotion(def) {
@@ -2361,7 +2413,7 @@
     const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
     const cv = document.createElement('canvas'); cv.width = cv.height = Math.round(ICON_PX * dpr);
     const g = cv.getContext('2d');
-    const art = def && (def.type === 'cosmetic' ? ICON_ART[def.cat] : ICON_ART[def.art]);
+    const art = def && (def.type === 'cosmetic' ? ICON_ART[def.cat] : def.type === 'potion' ? (g2 => drawPotionBottle(g2, def.potion, ICON_PX / 2, ICON_PX / 2 - 2, ICON_PX / 66, 0.4)) : ICON_ART[def.art]);
     try { g.setTransform(dpr, 0, 0, dpr, 0, 0); (art || drawFallbackIcon)(g, def || { rarity: 'common' }); }
     catch (_) { g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, ICON_PX, ICON_PX); drawFallbackIcon(g, def); }
     const url = cv.toDataURL('image/png');
