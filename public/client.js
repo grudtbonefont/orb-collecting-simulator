@@ -474,7 +474,7 @@
   window.OCSZone = () => ({ zone: G.zoneOf(me.x), open: doorOpen(), x: me.x, y: me.y });
   function updateDoorBtn() {
     const b = $('doorBtn'); if (!b) return;
-    const near = joined && !doorOpen() && Math.abs(me.x - G.DOOR.x) < 360 && Math.abs(me.y - G.DOOR.y) < 420;
+    const near = joined && !doorOpen() && G.doorDist(me.x) < 360; // anywhere along the wall-door
     b.classList.toggle('hidden', !near);
     if (near) { b.disabled = profile.balance < G.DOOR_COST; b.innerHTML = `🚪 Открыть дверь во 2-ю зону · ${orbsH(G.DOOR_COST)}`; }
   }
@@ -490,21 +490,20 @@
     ctx.fillStyle = 'rgba(150,80,255,0.07)'; ctx.fillRect(0, 0, Z, H);          // zone 1: violet tint
     ctx.fillStyle = 'rgba(40,130,255,0.11)'; ctx.fillRect(Z, 0, Z, H);          // zone 2: blue tint
     if (cam.x + VW < Z - 400 && cam.x > -1) return;                             // wall far off-screen
-    const open = doorOpen(), pulse = 0.6 + 0.4 * Math.sin(t * 3);
-    ctx.save();
-    ctx.lineWidth = 14; ctx.strokeStyle = 'rgba(140,110,255,0.85)'; ctx.shadowColor = '#7a5cff'; ctx.shadowBlur = 18;
-    ctx.beginPath(); ctx.moveTo(Z, 0); ctx.lineTo(Z, D.y - D.half); ctx.moveTo(Z, D.y + D.half); ctx.lineTo(Z, H); ctx.stroke();
-    // door frame
-    ctx.lineWidth = 6; ctx.strokeStyle = open ? '#5dff8f' : '#ffcc33'; ctx.shadowColor = open ? '#5dff8f' : '#ffcc33'; ctx.shadowBlur = 24 * pulse;
-    ctx.strokeRect(Z - 22, D.y - D.half, 44, D.half * 2);
-    if (!open) { // bars + lock
-      ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,204,51,0.8)'; ctx.shadowBlur = 0;
-      ctx.beginPath(); for (let y = D.y - D.half + 28; y < D.y + D.half; y += 28) { ctx.moveTo(Z - 20, y); ctx.lineTo(Z + 20, y); } ctx.stroke();
+    const open = doorOpen(), pulse = 0.6 + 0.4 * Math.sin(t * 3), col = open ? '#5dff8f' : '#ffcc33';
+    ctx.save(); // the whole wall is the door: glowing frame, bars when locked, labels follow the camera
+    ctx.fillStyle = open ? 'rgba(93,255,143,0.10)' : 'rgba(255,204,51,0.10)'; ctx.fillRect(Z - 22, 0, 44, H);
+    ctx.lineWidth = 5; ctx.strokeStyle = col; ctx.shadowColor = col; ctx.shadowBlur = 22 * pulse;
+    ctx.beginPath(); ctx.moveTo(Z - 22, 0); ctx.lineTo(Z - 22, H); ctx.moveTo(Z + 22, 0); ctx.lineTo(Z + 22, H); ctx.stroke();
+    const y0 = Math.max(0, Math.floor((cam.y - 60) / 28) * 28), y1 = Math.min(H, cam.y + VH + 60);
+    ctx.shadowBlur = 0;
+    if (!open) { ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,204,51,0.75)'; ctx.beginPath(); for (let y = y0; y < y1; y += 28) { ctx.moveTo(Z - 20, y); ctx.lineTo(Z + 20, y); } ctx.stroke(); }
+    else { ctx.strokeStyle = 'rgba(93,255,143,0.35)'; ctx.lineWidth = 2; ctx.setLineDash([12, 16]); ctx.lineDashOffset = -t * 40; ctx.beginPath(); ctx.moveTo(Z, y0); ctx.lineTo(Z, y1); ctx.stroke(); ctx.setLineDash([]); }
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = '700 18px system-ui, sans-serif';
+    for (let y = Math.max(300, Math.floor(cam.y / 700) * 700 + 350); y < Math.min(H - 100, cam.y + VH + 350); y += 700) {
+      ctx.fillText(open ? '🚪 Зона 2 — проход открыт' : `🔒 Дверь: ${fmt(G.DOOR_COST)} сфер`, Z, y);
+      ctx.font = '600 14px system-ui, sans-serif'; ctx.fillStyle = 'rgba(200,215,255,0.8)'; ctx.fillText('больше редких сфер →', Z + 130, y + 26); ctx.font = '700 18px system-ui, sans-serif'; ctx.fillStyle = '#fff';
     }
-    ctx.shadowBlur = 0; ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = '700 18px system-ui, sans-serif';
-    ctx.fillText(open ? '🚪 Зона 2' : `🔒 ${fmt(G.DOOR_COST)} сфер`, Z, D.y - D.half - 16);
-    ctx.font = '600 14px system-ui, sans-serif'; ctx.fillStyle = 'rgba(200,215,255,0.8)';
-    ctx.fillText('больше редких сфер →', Z + 120, D.y + 6);
     ctx.restore();
   }
   function updateHud(bump) {
@@ -1490,6 +1489,7 @@
     // world edge
     const [ex0, ey0] = px(0, 0), [ex1, ey1] = px(G.WORLD.w, G.WORLD.h);
     mctx.strokeStyle = 'rgba(255,120,120,0.35)'; mctx.strokeRect(ex0, ey0, ex1 - ex0, ey1 - ey0);
+    { const [wx] = px(G.ZONE_W, 0); mctx.strokeStyle = doorOpen() ? 'rgba(93,255,143,0.8)' : 'rgba(255,204,51,0.8)'; mctx.lineWidth = 2.5; mctx.beginPath(); mctx.moveTo(wx, ey0); mctx.lineTo(wx, ey1); mctx.stroke(); mctx.lineWidth = 1; } // wall-door
     if (evState && evState.zone) { // «Царь горы» zone is public and may be shown
       const z = evState.zone, [zx, zy] = px(z.x, z.y);
       mctx.fillStyle = evState.phase === 'active' ? 'rgba(255,204,51,0.25)' : 'rgba(255,204,51,0.1)'; mctx.strokeStyle = 'rgba(255,204,51,0.8)';
@@ -2393,6 +2393,24 @@
     row.append(minus, inp, plus, mx);
     el.append(row, btn); upd();
   }
+  // inventory sort (display only; slot indexes stay the server's), saved in localStorage
+  const INV_SORT_KEY = 'ocs_inv_sort', INV_SORTS = ['default', 'newest', 'price_desc', 'price_asc', 'rarity', 'type', 'name', 'qty'];
+  let invSort = INV_SORTS.includes(store.get(INV_SORT_KEY)) ? store.get(INV_SORT_KEY) : 'default';
+  const itemValue = d => (d.price > 0 ? d.price : d.shardPrice ? d.shardPrice * G.SHARD_EXCHANGE.orbs : 0);
+  function invOrder(inv) {
+    const idx = inv.map((_, i) => i), D = i => G.ITEM_BY_ID[inv[i].id] || {}, nm = i => D(i).name || '', by = f => (a, b) => f(a, b) || nm(a).localeCompare(nm(b), 'ru') || a - b;
+    const catRank = Object.fromEntries(G.INV_CATEGORIES.map((c, k) => [c.key, k]));
+    const cmp = {
+      newest: by((a, b) => (inv[b].at || 0) - (inv[a].at || 0) || b - a),
+      price_desc: by((a, b) => itemValue(D(b)) - itemValue(D(a))), price_asc: by((a, b) => itemValue(D(a)) - itemValue(D(b))),
+      rarity: by((a, b) => (RAR_RANK[D(b).rarity] || 0) - (RAR_RANK[D(a).rarity] || 0)),
+      type: by((a, b) => (catRank[D(a).cat] ?? 99) - (catRank[D(b).cat] ?? 99)),
+      name: (a, b) => nm(a).localeCompare(nm(b), 'ru') || a - b,
+      qty: by((a, b) => inv[b].q - inv[a].q),
+    }[invSort];
+    return cmp ? idx.sort(cmp) : idx;
+  }
+  $('invSort').addEventListener('change', () => { invSort = INV_SORTS.includes($('invSort').value) ? $('invSort').value : 'default'; store.set(INV_SORT_KEY, invSort); renderInv(); });
   function renderInv() {
     if (!profile) return;
     pruneHidden('inv');
@@ -2409,7 +2427,9 @@
     const grid = $('invGrid');
     grid.innerHTML = '';
     let shown = 0;
-    inv.forEach((slot, i) => {
+    $('invSort').value = invSort;
+    const order = invOrder(inv);
+    order.forEach(i => { const slot = inv[i];
       const def = G.ITEM_BY_ID[slot.id];
       if (!def || (invTab !== 'all' && def.cat !== invTab)) return;
       shown++;

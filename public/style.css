@@ -533,3 +533,6 @@ body.in-game .music-btn { display: none; }
   .ach-tab .ic { font-size: 18px; }
   .ach-list { max-height: 52vh; }
 }
+.inv-sort { display: flex; align-items: center; gap: 6px; margin: 6px 0 8px; font-size: 13px; }
+.inv-sort select { background: #131a36; color: #fff; border: 1px solid rgba(120,150,255,.4); border-radius: 8px; padding: 6px 8px; font: inherit; }
+@media (max-width: 640px) { .inv-sort select { font-size: 16px; flex: 1; min-height: 38px; } }

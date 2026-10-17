@@ -255,7 +255,7 @@ function spawnObstacle(now, f = {}) {
   let at = null;
   for (let i = 0; i < 40 && !at; i++) {
     const x = Number.isFinite(f.x) ? f.x : Math.round(rand(reach + 100, G.WORLD.w - reach - 100)), y = Number.isFinite(f.y) ? f.y : Math.round(rand(reach + 100, G.WORLD.h - reach - 100));
-    const ok = Number.isFinite(f.x) || (Math.abs(x - G.ZONE_W) > reach + 80 && Math.hypot(x - G.DOOR.x, y - G.DOOR.y) > OB.doorClear + reach &&
+    const ok = Number.isFinite(f.x) || (G.doorDist(x) > OB.doorClear + reach &&
       Array.from(players.values()).every(pl => Math.hypot(pl.x - x, pl.y - y) > OB.playerClear + reach) &&
       obstacles.every(b => Math.hypot(b.x - x, b.y - y) > obsReach(b) + reach + OB.gap));
     if (ok) at = { x, y };
@@ -1331,9 +1331,10 @@ io.on('connection', socket => {
     socket.on('test:grant', (d, ack) => {
       ack = safeAck(ack);
       if (!acct || !isObj(d)) return ack({ ok: false });
-      const r = INV.grantItem(acct.acc, d.id, d.qty, d.source || 'admin');
-      if (r.ok) accountChanged(acct.acc);
-      ack(Object.assign(r, { profile: ownProfile(acct.acc) }));
+      const other = typeof d.name === 'string' ? byKey.get(d.name.toLowerCase()) : null, acc = other ? other.acc : acct.acc; // {name}: another online player (UI screenshots)
+      const r = INV.grantItem(acc, d.id, d.qty, d.source || 'admin');
+      if (r.ok) { accountChanged(acc); if (other) other.socket.emit('profile', ownProfile(acc)); }
+      ack(Object.assign(r, { profile: ownProfile(acc) }));
     });
     socket.on('test:upgrades', (d, ack) => {
       ack = safeAck(ack);

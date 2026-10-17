@@ -220,6 +220,11 @@
     <div class="modal-head"><h2>🎒 Инвентарь</h2><div class="pill" id="invCount">0 / 450</div><button class="close" aria-label="Закрыть">✕</button></div>
     <div class="inv-meter"><div id="invMeter"></div></div>
     <div class="inv-bar"><div class="tabs" id="invTabs"></div><div id="invTrash" class="inv-trash" title="Перетащите предмет сюда, чтобы удалить">🗑 <span>Корзина</span></div></div>
+    <div class="inv-sort"><label for="invSort">Сортировка:</label> <select id="invSort">
+      <option value="default">По порядку получения</option><option value="newest">Сначала новые</option>
+      <option value="price_desc">Цена: дорогие сначала</option><option value="price_asc">Цена: дешёвые сначала</option>
+      <option value="rarity">По редкости</option><option value="type">По типу</option><option value="name">По названию</option><option value="qty">По количеству</option>
+    </select></div>
     <div class="grid inv-grid" id="invGrid"></div>
   </div>
 </div>

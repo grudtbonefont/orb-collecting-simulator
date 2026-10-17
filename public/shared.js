@@ -5,10 +5,11 @@
   const DOOR_COST = 3750; // one-time unlock for zone 2 (~35 min of base farming); earlier 1000-orb unlocks are kept
   const ZONE2_WEIGHTS = { c: 6960, u: 1800, r: 850, e: 280, l: 80, m: 30 }; // same tiers as zone 1, better odds: c 69.6 / u 18 / r 8.5 / e 2.8 / l 0.8 / m 0.3 % (mean ≈ 2.03 vs 1.49)
   const zoneOf = x => (x < ZONE_W ? 1 : 2);
-  const DOOR = { x: ZONE_W, y: ZONE_H / 2, half: 170 }; // opening in the wall between the zones (340 px tall)
-  // The wall at x = ZONE_W blocks everyone; only an unlocked player inside the door opening may cross. prevX = x before the move.
+  const DOOR = { x: ZONE_W, y: ZONE_H / 2, half: ZONE_H / 2, clear: 300 }; // the whole dividing wall is the door (wall-door); spawns keep `clear` px off it
+  const doorDist = x => Math.abs(x - ZONE_W); // distance to the wall-door line
+  // The wall at x = ZONE_W blocks locked players everywhere; unlocked players cross anywhere along it. prevX = x before the move.
   function zoneGate(pos, prevX, unlocked) {
-    if (unlocked && Math.abs(pos.y - DOOR.y) <= DOOR.half - PLAYER_R) return;
+    if (unlocked) return;
     if (prevX <= ZONE_W) { if (pos.x > ZONE_W - PLAYER_R) pos.x = ZONE_W - PLAYER_R; }
     else if (pos.x < ZONE_W + PLAYER_R) pos.x = ZONE_W + PLAYER_R;
   }
@@ -338,7 +339,7 @@
   // ---------------------------------------------------------------- temporary obstacles (server spawns, everyone collides)
   // kinds: 'wall' (long thin rect), 'block' (square-ish rect), 'rock' (circle), 'laser' (solid pylon + spinning beam)
   const OBSTACLES = { maxAlive: 30, everyMinMs: 6000, everyMaxMs: 15000, lifeMinMs: 45000, lifeMaxMs: 90000, laserChance: 0.25,
-    warnMs: 3000, playerClear: 380, doorClear: 650, gap: 450, pylonR: 26, beamMin: 240, beamMax: 340, spinMin: 0.8, spinMax: 1.3,
+    warnMs: 3000, playerClear: 380, doorClear: 300, gap: 450, pylonR: 26, beamMin: 240, beamMax: 340, spinMin: 0.8, spinMax: 1.3,
     penaltyPct: 0.07, penaltyMax: 150, invulnMs: 3000, dropMax: 10, dropLifeMs: 30000,
     // iron robot (own timer, separate from obstacles: 30 % roll every 45–90 s): rare solid player-shaped obstacle that shoots slow shots at players in range (shared immunity with lasers)
     robotChance: 0.3, robotEveryMinMs: 45000, robotEveryMaxMs: 90000, robotMax: 2, robotR: 30, robotRange: 500, aimMs: 700, shotEveryMin: 1500, shotEveryMax: 2000,
@@ -440,7 +441,7 @@
   }
 
   const api = {
-    WORLD, ZONE_W, ZONE_H, DOOR, DOOR_COST, ZONE2_WEIGHTS, zoneOf, zoneGate, PLAYER_R, BASE_SPEED, TICK_MS, STEP_DT, ORB_TYPES, ORB_RANK, ORB_LEGEND, POOL_WEIGHTS, RAIN_WEIGHTS, rollOrbType, expectedOrbValue, CATEGORIES, INV_CATEGORIES, RARITIES, ITEMS, ITEM_BY_ID, INV_SLOTS, INV_CAP, BUY_MAX_QTY, PAINTS,
+    WORLD, ZONE_W, ZONE_H, DOOR, doorDist, DOOR_COST, ZONE2_WEIGHTS, zoneOf, zoneGate, PLAYER_R, BASE_SPEED, TICK_MS, STEP_DT, ORB_TYPES, ORB_RANK, ORB_LEGEND, POOL_WEIGHTS, RAIN_WEIGHTS, rollOrbType, expectedOrbValue, CATEGORIES, INV_CATEGORIES, RARITIES, ITEMS, ITEM_BY_ID, INV_SLOTS, INV_CAP, BUY_MAX_QTY, PAINTS,
     DEFAULT_EQUIPPED, DEFAULT_OWNED, UPGRADES, UPGRADE_KEYS, UPGRADE_REFUND_PRICES, upLevel, upValue, jackpotChance, upgradeText, orbReward, skillPrize, compassTargets, SENSE_EPIC_RANGE, RADAR, radarBlips, PUSH, separatePlayers,
     EVENTS, EVENT_KEYS, AUTO_EVENT_KEYS, EVENT_SCHEDULE, luckyWeights, OBSTACLES, laserAngle, resolveObstacles, laserHits, laserPenalty, robotPenalty, WEEKEND, weekendInfo, SHARD_ID, SHARD_EXCHANGE,
     MINIGAMES, REACTION_PRIZES, rushPrize, memoryPrize, memoryShowMs, shellFinal, shellShuffleMs, throwPos, throwPoints, throwPrize, chainPrize, minigameMinMs, speedFor, pickupFor, applyInput, BONUS_ROOM, inBonusRoom,

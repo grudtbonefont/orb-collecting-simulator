@@ -130,16 +130,16 @@ async function achSuite(url) {
 async function resetSuite(url) {
   console.log('--- one-time achievement reset (stats.achResetV2)');
   const name = 'Rst' + rnd(), A = client(url); await A.register(name, false);
-  await A.emit('test:stats', { achResetV2: null, achV2: true, achSet: ['total_1', 'total_2', 'total_3', 'bosskill_1', 'bosskill_2', 'games_1', 'zone2_1'], total: 60000, bossKills: 30, bossDmg: 5000, rareCaught: 500, distM: 5000, minigames: 100, unlockedDoor2: true, questsDone: 12, bestStreak: 5 });
+  await A.emit('test:stats', { achResetV2: null, achV2: true, achSet: ['total_1', 'total_2', 'total_3', 'bosskill_1', 'bosskill_2', 'games_1', 'zone2_1'], total: 60000, bossKills: 30, bossDmg: 5000, rareCaught: 500, distM: 5000, minigames: 100, unlockedDoor2: false, questsDone: 12, bestStreak: 5 });
   await A.emit('test:grant', { id: G.SHARD_ID, qty: 7, source: 'admin' }); await A.emit('test:orbs', 1234);
   const b0 = A.profile.balance, s0 = A.profile.shards, inv0 = JSON.stringify(A.profile.inventory), up0 = JSON.stringify(A.profile.upgrades);
   A.enter(await A.call('play', null)); await sleep(2500);
   let st = A.profile.stats; const p = { total: A.profile.total, stats: st, codesUsed: A.profile.codesUsed || 0, items: C.itemsOwned(A.profile.inventory), liveMs: 0 };
   const allZero = C.CHAINS.every(ch => C.achValue(ch.tiers[0], p) === 0);
   ok(A.events('ach').length === 0 && Object.keys(st.ach).length === 0 && st.achResetV2 && st.achV2 === true && allZero, `after load: no tiers, every chain at progress 0 (${C.CHAINS.length} chains), no achievement events`);
-  ok(A.profile.balance === b0 && A.profile.shards === s0 && JSON.stringify(A.profile.inventory) === inv0 && JSON.stringify(A.profile.upgrades) === up0 && st.unlockedDoor2 === true && A.profile.total === 60000 && st.minigames === 100 && st.questsDone === 12,
+  ok(A.profile.balance === b0 && A.profile.shards === s0 && JSON.stringify(A.profile.inventory) === inv0 && JSON.stringify(A.profile.upgrades) === up0 && st.unlockedDoor2 === false && A.profile.total === 60000 && st.minigames === 100 && st.questsDone === 12,
     `balance (${b0}), shards (${s0}), inventory, upgrades, door, total, minigames, quests untouched; no payout`);
-  ok(st.bossKills === undefined && st.rareCaught === undefined && st.distM === undefined && st.bossDmg === undefined && st.achBase.total === 60000 && st.achBase.games === 100 && st.achBase.zone2 === 1, 'achievement-only counters zeroed; shared stats measured from a baseline');
+  ok(st.bossKills === undefined && st.rareCaught === undefined && st.distM === undefined && st.bossDmg === undefined && st.achBase.total === 60000 && st.achBase.games === 100 && st.achBase.zone2 === undefined, 'achievement-only counters zeroed; shared stats measured from a baseline');
   await A.emit('test:stats', { bossKills: 1 }); await waitFor(() => A.events('ach').length >= 1, 3000);
   await A.emit('test:stats', { total: 60100 }); await waitFor(() => A.events('ach').length >= 2, 3000);
   const ids = A.events('ach').map(e => e.id).join(',');
@@ -147,6 +147,12 @@ async function resetSuite(url) {
   A.close(); await sleep(300);
   const A2 = client(url); await A2.login(name); A2.enter(await A2.call('play', null)); await sleep(2000);
   ok(A2.events('ach').length === 0 && A2.profile.stats.ach.bosskill_1 && A2.profile.stats.ach.total_1 && A2.profile.stats.bossKills === 1 && A2.profile.stats.achBase.total === 60000, 'second load: reset not reapplied (tiers and counters kept)');
+  // «Первопроходец» is not baseline-based: an account that already unlocked the door gets it once
+  const b2 = A2.profile.balance, sh2 = A2.profile.shards;
+  await A2.emit('test:stats', { unlockedDoor2: true }); await waitFor(() => A2.events('ach').length >= 1, 3000);
+  await A2.emit('test:stats', { minigames: 101 }); await sleep(1300);
+  const zr = C.ACH_BY_ID.zone2_1.reward;
+  ok(A2.events('ach').length === 1 && A2.events('ach')[0].id === 'zone2_1' && A2.profile.balance === b2 + zr.orbs && A2.profile.shards === sh2 + zr.shards, `door already unlocked → «Первопроходец» granted once (+${zr.orbs} orbs, +${zr.shards} shards), not again`);
   A2.close();
 }
 async function questSuite(url) {

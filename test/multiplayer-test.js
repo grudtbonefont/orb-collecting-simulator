@@ -337,6 +337,8 @@ async function zoneSuite(URL) {
   await P.emit('test:tp', { x: G.ZONE_W - 150, y: G.DOOR.y });
   await walkRight(1500);
   ok(P.pos.x <= G.ZONE_W - G.PLAYER_R + 0.5, `locked door blocks the way (stopped at x=${Math.round(P.pos.x)})`);
+  await P.emit('test:tp', { x: G.ZONE_W - 150, y: G.ZONE_H - 300 }); await walkRight(1200);
+  ok(P.pos.x <= G.ZONE_W - G.PLAYER_R + 0.5, `locked: blocked anywhere along the wall too (y=${G.ZONE_H - 300})`);
   const poor = await P.emit('door:unlock');
   ok(!poor.ok && poor.code === 'funds' && poor.error.includes(String(G.DOOR_COST)), 'unlock without enough orbs refused: ' + poor.error);
   await P.emit('test:orbs', G.DOOR_COST + 50); await sleep(200);
@@ -345,9 +347,9 @@ async function zoneSuite(URL) {
   ok(r.ok && r.profile.stats.unlockedDoor2 === true && r.profile.balance === bal - G.DOOR_COST && r.profile.total === tot, `door unlocked for ${G.DOOR_COST} orbs (balance only, total unchanged)`);
   const again = await P.emit('door:unlock');
   ok(!again.ok && again.code === 'owned', 'second unlock refused (one-time purchase)');
-  await P.emit('test:tp', { x: G.ZONE_W - 150, y: G.DOOR.y + G.DOOR.half + 120 }); // next to the wall, not at the door
+  await P.emit('test:tp', { x: G.ZONE_W - 150, y: 400 }); // far from the middle: the whole wall is the door
   await walkRight(1200);
-  ok(P.pos.x <= G.ZONE_W - G.PLAYER_R + 0.5, 'even when unlocked, the wall only opens at the door');
+  ok(P.pos.x > G.ZONE_W + 50, `unlocked: passes the wall-door anywhere (near the top, y=400 → x=${Math.round(P.pos.x)})`);
   await P.emit('test:tp', { x: G.ZONE_W - 150, y: G.DOOR.y });
   await walkRight(2200);
   ok(P.pos.x > G.ZONE_W + 100 && G.zoneOf(P.pos.x) === 2, `walked through the door into zone 2 (x=${Math.round(P.pos.x)})`);
@@ -648,11 +650,13 @@ async function codesSuite(URL) {
   ok(rs.slice(0, 4).every(x => x.code === 'invalid') && rs[4].code === 'rate', 'rate limit: the 6th attempt within a minute is refused (' + rs[4].error + ')');
   // production codes (one use per account, case-insensitive)
   const D = makeClient(URL); await D.register('CodeD' + rnd());
-  const L = require('../lib/codes.js'), want = { KATIADESUTOP: [67, 1], ABSOLUTESECRETCODE: [67, 1], SPOOKYMONTH: [666, 0], BRIMSTONEBASEMENT: [125, 0], SHARDY: [0, 2], SECRETCODE: [123, 1], TREASURE: [50, 0], PATCH1: [111, 0], OSHIOTASHNIEIAICHA: [67, 1] };
-  ok(Object.entries(want).every(([k, [o, sh]]) => { const c = L.findCode(k.toLowerCase()); return c && (c.rewards.orbs || 0) === o && (c.rewards.shards || 0) === sh && !c.expiresAt && c.maxUses == null; }), '9 promo codes defined with the right rewards, no expiry, no global limit');
+  const L = require('../lib/codes.js'), want = { KATIADESUTOP: [67, 1], ABSOLUTESECRETCODE: [67, 1], SPOOKYMONTH: [666, 0], BRIMSTONEBASEMENT: [125, 0], SHARDY: [0, 2], SECRETCODE: [123, 1], TREASURE: [50, 0], PATCH1: [111, 0], OSHIOTASHNIEIAICHA: [67, 1], YOUTUBESECRET: [100, 1] };
+  ok(Object.entries(want).every(([k, [o, sh]]) => { const c = L.findCode(k.toLowerCase()); return c && (c.rewards.orbs || 0) === o && (c.rewards.shards || 0) === sh && !c.expiresAt && c.maxUses == null; }), '10 promo codes defined with the right rewards, no expiry, no global limit');
   const d0 = D.profile.balance, s0 = units(D, G.SHARD_ID);
   const c1 = await D.emit('code:redeem', 'spookyMonth'), c2 = await D.emit('code:redeem', 'SPOOKYMONTH'), c3 = await D.emit('code:redeem', ' secretcode ');
   ok(c1.ok && !c2.ok && c3.ok && D.profile.balance === d0 + 666 + 123 && units(D, G.SHARD_ID) === s0 + 1, `SPOOKYMONTH (+666, any case, once) and SECRETCODE (+123 + 1 💎) redeemed`);
+  const y1 = await D.emit('code:redeem', 'youtubeSecret'), y2 = await D.emit('code:redeem', 'YOUTUBESECRET');
+  ok(y1.ok && y1.rewards.orbs === 100 && y1.rewards.shards === 1 && !y2.ok, 'YOUTUBESECRET: +100 orbs + 1 shard, once per account, any case');
   D.close();
   A.close(); B.close(); C.close();
 }
@@ -1632,6 +1636,11 @@ async function runCycleMode() {
     const tmp = path.join(os.tmpdir(), `ocs-shards-${process.pid}.json`);
     const srv = await startServer(3101, { DATA_FILE: tmp, OCS_TEST_HOOKS: '1' });
     await tiersSuite(srv.url); await eventSuite(srv.url); await codesSuite(srv.url); await shardShopSuite(srv.url);
+    await srv.stop(); fs.rmSync(tmp, { force: true });
+  } else if (process.env.OCS_TEST_ONLY === 'door') { // wall-door + spawn exclusions + codes
+    const tmp = path.join(os.tmpdir(), `ocs-door-${process.pid}.json`);
+    const srv = await startServer(3101, { DATA_FILE: tmp, OCS_TEST_HOOKS: '1' });
+    await zoneSuite(srv.url); await codesSuite(srv.url); await luckyObstacleSuite(srv.url); await robotSuite(srv.url); await runnerCatchSuite(srv.url);
     await srv.stop(); fs.rmSync(tmp, { force: true });
   } else if (process.env.OCS_TEST_ONLY === 'codes') {
     const tmp = path.join(os.tmpdir(), `ocs-codes-${process.pid}.json`);

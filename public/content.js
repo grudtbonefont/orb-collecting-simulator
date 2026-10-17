@@ -48,7 +48,7 @@
     { id: 'streak', cat: 'quests', icon: '🔥', name: 'Неудержимый', desc: n => `Серия: ${fmtN(n)} дней подряд все задания`, stat: p => p.stats.bestStreak, goals: [2, 7, 14, 30], k: 1.3 },
     { id: 'zaps', cat: 'danger', icon: '⚡', name: 'Несгибаемый', desc: n => `Переживите ${fmtN(n)} попаданий лазеров, выстрелов и ударов`, stat: p => p.stats.zaps, goals: [1, 25, 150], k: 0.7 },
     { id: 'nearlaser', cat: 'danger', icon: '🔥', name: 'По краю', desc: n => `Проведите ${fmtN(n)} с рядом с лазером, не попав под луч`, stat: p => p.stats.nearLaserSec, goals: [30, 180, 900, 3000], unit: 'с' },
-    { id: 'zone2', cat: 'explore', icon: '🚪', name: 'Первопроходец', desc: () => 'Откройте дверь во 2-ю зону', stat: p => (p.stats.unlockedDoor2 ? 1 : 0), goals: [1], k: 1.5 },
+    { id: 'zone2', cat: 'explore', icon: '🚪', name: 'Первопроходец', desc: () => 'Откройте дверь во 2-ю зону', stat: p => (p.stats.unlockedDoor2 ? 1 : 0), goals: [1], k: 1.5, noBase: true }, // not baseline-based: unlocked accounts get it once after the reset
     { id: 'dist', cat: 'explore', icon: '👣', name: 'Путешественник', desc: n => `Пройдите ${fmtN(n)} м`, stat: p => p.stats.distM, goals: [2000, 25000, 150000, 600000], unit: 'м' },
     { id: 'play', cat: 'explore', icon: '⏱️', name: 'Ветеран', desc: n => `Проведите в игре ${n >= 60 ? fmtN(n / 60) + ' ч' : n + ' мин'}`, stat: playMin, goals: [60, 300, 1500, 6000], unit: 'мин' },
     { id: 'items', cat: 'collect', icon: '🎨', name: 'Коллекционер', desc: n => `Соберите ${fmtN(n)} разных предметов`, stat: p => p.items, goals: [3, 10, 20, 40] },
@@ -66,7 +66,7 @@
   });
   const CHAIN_BY_ID = Object.fromEntries(CHAINS.map(c => [c.id, c]));
   const ACH_BY_ID = Object.fromEntries(ACH.map(a => [a.id, a]));
-  const achValue = (a, p) => Math.max(0, Math.floor(Number(a.stat(p)) || 0) - ((p.stats && p.stats.achBase && p.stats.achBase[a.chain]) || 0)); // progress since the Oct 2026 reset
+  const achValue = (a, p) => Math.max(0, Math.floor(Number(a.stat(p)) || 0) - (CHAIN_BY_ID[a.chain].noBase ? 0 : (p.stats && p.stats.achBase && p.stats.achBase[a.chain]) || 0)); // progress since the Oct 2026 reset
   // distinct non-base cosmetics in the inventory (slots: [{id,q}])
   const itemsOwned = slots => new Set((slots || []).filter(s => s && G.ITEM_BY_ID[s.id] && G.ITEM_BY_ID[s.id].type === 'cosmetic' && !G.ITEM_BY_ID[s.id].base).map(s => s.id)).size;
   // pre-tier achievements (paid once) → the tier they cover (highest tier with goal ≤ the old goal) and what they paid
