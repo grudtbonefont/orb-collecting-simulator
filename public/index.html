@@ -119,6 +119,7 @@
   <div id="radar" class="radar"><canvas id="minimap" width="150" height="150" aria-label="Радар"></canvas><button id="radarToggle" class="radar-toggle" type="button" title="Свернуть / развернуть радар">–</button></div>
   <div class="zoom-btns"><button type="button" id="zoomIn" title="Приблизить (колесо мыши / два пальца)" aria-label="Приблизить">+</button><button type="button" id="zoomOut" title="Отдалить" aria-label="Отдалить">−</button></div>
   <button type="button" id="doorBtn" class="door-btn btn primary hidden"></button>
+  <button type="button" id="setBtn" class="help-btn set-btn" title="Настройки" aria-label="Настройки">⚙️</button>
   <button type="button" id="helpBtn" class="help-btn" title="Виды сфер (H)" aria-label="Виды сфер">?</button>
   <div id="orbHelp" class="orb-help hidden" role="dialog" aria-label="Виды сфер">
     <div class="oh-head"><b>Виды сфер</b><button type="button" id="orbHelpClose" class="close" aria-label="Закрыть">✕</button></div>
@@ -322,6 +323,17 @@
     <div class="modal-head"><h2>🏆 Достижения</h2><div class="pill" id="achCount">0 / 0</div><button class="close" aria-label="Закрыть">✕</button></div>
     <div id="achTabs" class="ach-tabs" role="tablist"></div>
     <div id="achList" class="ach-list"></div>
+  </div>
+</div>
+
+<!-- Settings -->
+<div id="settings" class="modal hidden">
+  <div class="modal-card set-card">
+    <div class="modal-head"><h2>⚙️ Настройки</h2><button class="close" aria-label="Закрыть">✕</button></div>
+    <div class="set-sec">🔔 Уведомления сверху <small>(ошибки показываются всегда)</small></div>
+    <div id="setCats" class="set-cats"></div>
+    <div class="set-sec">🎵 Звук</div>
+    <label class="set-row"><span>Музыка<small>Музыка в меню (та же кнопка 🔊 / 🔇)</small></span><input type="checkbox" id="setMusic" class="switch"></label>
   </div>
 </div>
 

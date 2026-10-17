@@ -63,6 +63,20 @@
   }
   const colorOf = (eq, t) => { const v = itemVal(eq.color) || '#3ee0ff'; return v === 'rainbow' ? rainbow(t) : paintOf(v) ? paintAt(v, t * 0.6) : v; };
 
+  // top notifications by category; each can be switched off in ⚙️ (localStorage ocs_toast_<cat> = '0'). Untagged errors always show.
+  const TOAST_CATS = [
+    { key: 'events', name: 'Эвенты', ex: '«Событие «Раннеры» началось!», «… нашёл(ла) сокровище!»' },
+    { key: 'mini', name: 'Мини-события', ex: '«Мини-событие «Золотой дождь»!», «Сундук открыт», бонусная комната' },
+    { key: 'boss', name: 'Босс', ex: '«Через 25 с появится босс», «Босс на арене!»' },
+    { key: 'ach', name: 'Достижения', ex: '«🏆 Достижение «Собиратель I»! +30 сфер, +1 оск.»' },
+    { key: 'quests', name: 'Задания', ex: '«📜 Задание выполнено: …», бонус за все задания' },
+    { key: 'rewards', name: 'Награды и покупки', ex: 'полученные предметы и осколки, промокоды, покупки, призы мини-игр' },
+    { key: 'rare', name: 'Легендарные и мифические сферы', ex: '«✨ Появилась легендарная сфера (+25)!»' },
+    { key: 'hits', name: 'Лазеры и урон', ex: '«⚡ Лазер! Потеряно 9 сфер…», удары робота и босса' },
+    { key: 'other', name: 'Прочее', ex: 'приветствие, выход из аккаунта, удаление предметов, подсказки' },
+  ];
+  const toastOn = cat => { try { return localStorage.getItem('ocs_toast_' + cat) !== '0'; } catch (_) { return true; } };
+  function toastC(cat, text, kind, html) { if (toastOn(cat)) toast(text, kind, html); }
   function toast(text, kind, html) {
     const el = document.createElement('div');
     el.className = 'toast' + (kind ? ' ' + kind : '');
@@ -169,10 +183,26 @@
       fadeT = setInterval(() => { const v = el.volume - 0.05; if (v <= 0.01) { clearInterval(fadeT); el.pause(); el.volume = VOL; } else el.volume = v; }, 60); // iOS ignores volume: it simply pauses at the end
     };
     for (const ev of ['pointerdown', 'touchend', 'keydown', 'click']) document.addEventListener(ev, tryPlay, { capture: true, passive: true }); // autoplay blocked → first interaction
-    btn.addEventListener('click', e => { e.stopPropagation(); muted = !muted; store.set(KEY, muted ? '0' : '1'); paint(); if (muted) { clearInterval(fadeT); el.pause(); } else tryPlay(); });
+    const setMuted = m => { muted = !!m; store.set(KEY, muted ? '0' : '1'); paint(); if (muted) { clearInterval(fadeT); el.pause(); } else tryPlay(); document.dispatchEvent(new Event('ocs-music')); };
+    btn.addEventListener('click', e => { e.stopPropagation(); setMuted(!muted); });
     paint();
-    return { menu() { want = true; document.body.classList.remove('in-game'); tryPlay(); }, game() { want = false; document.body.classList.add('in-game'); fadeOut(); }, el, get muted() { return muted; } };
+    return { menu() { want = true; document.body.classList.remove('in-game'); tryPlay(); }, game() { want = false; document.body.classList.add('in-game'); fadeOut(); }, el, setMuted, get muted() { return muted; } };
   })();
+  // ------------------------------------------------------------ ⚙️ settings (localStorage): top notifications, music (same switch as 🔊/🔇)
+  function buildSettings() {
+    const box = $('setCats'); box.textContent = '';
+    for (const c of TOAST_CATS) {
+      const row = document.createElement('label'); row.className = 'set-row';
+      const t = document.createElement('span'); t.textContent = c.name; const sm = document.createElement('small'); sm.textContent = c.ex; t.appendChild(sm);
+      const inp = document.createElement('input'); inp.type = 'checkbox'; inp.className = 'switch'; inp.dataset.cat = c.key; inp.checked = toastOn(c.key);
+      inp.addEventListener('change', () => store.set('ocs_toast_' + c.key, inp.checked ? '1' : '0'));
+      row.append(t, inp); box.appendChild(row);
+    }
+    $('setMusic').checked = !music.muted;
+  }
+  $('setMusic').addEventListener('change', () => music.setMuted(!$('setMusic').checked));
+  document.addEventListener('ocs-music', () => { $('setMusic').checked = !music.muted; });
+  $('setBtn').addEventListener('click', e => { e.stopPropagation(); buildSettings(); toggleModal('settings'); });
   window.OCSMusic = () => ({ paused: music.el.paused, muted: music.muted, volume: music.el.volume, src: music.el.currentSrc });
   music.menu(); // try autoplay on load
   function enterGame(res, reconnect) {
@@ -195,7 +225,7 @@
     runners.clear(); evResultHide(); setEvent(res.event || null); setObstacles(res.obstacles || []); setWeekend(res.weekend || 0);
     setMini(res.mini || null); setBoss(res.boss || null); roomUntil = 0; bossRings.length = 0; updateRoomBar();
     updateHud();
-    if (!reconnect) toast(`Добро пожаловать, ${myName}! Собирайте сферы.`, 'ok');
+    if (!reconnect) toastC('other', `Добро пожаловать, ${myName}! Собирайте сферы.`, 'ok');
   }
   function hideGameUi() {
     joined = false; evState = null; runners.clear(); obstacles = []; wkEnd = 0; updateWeekendChip(); setMini(null); setBoss(null); roomUntil = 0; updateRoomBar();
@@ -230,7 +260,7 @@
     token = null; store.del(TOKEN_KEY); paused = false; profile = null; summary = null;
     if (socket.connected) socket.emit('logout', { token: t }, () => {});
     showStart(); setAuthMode('login'); $('pass').value = '';
-    toast('Вы вышли из аккаунта');
+    toastC('other', 'Вы вышли из аккаунта');
   }
   $('logoutBtn').addEventListener('click', logout);
   $('resumeLogout').addEventListener('click', logout);
@@ -244,7 +274,7 @@
     socket.emit('pw:change', { old, new: nw }, r => {
       if (!r || !r.ok) { $('pfError').textContent = (r && r.error) || 'Ошибка'; return; }
       $('pfError').textContent = ''; if (summary) summary.mustChangePw = false; if (profile) profile.mustChangePw = false;
-      $('pfPwNote').classList.add('hidden'); toast('Пароль изменён', 'ok');
+      $('pfPwNote').classList.add('hidden'); toastC('other', 'Пароль изменён', 'ok');
     });
   });
   $('pfPlay').addEventListener('click', play);
@@ -270,7 +300,7 @@
   socket.on('chat', m => addChat(m, true));
   socket.on('pmeta', p => { const pl = players.get(p.id); if (pl) { pl.eq = p.eq; pl.name = p.name; } });
   socket.on('sping', v => socket.emit('spong', v));
-  socket.on('announce', a => toast('✨ ' + a.text));
+  socket.on('announce', a => toastC('rare', '✨ ' + a.text));
   // ------------------------------------------------------------ temporary obstacles + rotating lasers (server-run)
   let obstacles = [], zapFlash = 0, robotState = new Map(), shotsNow = [];
   // «Выходные» chip: ms left until Monday 00:00 MSK, counted down locally between server updates
@@ -299,7 +329,7 @@
   socket.on('zap', z => {
     if (!z) return; zapFlash = performance.now();
     floaters.push({ x: me.x, y: me.y - 26, text: (z.src === 'robot' ? '💥 −' : '⚡ −') + z.loss, color: '#ff4d5e', start: performance.now(), big: true });
-    toast(`${z.src === 'robot' ? '🤖 Робот попал в вас!' : z.src === 'boss' ? '👹 Удар босса!' : '⚡ Лазер!'} Потеряно ${fmt(z.loss)} сфер — часть рассыпалась рядом. ${Math.round(z.inv / 1000)} с неуязвимости.`, 'err');
+    toastC('hits', `${z.src === 'robot' ? '🤖 Робот попал в вас!' : z.src === 'boss' ? '👹 Удар босса!' : '⚡ Лазер!'} Потеряно ${fmt(z.loss)} сфер — часть рассыпалась рядом. ${Math.round(z.inv / 1000)} с неуязвимости.`, 'err');
   });
   function drawRobot(o, t, now) {
     const st = robotState.get(o.id) || { face: 0, aim: 0 }, r = o.r, a = st.face;
@@ -442,9 +472,9 @@
   socket.on('item', d => {
     if (!d) return;
     if (d.error) { toast(d.error, 'err'); return; }
-    if (d.id === G.SHARD_ID) { toast(`✦ +${d.qty} ${d.qty === 1 ? 'осколок' : d.qty < 5 ? 'осколка' : 'осколков'}`, 'ok'); return; }
+    if (d.id === G.SHARD_ID) { toastC('rewards', `✦ +${d.qty} ${d.qty === 1 ? 'осколок' : d.qty < 5 ? 'осколка' : 'осколков'}`, 'ok'); return; }
     const def = G.ITEM_BY_ID[d.id];
-    if (def) toast(`${def.icon || '🎁'} Получен предмет: ${def.name}${d.qty > 1 ? ' ×' + d.qty : ''} — он в инвентаре (I)`, 'ok');
+    if (def) toastC('rewards', `${def.icon || '🎁'} Получен предмет: ${def.name}${d.qty > 1 ? ' ×' + d.qty : ''} — он в инвентаре (I)`, 'ok');
   });
   // any fresh own-profile from the server: refresh everything that shows it
   function setProfile(p) {
@@ -482,7 +512,7 @@
     socket.emit('door:unlock', null, res => {
       if (!res || !res.ok) { toast((res && res.error) || 'Ошибка', 'err'); return; }
       setProfile(res.profile); updateDoorBtn();
-      toast('🚪 Дверь открыта! В синей зоне редкие сферы попадаются чаще.', 'ok');
+      toastC('rewards', '🚪 Дверь открыта! В синей зоне редкие сферы попадаются чаще.', 'ok');
     });
   });
   function drawZones(t) {
@@ -1639,23 +1669,23 @@
     clearTimeout(evResultTimer); evResultTimer = setTimeout(evResultHide, 12000);
   }
   socket.on('ev:announce', d => { if (!joined || !d) return; evResultHide(); setEvent(d); });
-  socket.on('ev:start', d => { if (!joined || !d) return; setEvent(d); const def = G.EVENTS[d.kind]; if (def) toast(`${def.icon} Событие «${def.name}» началось!`, 'ok'); });
+  socket.on('ev:start', d => { if (!joined || !d) return; setEvent(d); const def = G.EVENTS[d.kind]; if (def) toastC('events', `${def.icon} Событие «${def.name}» началось!`, 'ok'); });
   socket.on('ev:koth', d => { kothInfo = d; });
   socket.on('ev:treasure', d => {
     if (!evState || !d) return;
     evState.remaining = d.left;
-    toast(`💰 ${d.name} нашёл(ла) сокровище!${d.left ? ' Осталось: ' + d.left : ''}`);
+    toastC('events', `💰 ${d.name} нашёл(ла) сокровище!${d.left ? ' Осталось: ' + d.left : ''}`);
     updateEventUi();
   });
   socket.on('ev:runner', d => {
     if (!evState || !d) return;
-    toast(`💨 ${d.name} поймал(а) Раннера!${d.left ? ' Осталось: ' + d.left : ''}`);
+    toastC('events', `💨 ${d.name} поймал(а) Раннера!${d.left ? ' Осталось: ' + d.left : ''}`);
   });
   socket.on('ev:end', d => {
     if (!d) return;
     evState = null; kothInfo = null; runners.clear(); updateEventUi();
     if (!joined) return;
-    if (d.cancelled) { toast('Событие отменено'); return; }
+    if (d.cancelled) { toastC('events', 'Событие отменено'); return; }
     showEventResult(d);
     if (mobileUI()) { const b = Math.max($('hud').querySelector('.stats').getBoundingClientRect().bottom, $('hud').querySelector('.top').getBoundingClientRect().bottom); $('hud').style.setProperty('--ev-top', Math.round(b + 8) + 'px'); }
   });
@@ -1720,16 +1750,16 @@
     miniState = Object.assign({}, d, { endAt: now + (d.left || 0), at: now });
     updateMiniChip();
   }
-  socket.on('mini:start', d => { if (!joined || !d) return; setMini(d); const def = C.MINI[d.kind]; if (def) toast(`${def.icon} Мини-событие «${def.name}»! Отмечено на радаре.`, 'ok'); });
+  socket.on('mini:start', d => { if (!joined || !d) return; setMini(d); const def = C.MINI[d.kind]; if (def) toastC('mini', `${def.icon} Мини-событие «${def.name}»! Отмечено на радаре.`, 'ok'); });
   socket.on('mini', d => { if (!joined) return; setMini(d); });
   socket.on('mini:end', d => {
     if (!joined) return; const k = miniState && miniState.kind; setMini(null);
-    if (d && d.reason === 'opened' && k === 'chest') toast(`🧰 Сундук открыт: ${(d.names || []).map(String).join(', ')}`);
+    if (d && d.reason === 'opened' && k === 'chest') toastC('mini', `🧰 Сундук открыт: ${(d.names || []).map(String).join(', ')}`);
   });
-  socket.on('mini:reward', d => { if (d && d.reward) toast(`🧰 Награда из сундука: ${C.rewardText(d.reward)}`, 'ok'); });
+  socket.on('mini:reward', d => { if (d && d.reward) toastC('mini', `🧰 Награда из сундука: ${C.rewardText(d.reward)}`, 'ok'); });
   socket.on('room', d => {
     roomUntil = d && d.left > 0 ? performance.now() + d.left : 0;
-    toast(roomUntil ? '🌀 Бонусная комната! Собирайте сферы — через 30 с вернётесь обратно.' : '🌀 Вы вернулись на арену.', 'ok');
+    toastC('mini', roomUntil ? '🌀 Бонусная комната! Собирайте сферы — через 30 с вернётесь обратно.' : '🌀 Вы вернулись на арену.', 'ok');
     updateRoomBar();
   });
   function updateRoomBar() {
@@ -1764,7 +1794,7 @@
   }
   function bossPos(now) { const b = bossState, k = Math.min(1, (now - b.at) / G.TICK_MS); return { x: b.px + (b.x - b.px) * k, y: b.py + (b.y - b.py) * k }; }
   function bossSolid() { if (!bossState || bossState.phase !== 'active') return []; const p = bossPos(performance.now()); return [{ k: 'circle', x: p.x, y: p.y, r: bossState.r }]; }
-  socket.on('boss', d => { if (!joined) return; const was = bossState; setBoss(d); if (d && d.phase === 'announce' && !was) toast(`👹 Через ${Math.ceil((d.in || 0) / 1000)} с появится босс «${C.BOSS.name}»! Он отмечен на радаре.`, 'ok'); if (d && d.phase === 'active') toast('👹 Босс на арене! Толкайте его, чтобы нанести урон.', 'ok'); });
+  socket.on('boss', d => { if (!joined) return; const was = bossState; setBoss(d); if (d && d.phase === 'announce' && !was) toastC('boss', `👹 Через ${Math.ceil((d.in || 0) / 1000)} с появится босс «${C.BOSS.name}»! Он отмечен на радаре.`, 'ok'); if (d && d.phase === 'active') toastC('boss', '👹 Босс на арене! Толкайте его, чтобы нанести урон.', 'ok'); });
   socket.on('boss:ring', d => { if (!joined || !d) return; bossRings.push(Object.assign({}, d, { at: performance.now() + d.warn })); });
   socket.on('boss:hit', d => { if (!joined || !d) return; floaters.push({ x: dispMe.x, y: dispMe.y - 40, text: `−${d.dmg} HP`, color: '#ff7a8a', start: performance.now(), big: true }); });
   socket.on('boss:end', d => {
@@ -1883,8 +1913,8 @@
   const achProfile = p => ({ total: p.total, stats: p.stats || {}, codesUsed: p.codesUsed || 0, items: C.itemsOwned(p.inventory), liveMs: 0 });
   socket.on('ach', d => {
     if (!d) return;
-    if (d.ids) { toast(`🏆 Достижения: ${d.ids.length ? d.ids.length + ' ступеней получено' : 'пересчитаны'} · ${C.rewardText(d.reward)}`, 'ok'); return; }
-    const a = C.ACH_BY_ID[d.id]; if (a) toast(`🏆 Достижение «${a.name}»! ${C.rewardText(d.reward)}`, 'ok');
+    if (d.ids) { toastC('ach', `🏆 Достижения: ${d.ids.length ? d.ids.length + ' ступеней получено' : 'пересчитаны'} · ${C.rewardText(d.reward)}`, 'ok'); return; }
+    const a = C.ACH_BY_ID[d.id]; if (a) toastC('ach', `🏆 Достижение «${a.name}»! ${C.rewardText(d.reward)}`, 'ok');
   });
   let achCat = C.ACH_CATS[0].key;
   function chainState(ch, p, got) { // tiers done (prefix of paid tiers), the next tier and progress to it
@@ -1925,8 +1955,8 @@
   // ---- daily quests + boosts
   socket.on('quest', d => {
     if (!d) return;
-    if (d.all) { toast(`📜 Все задания дня выполнены! Серия: ${d.streak} 🔥 · ${C.rewardText(d.reward)}`, 'ok'); return; }
-    const q = C.QUEST_BY_ID[d.id]; if (q) toast(`📜 Задание выполнено: «${q.text}» · ${C.rewardText(d.reward)}`, 'ok');
+    if (d.all) { toastC('quests', `📜 Все задания дня выполнены! Серия: ${d.streak} 🔥 · ${C.rewardText(d.reward)}`, 'ok'); return; }
+    const q = C.QUEST_BY_ID[d.id]; if (q) toastC('quests', `📜 Задание выполнено: «${q.text}» · ${C.rewardText(d.reward)}`, 'ok');
   });
   const streakNow = st => (st && st.streakDay != null && st.streakDay >= C.dayKey() - 1 ? st.streak || 0 : 0);
   function updateQuestTracker() {
@@ -2354,14 +2384,14 @@
         if (r.orbs) parts.push('+' + orbsH(r.orbs));
         if (r.shards) parts.push('+' + shardsH(r.shards));
         for (const it of r.items) { const d = G.ITEM_BY_ID[it.id]; parts.push(esc(d ? d.name : it.id) + (it.qty > 1 ? ' ×' + it.qty : '')); }
-        toast('', 'ok', 'Код активирован! ' + (parts.join(', ') || 'Готово'));
+        toastC('rewards', '', 'ok', 'Код активирован! ' + (parts.join(', ') || 'Готово'));
       });
     };
   }
   function afterAction(res, okMsg) {
     if (!res || !res.ok) { toast((res && res.error) || 'Ошибка', 'err'); return; }
     setProfile(res.profile);
-    if (okMsg) toast(okMsg, 'ok');
+    if (okMsg) toastC('rewards', okMsg, 'ok');
   }
 
   // ------------------------------------------------------------ inventory (100 slots; stackable items up to 99 per slot)
@@ -2471,7 +2501,7 @@
     const i = parseInt(e.dataTransfer.getData('text/plain'), 10);
     if (Number.isInteger(i)) openTrash(i);
   });
-  trashZone.addEventListener('click', () => toast('Нажмите 🗑 на предмете или перетащите его сюда'));
+  trashZone.addEventListener('click', () => toastC('other', 'Нажмите 🗑 на предмете или перетащите его сюда'));
   function trashQty() { const v = parseInt($('trashQty').value, 10); return Number.isFinite(v) ? v : 0; }
   function setTrashQty(v) {
     const max = trashSlot ? trashSlot.q : 1;
@@ -2514,7 +2544,7 @@
       if (!res || !res.ok) { $('trashErr').textContent = (res && res.error) || 'Не удалось удалить'; return; }
       closeTrash();
       setProfile(res.profile);
-      toast(`🗑 Удалено: ${def.name}${def.stackable ? ' ×' + qty : ''}${res.unequipped ? ' (снято)' : ''}`);
+      toastC('other', `🗑 Удалено: ${def.name}${def.stackable ? ' ×' + qty : ''}${res.unequipped ? ' (снято)' : ''}`);
     });
   };
 
@@ -2738,7 +2768,7 @@
     $('reactionArea').classList.add('hidden'); $('rushArea').classList.add('hidden');
     $('mgAgain').onclick = () => startGame(r.kind);
     $('mgBack').onclick = () => { box.classList.add('hidden'); showGamesList(); updateGameButtons(); };
-    if ($('games').classList.contains('hidden')) toast(`${name}: ${r.prize > 0 ? '+' + r.prize + ' сфер' : 'без выигрыша'}`, r.prize > 0 ? 'ok' : 'err');
+    if ($('games').classList.contains('hidden')) toastC('rewards', `${name}: ${r.prize > 0 ? '+' + r.prize + ' сфер' : 'без выигрыша'}`, r.prize > 0 ? 'ok' : 'err');
     if (r.prize > 0) floaters.push({ x: dispMe.x, y: dispMe.y - 40, text: '+' + r.prize, color: '#ffcc33', start: performance.now(), big: true });
     updateGameButtons();
   }

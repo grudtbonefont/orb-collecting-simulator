@@ -178,7 +178,7 @@
     X('h_shard_crown', 'hat', 'Осколочная корона', 540, 'legendary', 'shardcrown'),
   ];
   const SHARD_ID = 'x_legend_shard';
-  const SHARD_EXCHANGE = { orbs: 40, maxPerTrade: 99 }; // «Лавка осколков»: 1 shard → 40 orbs (balance only, not the all-time total)
+  const SHARD_EXCHANGE = { orbs: 25, maxPerTrade: 99 }; // «Лавка осколков»: 1 shard → 25 orbs (was 40) (balance only, not the all-time total)
   const ITEM_BY_ID = {};
   for (const it of ITEMS) ITEM_BY_ID[it.id] = it;
   const INV_CAP = 450;       // inventory capacity in UNITS (a stack of 10 uses 10); stacks only group items (≤ maxStack each)

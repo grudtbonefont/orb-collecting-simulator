@@ -130,7 +130,7 @@ Exclusive cosmetics that **cannot be bought with orbs**, only with «Леген�
 | Призма | цвет | 200 |
 | Осколочная корона | шапка | 300 |
 
-All 8 together: 1 020 shards. Exchange: **1 shard → 40 orbs** (balance only, not the all-time total; up to 99 per trade). Shard income (estimate): legendary orbs ≈ up to 30/h if you catch every one, mythic orbs ≈ 7/h server-wide, events ≈ 2–4/h → a typical active player gets ≈ 15–35 shards/h, so the top item takes ≈ 8–20 h of play. Socket: `shard:buy(itemId)`, `shard:exchange(qty)` (rate limited 8 / 5 s).
+All 8 together: 1 020 shards. Exchange: **1 shard → 25 orbs** (balance only, not the all-time total; up to 99 per trade). Shard income (estimate): legendary orbs ≈ up to 30/h if you catch every one, mythic orbs ≈ 7/h server-wide, events ≈ 2–4/h → a typical active player gets ≈ 15–35 shards/h, so the top item takes ≈ 8–20 h of play. Socket: `shard:buy(itemId)`, `shard:exchange(qty)` (rate limited 8 / 5 s).
 
 ## Content: mini-events, boss, achievements, daily quests (`public/content.js`, `lib/features.js`)
 - **Shards are a currency** (`stats.shards`, shown in the HUD). One-time migration `stats.shardMigrationV1` moves old shard inventory items into the balance; `INV.grantItem/removeItem/countItem(SHARD_ID)` route to the balance.
