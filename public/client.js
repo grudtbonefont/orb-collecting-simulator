@@ -42,7 +42,8 @@
   const pointer = { down: false, x: 0, y: 0 };
 
   const itemVal = id => (G.ITEM_BY_ID[id] || {}).value;
-  const mySpeed = () => G.speedFor(profile ? profile.upgrades.speed : 0) * C.boostMult(profile && profile.stats, 'speed', Date.now() + srvSkew); // quest boost «Скорость +10 %»
+  let selfFx = { spd: 1, frozen: false, god: false }; // admin effects on this player (server-authoritative; mirrored for prediction)
+  const mySpeed = () => G.speedFor(profile ? profile.upgrades.speed : 0) * C.boostMult(profile && profile.stats, 'speed', Date.now() + srvSkew) * (selfFx.frozen ? 0 : selfFx.spd || 1); // quest boost «Скорость +10 %»
   let srvSkew = 0;
   const myPickup = () => G.pickupFor(profile ? profile.upgrades.magnet : 0);
   const fmt = n => Number(n).toLocaleString('ru-RU');
@@ -73,6 +74,7 @@
     { key: 'rewards', name: 'Награды и покупки', ex: 'полученные предметы и осколки, промокоды, покупки, призы мини-игр' },
     { key: 'rare', name: 'Легендарные и мифические сферы', ex: '«✨ Появилась легендарная сфера (+25)!»' },
     { key: 'hits', name: 'Лазеры и урон', ex: '«⚡ Лазер! Потеряно 9 сфер…», удары робота и босса' },
+    { key: 'disco', name: 'Диско-ивент', ex: '«🪩 Диско-ивент! Сферы ×1,5…», конец диско, бонус ×2 от администратора' },
     { key: 'other', name: 'Прочее', ex: 'приветствие, выход из аккаунта, удаление предметов, подсказки' },
   ];
   const toastOn = cat => { try { return localStorage.getItem('ocs_toast_' + cat) !== '0'; } catch (_) { return true; } };
@@ -177,26 +179,29 @@
     // single audio element: in-game background playlist only (no menu music)
     const btn = $('musicBtn'), KEY = 'ocs_music', TR = ['/audio/bg1.m4a', '/audio/bg2.m4a', '/audio/bg3.m4a'], VOL = 0.3;
     const a = new Audio(); a.preload = 'none'; a.setAttribute('playsinline', ''); a.volume = VOL;
-    let muted = store.get(KEY) === '0', on = false, loaded = false, pending = false, idx = Math.floor(Math.random() * TR.length);
-    const load = i => { idx = (i + TR.length) % TR.length; a.src = TR[idx]; loaded = true; };
+    let muted = store.get(KEY) === '0', on = false, loaded = false, pending = false, disco = false, idx = Math.floor(Math.random() * TR.length);
+    const DISCO_SRC = '/audio/disco.m4a';
+    const load = i => { idx = (i + TR.length) % TR.length; a.src = TR[idx]; a.loop = false; loaded = true; };
+    const loadDisco = () => { a.src = DISCO_SRC; a.loop = true; loaded = true; };
     const play = () => {
       if (muted || !on || pending || !a.paused) return; // guard: never start twice
-      if (!loaded) load(idx);
+      if (!loaded) { if (disco) loadDisco(); else load(idx); }
       for (const x of document.querySelectorAll('audio')) if (x !== a) x.pause();
       a.volume = VOL; pending = true;
       const p = a.play(); const done = () => { pending = false; if (muted || !on) a.pause(); };
       if (p && p.then) p.then(done, done); else done();
     };
-    a.addEventListener('ended', () => { load(idx + 1); play(); });
-    a.addEventListener('error', () => { if (on && loaded) { load(idx + 1); setTimeout(play, 500); } });
+    a.addEventListener('ended', () => { if (disco) return; load(idx + 1); play(); });
+    a.addEventListener('error', () => { if (on && loaded && !disco) { load(idx + 1); setTimeout(play, 500); } });
     const kick = () => play();
     for (const ev of ['pointerdown', 'touchend', 'keydown', 'click']) document.addEventListener(ev, kick, { capture: true, passive: true }); // autoplay blocked → first interaction
     const paint = () => { btn.textContent = muted ? '🔇' : '🔊'; btn.setAttribute('aria-pressed', muted ? 'true' : 'false'); };
     const setMuted = m => { muted = !!m; store.set(KEY, muted ? '0' : '1'); paint(); if (muted) a.pause(); else play(); document.dispatchEvent(new Event('ocs-music')); };
     btn.addEventListener('click', e => { e.stopPropagation(); setMuted(!muted); });
     paint();
-    const bg = { el: a, get idx() { return idx; }, next() { a.pause(); load(idx + 1); play(); } };
-    return { menu() { on = false; document.body.classList.remove('in-game'); a.pause(); }, game() { on = true; document.body.classList.add('in-game'); play(); }, el: a, bg, setMuted, get muted() { return muted; } };
+    const setDisco = v => { v = !!v; if (v === disco) return; disco = v; a.pause(); pending = false; if (disco) loadDisco(); else load(idx); play(); }; // one element: disco track replaces the playlist, the playlist resumes after
+    const bg = { el: a, get idx() { return idx; }, get disco() { return disco; }, next() { if (disco) return; a.pause(); load(idx + 1); play(); } };
+    return { menu() { on = false; document.body.classList.remove('in-game'); a.pause(); }, game() { on = true; document.body.classList.add('in-game'); play(); }, el: a, bg, setMuted, setDisco, get muted() { return muted; } };
   })();
   // ------------------------------------------------------------ ⚙️ settings (localStorage): top notifications, music (same switch as 🔊/🔇)
   function buildSettings() {
@@ -213,7 +218,7 @@
   $('setMusic').addEventListener('change', () => music.setMuted(!$('setMusic').checked));
   document.addEventListener('ocs-music', () => { $('setMusic').checked = !music.muted; });
   $('setBtn').addEventListener('click', e => { e.stopPropagation(); buildSettings(); toggleModal('settings'); });
-  window.OCSMusic = () => ({ bgPaused: music.el.paused, bgSrc: music.el.currentSrc || music.el.src, bgIdx: music.bg.idx, bgPreload: music.el.preload, bgNext: () => music.bg.next(), muted: music.muted, playing: [...document.querySelectorAll("audio")].concat([music.el]).filter((x, i, s) => s.indexOf(x) === i && !x.paused).length });
+  window.OCSMusic = () => ({ bgPaused: music.el.paused, bgSrc: music.el.currentSrc || music.el.src, bgIdx: music.bg.idx, bgPreload: music.el.preload, bgNext: () => music.bg.next(), disco: music.bg.disco, muted: music.muted, playing: [...document.querySelectorAll("audio")].concat([music.el]).filter((x, i, s) => s.indexOf(x) === i && !x.paused).length });
   window.OCSMusicCtl = { menu: () => music.menu(), game: () => music.game() };
   music.menu(); // try autoplay on load
   function enterGame(res, reconnect) {
@@ -234,6 +239,7 @@
     $('hudName').textContent = '👤 ' + myName;
     resetChat(res.chat || []);
     runners.clear(); evResultHide(); setEvent(res.event || null); setObstacles(res.obstacles || []); setWeekend(res.weekend || 0);
+    setFx(res.fx || null, true); $('admBtn').classList.toggle('hidden', !res.admin); isAdminMe = !!res.admin; selfFx = { spd: 1, frozen: false, god: false };
     setMini(res.mini || null); setBoss(res.boss || null); roomUntil = 0; bossRings.length = 0; updateRoomBar();
     updateHud();
     if (!reconnect) toastC('other', `Добро пожаловать, ${myName}! Собирайте сферы.`, 'ok');
@@ -1640,6 +1646,7 @@
     $('evChipPhase').textContent = ann ? `Начнётся через ${sec} с` : `Идёт · осталось ${mmss}`;
     if (ann) $('evChipInfo').textContent = '';
   }
+  for (const id of ['discoChip', 'x2Chip']) { $(id + 'Btn').addEventListener('click', ev => { ev.stopPropagation(); $(id).classList.toggle('open'); }); document.addEventListener('pointerdown', ev => { if (!$(id).contains(ev.target)) $(id).classList.remove('open'); }); }
   for (const id of ['evChip', 'wkChip']) {
     $(id + 'Btn').addEventListener('click', ev => { ev.stopPropagation(); for (const o of ['evChip', 'wkChip']) if (o !== id) $(o).classList.remove('open'); $(id).classList.toggle('open'); });
     $(id).addEventListener('pointerdown', ev => ev.stopPropagation());
@@ -3022,6 +3029,7 @@
     if (now - lastSend < 300) return;
     lastSend = now;
     socket.emit('chat', text, res => {
+      if (res && res.cmd) { addChat({ notice: !res.ok, sys: false, t: (res.ok ? '✔ ' + (res.msg || 'OK') : '✖ ' + (res.error || 'Ошибка')) }); return; } // admin command: local echo only
       if (!res || !res.ok) {
         addChat({ notice: true, t: (res && res.error) || 'Сообщение не отправлено' });
         if (!chatInput.value) chatInput.value = text; // let the player retry
@@ -3030,4 +3038,86 @@
     chatInput.value = '';
     if (!mobileUI()) chatInput.blur();
   });
+
+  // ------------------------------------------------------------ admin effects (disco, x2), announcements, admin panel
+  let isAdminMe = false, discoEnd = 0, x2End = 0, discoWas = false;
+  function setFx(f, silent) {
+    f = f || {}; const now = performance.now();
+    const wasDisco = discoEnd > now;
+    discoEnd = f.disco > 0 ? now + f.disco : 0; x2End = f.x2 > 0 ? now + f.x2 : 0;
+    if (!silent && !wasDisco && discoEnd) toastC('disco', '🪩 Диско-ивент! Сферы ×1,5 и удача ×1,5', 'ok');
+    updateFx();
+  }
+  function fmtLeft(ms) { const s = Math.ceil(ms / 1000), m = Math.floor(s / 60); return m ? `${m}:${String(s % 60).padStart(2, '0')}` : `${s} с`; }
+  function updateFx() {
+    const now = performance.now(), dl = discoEnd - now, xl = x2End - now, d = joined && dl > 0;
+    $('discoChip').classList.toggle('hidden', !d); $('x2Chip').classList.toggle('hidden', !(joined && xl > 0));
+    if (d) { $('discoChipTime').textContent = fmtLeft(dl); $('discoChipPhase').textContent = 'Осталось ' + fmtLeft(dl); }
+    if (joined && xl > 0) { $('x2ChipTime').textContent = fmtLeft(xl); $('x2ChipPhase').textContent = 'Осталось ' + fmtLeft(xl); }
+    $('discoFx').classList.toggle('hidden', !d);
+    if (d !== discoWas) { discoWas = d; music.setDisco(d); if (!d && joined && discoEnd) toastC('disco', '🪩 Диско закончилось', ''); }
+    const go = $('admDiscoGo'); if (go) go.textContent = dl > 0 ? '⏹ Выключить диско' : '🪩 Включить диско';
+  }
+  setInterval(updateFx, 500);
+  socket.on('fx', f => setFx(f));
+  socket.on('adm:self', s => { if (s) selfFx = { spd: Number(s.spd) || 1, frozen: !!s.frozen, god: !!s.god }; });
+  socket.on('chat:clear', () => { chatLog.textContent = ''; });
+  let annT = null;
+  socket.on('adm:announce', a => {
+    if (!a || !a.t) return;
+    $('annText').textContent = String(a.t); $('annOverlay').classList.remove('hidden');
+    clearTimeout(annT); annT = setTimeout(() => $('annOverlay').classList.add('hidden'), 6000);
+  });
+  $('annOverlay').addEventListener('click', () => $('annOverlay').classList.add('hidden'));
+
+  const adm = (d, cb) => socket.emit('adm', d, r => { r = r || { ok: false, error: 'Нет ответа' }; const m = $('admMsg'); m.textContent = r.ok ? '✔ ' + (r.msg || 'Готово') : '✖ ' + (r.error || 'Ошибка'); m.classList.toggle('err', !r.ok); if (r.players) admPlayers(r.players); if (r.bans) admBans(r.bans); if (cb) cb(r); });
+  const opt = (sel, list) => { sel.textContent = ''; for (const [v, t] of list) { const o = document.createElement('option'); o.value = v; o.textContent = t; sel.appendChild(o); } };
+  const mkBtn = (txt, fn, cls) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'btn' + (cls ? ' ' + cls : ''); b.textContent = txt; b.addEventListener('click', fn); return b; };
+  function admPlayers(list) {
+    const box = $('admPlayers'); box.textContent = '';
+    for (const p of list) {
+      const row = document.createElement('div'); row.className = 'adm-pl';
+      const n = document.createElement('b'); n.textContent = p.name + (p.admin ? ' 🛡️' : '') + (p.muted ? ' 🔇' : '') + (p.frozen ? ' ❄️' : ''); row.appendChild(n);
+      if (!p.admin) {
+        row.append(mkBtn('📍', () => adm({ a: 'cmd', text: '/tp ' + p.name })), mkBtn(p.frozen ? '🔥' : '❄️', () => adm({ a: 'cmd', text: (p.frozen ? '/unfreeze ' : '/freeze ') + p.name }, () => adm({ a: 'players' }))),
+          mkBtn(p.muted ? '🔊' : '🔇', () => adm({ a: 'cmd', text: p.muted ? '/unmute ' + p.name : '/mute ' + p.name + ' 10' }, () => adm({ a: 'players' }))),
+          mkBtn('Кик', () => adm({ a: 'kick', name: p.name })), mkBtn('Бан', () => { if (confirm('Забанить ' + p.name + '?')) adm({ a: 'ban', name: p.name }); }, 'danger'));
+      }
+      box.appendChild(row);
+    }
+    opt($('admGivePl'), list.map(p => [p.name, p.name]));
+  }
+  function admBans(list) {
+    const box = $('admBans'); box.textContent = '';
+    if (!list.length) { box.textContent = 'Нет'; return; }
+    for (const b of list) { const row = document.createElement('div'); row.className = 'adm-pl'; const n = document.createElement('b'); n.textContent = b.name; row.append(n, mkBtn('Разбанить', () => adm({ a: 'unban', name: b.name }))); box.appendChild(row); }
+  }
+  function openAdmin() {
+    if (!isAdminMe) return;
+    openModal('admin');
+    adm({ a: 'init' }, r => {
+      if (!r.ok) return;
+      const ev = $('admEvents'); ev.textContent = ''; for (const e of r.events) ev.appendChild(mkBtn(e.name, () => adm({ a: 'event', kind: e.k })));
+      const mi = $('admMinis'); mi.textContent = ''; for (const e of r.minis) mi.appendChild(mkBtn(e.icon + ' ' + e.name, () => adm({ a: 'mini', kind: e.k })));
+      opt($('admRarity'), r.rarities.map(x => [x.k, x.name])); opt($('admGiveItem'), r.items.map(x => [x.id, x.name]));
+      $('admMsg').textContent = '';
+    });
+  }
+  $('admBtn').addEventListener('click', e => { e.stopPropagation(); openAdmin(); });
+  for (const t of document.querySelectorAll('.adm-tab')) t.addEventListener('click', () => {
+    for (const x of document.querySelectorAll('.adm-tab')) x.classList.toggle('active', x === t);
+    for (const s of document.querySelectorAll('.adm-sec')) s.classList.toggle('hidden', s.dataset.sec !== t.dataset.sec);
+    if (t.dataset.sec === 'pl') { adm({ a: 'players' }); adm({ a: 'bans' }); }
+  });
+  $('admin').addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter' && e.target.id === 'admCmd') $('admCmdGo').click(); });
+  $('admBoss').addEventListener('click', () => adm({ a: 'boss' }));
+  $('admOrbGo').addEventListener('click', () => adm({ a: 'orbs', t: $('admRarity').value, n: Number($('admOrbN').value), where: $('admOrbWhere').value }));
+  $('admObsGo').addEventListener('click', () => adm({ a: 'obstacle', kind: $('admObsKind').value, where: $('admObsWhere').value }));
+  $('admPlRefresh').addEventListener('click', () => { adm({ a: 'players' }); adm({ a: 'bans' }); });
+  $('admGiveWhat').addEventListener('change', () => $('admGiveItem').classList.toggle('hidden', $('admGiveWhat').value !== 'item'));
+  $('admGiveGo').addEventListener('click', () => adm({ a: 'give', name: $('admGivePl').value, what: $('admGiveWhat').value, item: $('admGiveItem').value, qty: Number($('admGiveQty').value) }));
+  $('admBanGo').addEventListener('click', () => { const n = $('admBanName').value.trim(); if (n && confirm('Забанить ' + n + '?')) adm({ a: 'ban', name: n }); });
+  $('admCmdGo').addEventListener('click', () => { const t = $('admCmd').value.trim(); if (t) adm({ a: 'cmd', text: t }, r => { if (r.ok) $('admCmd').value = ''; }); });
+  $('admDiscoGo').addEventListener('click', () => adm({ a: 'disco', min: Number($('admDiscoMin').value) }));
+  window.OCSFx = () => ({ disco: discoEnd > performance.now(), x2: x2End > performance.now(), overlay: !$('discoFx').classList.contains('hidden'), admin: isAdminMe, btn: !$('admBtn').classList.contains('hidden'), selfFx });
 })();

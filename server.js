@@ -126,7 +126,7 @@ const targetZone = z => (z === 1 ? targetOrbs() : Math.round(targetOrbs() * SPAW
 const zoneCount = { 1: 0, 2: 0 }; // normal (pool) orbs alive per zone
 // one normal pool spawn: weighted tier roll; a mythic only while none is alive and someone is playing (else epic)
 function rollPool(z = 1) {
-  const w = z === 2 ? G.ZONE2_WEIGHTS : G.POOL_WEIGHTS, t = G.rollOrbType(luckyOn() ? G.luckyWeights(w) : w); // «Волна удачи»: rare+ ×2
+  const w = z === 2 ? G.ZONE2_WEIGHTS : G.POOL_WEIGHTS, t = G.rollOrbType(discoOn() ? G.luckyWeights(luckyOn() ? G.luckyWeights(w) : w, DISCO.rareMult) : luckyOn() ? G.luckyWeights(w) : w); // «Волна удачи»: rare+ ×2
   if (t === 'l') return players.size === 0 || (ev && ev.kind !== 'lucky') ? 'e' : 'l'; // chance only; not while nobody can catch it (75 s life, announced); never during an arena event (except «Волна удачи»)
   return t; // mythic: by chance only, no cap / timer
 }
@@ -217,6 +217,29 @@ function weekendState(now = Date.now()) {
   return G.weekendInfo(now);
 }
 const weekendOn = now => weekendState(now).on;
+// ---------------------------------------------------------------- admin (exactly one account, checked server-side by the logged-in account name as stored)
+const ADMIN_NAME = 'DragonzTV';
+const isAdmin = acc => !!acc && acc.name === ADMIN_NAME;
+const adminLog = (acc, action, detail) => console.log(`[admin] ${acc ? acc.name : '?'}: ${action}${detail ? ' ' + JSON.stringify(detail).slice(0, 300) : ''}`); // no IPs / tokens
+const DISCO = { orbMult: 1.5, luckMult: 1.5, rareMult: 1.5, defMin: 3, maxMin: 30 };
+let discoUntil = 0, x2Until = 0, discoTimer = null, x2Timer = null;
+const discoOn = (now = Date.now()) => discoUntil > now;
+const x2On = (now = Date.now()) => x2Until > now;
+function fxState(now = Date.now()) { return { disco: Math.max(0, discoUntil - now), x2: Math.max(0, x2Until - now) }; }
+function pushFx() { if (io) io.to('arena').emit('fx', fxState()); }
+function setDisco(min) { // min > 0: start / restart; 0: end now
+  clearTimeout(discoTimer);
+  const was = discoOn();
+  if (min > 0) { discoUntil = Date.now() + min * 60000; discoTimer = setTimeout(() => { discoUntil = 0; pushFx(); systemChat('🪩 Диско-ивент закончился'); }, min * 60000); systemChat(`🪩 Диско-ивент! Сферы ×1,5 и удача ×1,5 на ${min} мин`); }
+  else { discoUntil = 0; if (was) systemChat('🪩 Диско-ивент закончился'); }
+  pushFx();
+}
+function setX2(min) {
+  clearTimeout(x2Timer);
+  if (min > 0) { x2Until = Date.now() + min * 60000; x2Timer = setTimeout(() => { x2Until = 0; pushFx(); }, min * 60000); systemChat(`✖️2 Сферы ×2 на ${min} мин`); }
+  else x2Until = 0;
+  pushFx();
+}
 
 // ---------------------------------------------------------------- temporary obstacles + rotating lasers (numbers in G.OBSTACLES)
 // OBSTACLES=0 turns them off (the test suite does, except the obstacle tests).
@@ -975,6 +998,7 @@ io.on('connection', socket => {
       event: publicEvent(),
       obstacles: publicObstacles(),
       weekend: weekendState().left,
+      fx: fxState(), admin: isAdmin(acc),
       ...FX.joinState(),
     };
   }
@@ -1040,6 +1064,7 @@ io.on('connection', socket => {
           return ack({ ok: false, error: 'Неверный ник или пароль.' + (remaining <= 2 ? ` Осталось попыток: ${remaining}.` : ''), code: 'wrong' });
         }
         nameFails.delete(key); sockFails.delete('s');
+        { const live = profiles.get(key) || found; if (live.stats && live.stats.ban) return ack({ ok: false, error: 'Аккаунт заблокирован администратором.', code: 'banned' }); }
         if (profiles.has(key)) acc = profiles.get(key);
         else { profiles.set(key, found); acc = found; }
       }
@@ -1069,6 +1094,7 @@ io.on('connection', socket => {
     if (sess.expiresAt <= now) { await store.deleteSession(h); return expired; }
     const acc = await loadAccount(sess.key);
     if (!acc) { await store.deleteSession(h); return expired; }
+    if (acc.stats && acc.stats.ban) return { error: { ok: false, expired: true, error: 'Аккаунт заблокирован администратором.', code: 'banned' } };
     await store.touchSession(h, now + SESSION_TTL_MS); // sliding expiry
     return { acc, h };
   }
@@ -1101,6 +1127,7 @@ io.on('connection', socket => {
     ack = safeAck(ack);
     if (!acct) return ack({ ok: false, expired: true, error: 'Сначала войдите в аккаунт' });
     if (pl) return ack({ ok: false, error: 'Вы уже в игре' });
+    if (acct.acc.stats.ban) return ack({ ok: false, expired: true, error: 'Аккаунт заблокирован администратором.', code: 'banned' });
     ack(Object.assign({ ok: true }, enterGame(acct.acc, acct.sessionHash)));
   });
 
@@ -1130,6 +1157,11 @@ io.on('connection', socket => {
     ack = safeAck(ack);
     if (!pl) return ack({ ok: false, error: 'Войдите в игру, чтобы писать в чат' });
     const now = Date.now();
+    if (typeof text === 'string' && text.trim().startsWith('/')) { // commands: admin only, never broadcast
+      if (!isAdmin(pl.acc)) { adminLog(pl.acc, 'denied command'); return ack({ ok: false, error: 'Команды доступны только администратору.' }); }
+      return runCommand(text.trim()).then(r => ack(Object.assign({ cmd: true }, r)), () => ack({ ok: false, error: 'Ошибка команды' }));
+    }
+    if (pl.acc.stats.muteUntil > now) return ack({ ok: false, error: `Вы не можете писать в чат ещё ${Math.ceil((pl.acc.stats.muteUntil - now) / 60000)} мин.` });
     const clean = R.sanitizeChat(text);
     if (clean.error) return ack({ ok: false, error: clean.error });
     pl.chatTimes = pl.chatTimes.filter(t => now - t < CHAT_WINDOW_MS);
@@ -1327,6 +1359,102 @@ io.on('connection', socket => {
     ack({ ok: true, profile: ownProfile(a) });
   });
 
+  // ---------------------------------------------------------------- admin panel + chat commands (DragonzTV only; checked on every call)
+  const findOnline = name => (typeof name === 'string' && name.trim() ? byKey.get(name.trim().toLowerCase()) : null);
+  const adminList = () => Array.from(players.values(), q => ({ name: q.acc.name, balance: q.acc.balance, muted: q.acc.stats.muteUntil > Date.now(), frozen: !!q.frozen, admin: isAdmin(q.acc) }));
+  async function bannedList() {
+    const m = new Map();
+    for (const b of await store.listBanned()) m.set(b.key, b);
+    for (const a of profiles.values()) { if (a.stats && a.stats.ban) m.set(a.key, { key: a.key, name: a.name, at: a.stats.ban.at }); else m.delete(a.key); }
+    return Array.from(m.values());
+  }
+  const selfState = q => q.socket.emit('adm:self', { spd: q.spd || 1, frozen: !!q.frozen, god: !!q.god });
+  const placeNear = (x, y, ring) => { const a = Math.random() * Math.PI * 2, d = ring * Math.sqrt(Math.random()); return { x: Math.max(40, Math.min(G.WORLD.w - 40, Math.round(x + Math.cos(a) * d))), y: Math.max(40, Math.min(G.WORLD.h - 40, Math.round(y + Math.sin(a) * d))) }; };
+  const minutes = (v, def, max) => { const n = v === undefined || v === '' ? def : Number(v); return Number.isFinite(n) && n > 0 ? Math.min(max, n) : null; };
+  async function runCommand(text) {
+    const [rawCmd, ...args] = text.slice(1).split(/\s+/), cmd = (rawCmd || '').toLowerCase(), a = acct.acc;
+    adminLog(a, 'command /' + cmd, args.length ? { args: args.slice(0, 3) } : null);
+    const need = () => { const q = findOnline(args[0]); return q || null; };
+    switch (cmd) {
+      case 'announce': { const t = R.sanitizeChat(args.join(' ')); if (t.error || !t.text) return { ok: false, error: 'Текст объявления?' }; io.to('arena').emit('adm:announce', { t: t.text, by: a.name }); return { ok: true, msg: 'Объявление отправлено' }; }
+      case 'tp': case 'tphere': {
+        const q = need(); if (!q || !pl) return { ok: false, error: 'Игрок не в сети' };
+        const [from, to] = cmd === 'tp' ? [pl, q] : [q, pl];
+        from.x = to.x + 40; from.y = to.y; from.inputs.length = 0; return { ok: true, msg: cmd === 'tp' ? `Телепорт к ${q.acc.name}` : `${q.acc.name} перенесён к вам` };
+      }
+      case 'x2': { const m = args[0] === '0' ? 0 : minutes(args[0], 5, 120); if (m === null) return { ok: false, error: '/x2 <минуты>' }; setX2(m); return { ok: true, msg: m ? `Сферы ×2 на ${m} мин` : '×2 выключен' }; }
+      case 'mute': { const q = need(), m = minutes(args[1], 10, 1440); if (!q || m === null) return { ok: false, error: '/mute <игрок> <минуты>' }; q.acc.stats.muteUntil = Date.now() + m * 60000; markDirty(q.acc); q.socket.emit('chat', { notice: true, t: `Администратор запретил вам писать в чат на ${m} мин.` }); return { ok: true, msg: `${q.acc.name} в муте ${m} мин` }; }
+      case 'unmute': { const q = need(); if (!q) return { ok: false, error: 'Игрок не в сети' }; delete q.acc.stats.muteUntil; markDirty(q.acc); return { ok: true, msg: `${q.acc.name} размучен` }; }
+      case 'clearchat': chatHistory = []; io.to('arena').emit('chat:clear'); return { ok: true, msg: 'Чат очищен' };
+      case 'freeze': case 'unfreeze': { const q = need(); if (!q) return { ok: false, error: 'Игрок не в сети' }; q.frozen = cmd === 'freeze'; q.inputs.length = 0; selfState(q); return { ok: true, msg: `${q.acc.name} ${q.frozen ? 'заморожен' : 'разморожен'}` }; }
+      case 'god': { if (!pl) return { ok: false, error: 'Войдите в игру' }; pl.god = !pl.god; pl.zapUntil = pl.god ? Infinity : 0; selfState(pl); return { ok: true, msg: pl.god ? 'Неуязвимость включена' : 'Неуязвимость выключена' }; }
+      case 'speed': { const v = Number(args[0]); if (!pl || !Number.isFinite(v) || v <= 0 || v > 5) return { ok: false, error: '/speed <0.1–5>' }; pl.spd = v; selfState(pl); return { ok: true, msg: `Скорость ×${v}` }; }
+      case 'disco': { if (discoOn()) { setDisco(0); return { ok: true, msg: 'Диско выключено', disco: false }; } const m = minutes(args[0], DISCO.defMin, DISCO.maxMin); if (m === null) return { ok: false, error: '/disco [минуты]' }; setDisco(m); return { ok: true, msg: `Диско на ${m} мин`, disco: true }; }
+      default: return { ok: false, error: 'Неизвестная команда' };
+    }
+  }
+  socket.on('adm', async (d, ack) => {
+    ack = safeAck(ack);
+    const a = acct && acct.acc;
+    if (!isAdmin(a)) { adminLog(a, 'denied', { a: isObj(d) ? String(d.a).slice(0, 20) : null }); return ack({ ok: false, error: 'Нет доступа' }); }
+    if (!isObj(d) || typeof d.a !== 'string') return ack({ ok: false, error: 'Неверный запрос' });
+    try {
+      const now = Date.now(), here = pl || { x: G.ZONE_W / 2, y: G.ZONE_H / 2 };
+      if (d.a !== 'init' && d.a !== 'players' && d.a !== 'bans' && d.a !== 'cmd') adminLog(a, d.a, Object.assign({}, d, { a: undefined }));
+      switch (d.a) {
+        case 'init': return ack({ ok: true, events: G.EVENT_KEYS.map(k => ({ k, name: G.EVENTS[k].name })), minis: C.MINI_KEYS.map(k => ({ k, name: C.MINI[k].name, icon: C.MINI[k].icon })),
+          rarities: Object.keys(G.ORB_TYPES).filter(t => t !== 't').map(t => ({ k: t, name: G.ORB_TYPES[t].name })), items: G.ITEMS.map(it => ({ id: it.id, name: it.name })),
+          players: adminList(), bans: await bannedList(), fx: fxState() });
+        case 'players': return ack({ ok: true, players: adminList() });
+        case 'bans': return ack({ ok: true, bans: await bannedList() });
+        case 'event': {
+          if (!has(G.EVENTS, d.kind)) return ack({ ok: false, error: 'Нет такого ивента' });
+          if (ev) endEvent(now, 'admin'); announceEvent(d.kind, { announceMs: 5000 }); return ack({ ok: true, msg: `Ивент «${G.EVENTS[d.kind].name}» через 5 с` });
+        }
+        case 'mini': if (!C.MINI_KEYS.includes(d.kind)) return ack({ ok: false, error: 'Нет такого мини-ивента' }); if (FX.miniNow()) FX.endMini('forced'); FX.startMini(d.kind, {}); return ack({ ok: true, msg: `Мини-ивент «${C.MINI[d.kind].name}»` });
+        case 'boss': if (FX.bossNow()) FX.endBoss(false); FX.announceBoss({}); return ack({ ok: true, msg: 'Босс вызван' });
+        case 'orbs': {
+          if (!has(G.ORB_TYPES, d.t) || d.t === 't') return ack({ ok: false, error: 'Редкость?' });
+          const n = Math.max(1, Math.min(100, Math.floor(Number(d.n) || 1)));
+          for (let i = 0; i < n; i++) { const p = d.where === 'random' ? randomSpot(80) : d.where === 'here' ? { x: Math.round(here.x), y: Math.round(here.y) } : placeNear(here.x, here.y, 260); const o = addOrb(d.t, p, 'admin'); o.expires = now + 120000; }
+          return ack({ ok: true, msg: `+${n} × ${G.ORB_TYPES[d.t].name}` });
+        }
+        case 'obstacle': {
+          const kind = ['wall', 'block', 'rock', 'laser', 'robot'].includes(d.kind) ? d.kind : undefined;
+          const p = d.where === 'random' ? {} : placeNear(here.x, here.y, 450);
+          const o = spawnObstacle(now, { kind, x: p.x, y: p.y }); return ack(o ? { ok: true, msg: 'Препятствие создано' } : { ok: false, error: 'Не удалось (нет места или лимит)' });
+        }
+        case 'give': {
+          const q = findOnline(d.name); if (!q) return ack({ ok: false, error: 'Игрок не в сети' });
+          const n = Math.floor(Number(d.qty) || 0); if (n < 1 || n > 1e6) return ack({ ok: false, error: 'Количество 1–1000000' });
+          if (d.what === 'orbs') { q.acc.balance += n; q.acc.total += n; q.socket.emit('bal', { b: q.acc.balance, t: q.acc.total, s: q.session }); }
+          else {
+            const id = d.what === 'shards' ? G.SHARD_ID : d.item; if (!has(G.ITEM_BY_ID, id)) return ack({ ok: false, error: 'Нет такого предмета' });
+            const r = INV.grantItem(q.acc, id, Math.min(n, 999), 'admin'); if (!r.ok) return ack({ ok: false, error: r.error || 'Не выдано' });
+            q.socket.emit('item', { id, qty: Math.min(n, 999), source: 'admin' });
+          }
+          accountChanged(q.acc); return ack({ ok: true, msg: `Выдано ${q.acc.name}` });
+        }
+        case 'kick': {
+          const q = findOnline(d.name); if (!q) return ack({ ok: false, error: 'Игрок не в сети' }); if (isAdmin(q.acc)) return ack({ ok: false, error: 'Нельзя' });
+          q.socket.emit('kicked', 'Вас выгнал администратор.'); removePlayer(q); q.socket.disconnect(true); return ack({ ok: true, msg: `${q.acc.name} выгнан`, players: adminList() });
+        }
+        case 'ban': case 'unban': {
+          const key = typeof d.name === 'string' ? d.name.trim().toLowerCase() : ''; if (!/^[a-z0-9_]{3,20}$/.test(key)) return ack({ ok: false, error: 'Ник?' });
+          const t = await loadAccount(key); if (!t) return ack({ ok: false, error: 'Аккаунт не найден' }); if (isAdmin(t)) return ack({ ok: false, error: 'Нельзя' });
+          if (d.a === 'ban') {
+            t.stats.ban = { at: now, by: a.name }; markDirty(t); await flush();
+            const q = byKey.get(key); if (q) { q.socket.emit('kicked', 'Ваш аккаунт заблокирован администратором.'); removePlayer(q); q.socket.disconnect(true); }
+          } else { delete t.stats.ban; markDirty(t); await flush(); }
+          return ack({ ok: true, msg: `${t.name} ${d.a === 'ban' ? 'забанен' : 'разбанен'}`, bans: await bannedList(), players: adminList() });
+        }
+        case 'cmd': { if (typeof d.text !== 'string' || !d.text.trim().startsWith('/')) return ack({ ok: false, error: 'Команда начинается с /' }); return ack(await runCommand(d.text.trim().slice(0, 200))); }
+        case 'disco': return ack(await runCommand('/disco' + (Number(d.min) > 0 ? ' ' + Number(d.min) : '')));
+        default: return ack({ ok: false, error: 'Неизвестное действие' });
+      }
+    } catch (e) { console.error('admin error:', e.message); ack({ ok: false, error: 'Ошибка сервера' }); }
+  });
+
   if (TEST_HOOKS) {
     socket.on('test:grant', (d, ack) => {
       ack = safeAck(ack);
@@ -1512,6 +1640,8 @@ function collectAround(pl, radius, now) {
     const rw = G.orbReward(ot.value, pl.acc.upgrades, pl, Math.random, o.t);
     if (weekendOn(now)) { const f = (pl.wkFrac || 0) + rw.value * (G.WEEKEND.mult - 1), whole = Math.floor(f + 1e-9); pl.wkFrac = f - whole; rw.value += whole; } // «Выходные»: ×1.5 (fraction carried) // «находка», luck ×2, multiplier (fraction in pl.frac) — server-side only
     if (C.boostMult(pl.acc.stats, 'orbs', now) > 1) { const f = (pl.bFrac || 0) + rw.value * (C.BOOSTS.orbs.mult - 1), whole = Math.floor(f + 1e-9); pl.bFrac = f - whole; rw.value += whole; } // quest boost «Сферы ×1.5»
+    if (discoOn(now) && !rw.lucky) { const p = G.upValue('luck', pl.acc.upgrades.luck) / 100, extra = p > 0 && p < 1 ? p * (DISCO.luckMult - 1) / (1 - p) : 0; if (extra > 0 && Math.random() < extra) { rw.value *= 2; rw.lucky = true; } } // disco: luck chance ×1.5
+    { const xm = (discoOn(now) ? DISCO.orbMult : 1) * (x2On(now) ? 2 : 1); if (xm > 1) { const f = (pl.xFrac || 0) + rw.value * (xm - 1), whole = Math.floor(f + 1e-9); pl.xFrac = f - whole; rw.value += whole; } } // disco ×1.5, admin /x2 ×2 (stack multiplicatively with weekend / boosts)
     FX.onCollect(pl, o, rw.value);
     if (rw.lucky) pl.lucky++;
     if (rw.jackpot) pl.jackpots++;
@@ -1538,7 +1668,7 @@ function tick() {
     pl.x0 = pl.x; pl.y0 = pl.y;
     pl.budget = Math.min(pl.budget + 1, 6);
     while (pl.inputs.length > 12) pl.lastSeq = pl.inputs.shift().s; // keep latency bounded
-    const speed = G.speedFor(pl.acc.upgrades.speed) * C.boostMult(pl.acc.stats, 'speed', now);
+    const speed = G.speedFor(pl.acc.upgrades.speed) * C.boostMult(pl.acc.stats, 'speed', now) * (pl.frozen ? 0 : pl.spd || 1);
     const solid = FX.solids();
     const radius = G.pickupFor(pl.acc.upgrades.magnet);
     while (pl.budget >= 1 && pl.inputs.length) {

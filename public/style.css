@@ -560,3 +560,50 @@ body.in-game .music-btn { display: none; }
 .qtrack .qt-x { position: absolute; top: 2px; right: 3px; width: 22px; height: 22px; line-height: 22px; text-align: center; border-radius: 6px; color: #ffd76a; font-size: 14px; background: rgba(255,255,255,.06); }
 .qtrack .qt-x:hover { background: rgba(255,255,255,.16); }
 .qtrack.qt-min { width: auto; padding: 4px 9px; font-weight: 800; color: #ffd76a; border-radius: 14px; }
+
+/* admin panel */
+.adm-btn { right: 12px; bottom: 208px; font-size: 15px; line-height: 1; padding: 0; }
+@media (max-width: 640px) { .adm-btn { bottom: calc(222px + env(safe-area-inset-bottom)); } }
+.adm-card { max-width: 620px; }
+.adm-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
+.adm-tab { background: rgba(255,255,255,.08); color: #c8d0f0; border: 0; border-radius: 8px; padding: 8px 12px; font: 700 13px system-ui, sans-serif; cursor: pointer; }
+.adm-tab.active { background: #5b6cff; color: #fff; }
+.adm-sec h4 { margin: 10px 0 6px; font-size: 14px; }
+.adm-sec.hidden { display: none; }
+.adm-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.adm-grid .btn { padding: 8px 10px; font-size: 13px; }
+.adm-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.adm-row select, .adm-row input { background: rgba(255,255,255,.08); color: #fff; border: 1px solid rgba(140,160,255,.3); border-radius: 8px; padding: 8px; font-size: 14px; min-width: 0; }
+.adm-row input[type=number] { width: 90px; }
+.adm-row #admCmd { flex: 1; min-width: 180px; }
+.adm-row select option { color: #000; }
+.adm-row .hidden { display: none; }
+.adm-list { display: flex; flex-direction: column; gap: 4px; max-height: 200px; overflow: auto; }
+.adm-pl { display: flex; align-items: center; gap: 6px; background: rgba(255,255,255,.05); border-radius: 8px; padding: 6px 8px; font-size: 13px; }
+.adm-pl b { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.adm-pl button { padding: 4px 8px; font-size: 12px; }
+.adm-help { font-size: 12px; margin-top: 8px; line-height: 1.6; }
+.adm-msg { min-height: 20px; margin-top: 10px; font-size: 13px; color: #8fffb0; }
+.adm-msg.err { color: #ff9aa6; }
+.btn.danger { background: #c8324a; color: #fff; }
+@media (max-width: 760px) { .adm-tab { flex: 1 1 30%; padding: 10px 6px; } .adm-row > * { flex: 1 1 40%; } .adm-row input[type=number] { width: auto; } }
+/* full-screen announcement */
+.ann-overlay { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; background: rgba(3,5,15,.55); pointer-events: auto; animation: annIn .35s ease-out; }
+.ann-overlay.hidden { display: none; }
+.ann-box { max-width: min(720px, 92vw); text-align: center; padding: 26px 30px; border-radius: 18px; background: rgba(18,20,50,.92); border: 2px solid #ffcc33; box-shadow: 0 0 40px rgba(255,204,51,.4); }
+.ann-title { font: 800 16px system-ui, sans-serif; color: #ffcc33; margin-bottom: 10px; letter-spacing: .05em; }
+.ann-text { font: 800 clamp(22px, 5vw, 40px) system-ui, sans-serif; color: #fff; overflow-wrap: anywhere; }
+@keyframes annIn { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: none; } }
+/* disco overlay: four soft coloured spotlights drifting over the arena (transform / opacity only — cheap to composite) */
+.disco-fx { position: fixed; inset: 0; z-index: 4; pointer-events: none; overflow: hidden; mix-blend-mode: screen; opacity: .32; }
+.disco-fx.hidden { display: none; }
+.disco-fx i { position: absolute; width: 70vmax; height: 70vmax; border-radius: 50%; left: -10vmax; top: -10vmax; will-change: transform; filter: blur(2px);
+  background: radial-gradient(circle, var(--c) 0%, transparent 60%); animation: discoMove 9s ease-in-out infinite alternate; }
+.disco-fx i:nth-child(1) { --c: rgba(255,40,180,.75); }
+.disco-fx i:nth-child(2) { --c: rgba(40,200,255,.75); animation-duration: 11s; animation-delay: -3s; left: 40vw; }
+.disco-fx i:nth-child(3) { --c: rgba(255,220,40,.65); animation-duration: 13s; animation-delay: -6s; top: 40vh; }
+.disco-fx i:nth-child(4) { --c: rgba(120,255,90,.6); animation-duration: 10s; animation-delay: -1s; left: 30vw; top: 30vh; }
+@keyframes discoMove { 0% { transform: translate(0,0) scale(.8); } 50% { transform: translate(35vw,20vh) scale(1); } 100% { transform: translate(10vw,45vh) scale(.9); } }
+@media (prefers-reduced-motion: reduce) { .disco-fx { opacity: .18; } .disco-fx i { animation-duration: 40s; } }
+.ev-chip[data-kind=disco] .ev-chip-btn { border-color: #ff4fd8; box-shadow: 0 0 14px rgba(255,79,216,.55); }
+.ev-chip[data-kind=x2] .ev-chip-btn { border-color: #ffcc33; font-size: 18px; }
