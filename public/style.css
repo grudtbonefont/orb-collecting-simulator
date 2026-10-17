@@ -521,3 +521,15 @@ body.in-game .music-btn { display: none; }
   .menu-buttons .btn { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 74px; padding: 6px 2px; font-size: 11.5px; }
   .menu-buttons .btn i { margin: 0; font-size: 20px; line-height: 1.1; }
 }
+.ach-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.ach-tab { display: flex; align-items: center; gap: 5px; padding: 6px 10px; border-radius: 10px; border: 1px solid rgba(120, 150, 255, .35); background: rgba(255, 255, 255, .05); color: #fff; font: inherit; font-size: 13px; cursor: pointer; }
+.ach-tab .cnt { font-size: 11px; opacity: .7; }
+.ach-tab.active { background: rgba(62, 224, 255, .18); border-color: #3ee0ff; }
+.ach-tab.full .cnt { color: #ffd76a; opacity: 1; }
+.ach-pips { color: #ffd76a; font-weight: 400; letter-spacing: 1px; }
+@media (max-width: 640px) {
+  .ach-tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+  .ach-tab { flex-direction: column; gap: 0; padding: 5px 2px; font-size: 10px; text-align: center; }
+  .ach-tab .ic { font-size: 18px; }
+  .ach-list { max-height: 52vh; }
+}

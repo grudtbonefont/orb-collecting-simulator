@@ -68,7 +68,7 @@ function newAccount(name, passHash) {
 // Only what the owner may see about their own account (never the hash/key).
 function ownProfile(a) {
   const { pwResetMark, ...stats } = a.stats || {}; // internal marker stays server-side
-  return { name: a.name, balance: a.balance, shards: (a.stats && a.stats.shards) || 0, codesUsed: (a.codes || []).length, title: C.titleOf(a.stats), total: a.total, equipped: a.equipped, upgrades: a.upgrades, stats, mustChangePw: !!(a.stats && a.stats.mustChangePw),
+  return { name: a.name, balance: a.balance, shards: (a.stats && a.stats.shards) || 0, codesUsed: (a.codes || []).length, total: a.total, equipped: a.equipped, upgrades: a.upgrades, stats, mustChangePw: !!(a.stats && a.stats.mustChangePw),
     inventory: a.inventory.slots.map(s => ({ id: s.id, q: s.q, src: s.src })), slots: G.INV_CAP, cap: G.INV_CAP, used: INV.unitsUsed(a), createdAt: a.createdAt };
 }
 async function loadAccount(key) {
@@ -545,6 +545,7 @@ function endEvent(now, reason) {
     x.place = i + 1;
     const st = x.pl.acc.stats; st.eventsPlayed = (st.eventsPlayed || 0) + 1; FX.onEventPlayed(x.pl);
     if (i === 0 || ((e.kind === 'treasure' || e.kind === 'runner') && x.score > 0)) st.eventWins = (st.eventWins || 0) + 1;
+    if (e.kind === 'lucky') st.luckyPlayed = (st.luckyPlayed || 0) + 1;
     markDirty(x.pl.acc); emitProfile(x.pl); // stats changed
   });
   const row = x => ({ name: x.pl.acc.name, score: Math.floor(x.score), reward: x.reward || null });
@@ -560,7 +561,7 @@ function endEvent(now, reason) {
 }
 
 // Public data about a player: public id, nickname, cosmetics, position. Nothing else.
-function playerMeta(pl) { return { id: pl.id, name: pl.acc.name, eq: pl.acc.equipped, x: pl.x, y: pl.y, ti: C.titleOf(pl.acc.stats) }; }
+function playerMeta(pl) { return { id: pl.id, name: pl.acc.name, eq: pl.acc.equipped, x: pl.x, y: pl.y }; }
 function emitProfile(pl) { pl.socket.emit('profile', ownProfile(pl.acc)); }
 // after an account change made from any socket: refresh the arena player of that account (if any)
 function accountChanged(acc, opts = {}) {
@@ -654,7 +655,8 @@ app.use((err, req, res, next) => { console.error('http error:', err && err.messa
 const server = http.createServer(app);
 io = new Server(server, { maxHttpBufferSize: 10 * 1024, pingInterval: 10000, pingTimeout: 20000, serveClient: true });
 FX = createFeatures({ io: () => io, players, orbs, addOrb, removeOrb, pickSpot, inObstacle, payReward, markDirty, emitProfile, systemChat, flushSoon,
-  penalize: (pl, now, src) => laserHit(pl, null, now, src), mainEventBusy: () => !!ev, testHooks: TEST_HOOKS });
+  penalize: (pl, now, src) => laserHit(pl, null, now, src), mainEventBusy: () => !!ev, testHooks: TEST_HOOKS,
+  nearLaser: (pl, now) => obstacles.some(o => o.k === 'laser' && G.laserHits(o, pl.x, pl.y, now, 150)) }); // «По краю»: within 150 px of an armed beam
 
 // ---------------------------------------------------------------- auth helpers
 // Cyrillic letters that look like Latin ones (typed on a Russian phone keyboard)
@@ -771,6 +773,7 @@ function finishMinigame(pl, info) {
   pl.acc.balance += prize;
   pl.acc.total += prize;
   s.minigames = (s.minigames || 0) + 1;
+  if (!info.aborted && prize > 0) s.mgWins = (s.mgWins || 0) + 1;
   markDirty(pl.acc);
   if (!info.aborted) { FX.onMinigame(pl); pl.socket.emit('mg:result', result); emitProfile(pl); }
 }
@@ -1135,7 +1138,7 @@ io.on('connection', socket => {
     if (clean.text.toLowerCase() === pl.lastChat && now - last < 15000) return ack({ ok: false, error: 'Не повторяйте одно и то же сообщение.' });
     pl.chatTimes.push(now);
     pl.lastChat = clean.text.toLowerCase();
-    pushChat({ n: pl.acc.name, c: nameColorOf(pl.acc), ti: C.titleOf(pl.acc.stats) || undefined, t: clean.text }, true);
+    pushChat({ n: pl.acc.name, c: nameColorOf(pl.acc), t: clean.text }, true);
     ack({ ok: true, masked: clean.masked });
   });
 
@@ -1173,6 +1176,7 @@ io.on('connection', socket => {
     if (a.balance < cost) return ack({ ok: false, error: `Не хватает сфер: нужно ${cost}`, code: 'funds' });
     const g = INV.grantItem(a, def.id, q, 'shop'); // all-or-nothing (space checked inside)
     if (!g.ok) return ack({ ok: false, error: g.error, code: g.code });
+    a.stats.buys = (a.stats.buys || 0) + 1;
     a.balance -= cost;
     accountChanged(a);
     ack({ ok: true, profile: ownProfile(a) });
@@ -1240,6 +1244,7 @@ io.on('connection', socket => {
     if (!g.ok) { a.inventory = JSON.parse(snap.inv); a.owned = snap.owned; a.equipped = snap.eq; a.stats.shards = snap.shards; return ack({ ok: false, error: g.error, code: g.code }); }
     accountChanged(a);
     try { await flush(); } catch (_) { /* stays dirty, retried by the periodic flush */ }
+    a.stats.buys = (a.stats.buys || 0) + 1;
     ack({ ok: true, spent: cost, qty: q, profile: ownProfile(a) });
   });
   // ---- promo codes (lib/codes.js): once per account, global maxUses, atomic, 5 attempts / minute / account
@@ -1305,15 +1310,6 @@ io.on('connection', socket => {
     accountChanged(a);
     try { await flush(); } catch (_) { /* retried later */ }
     ack({ ok: true, orbs: got, profile: ownProfile(a) });
-  });
-
-  // earned title shown next to the nickname (world, chat, profile); null = none
-  socket.on('title:set', (id, ack) => {
-    ack = safeAck(ack);
-    if (!acct) return ack({ ok: false, error: 'Сначала войдите в аккаунт' });
-    const r = FX.setTitle(acct.acc, typeof id === 'string' ? id : null);
-    if (r.ok) accountChanged(acct.acc, { looks: true });
-    ack(Object.assign(r, { profile: ownProfile(acct.acc) }));
   });
 
   socket.on('upgrade', (key, ack) => {
@@ -1413,9 +1409,9 @@ io.on('connection', socket => {
       if (typeof d.name === 'string' && !other) return ack({ ok: false });
       const acct2 = other ? { acc: other.acc } : acct; d = Object.assign({}, d); delete d.name;
       const st = acct2.acc.stats;
-      for (const [k, v] of Object.entries(d)) if (!['total', 'dayShift', 'playMsAdd', 'resetAch'].includes(k) && /^[a-zA-Z0-9]{1,30}$/.test(k) && (typeof v === 'number' || typeof v === 'boolean' || v === null)) { if (v === null) delete st[k]; else st[k] = v; }
-      if (typeof d.title === 'string') FX.setTitle(acct2.acc, d.title);
+      for (const [k, v] of Object.entries(d)) if (!['total', 'dayShift', 'playMsAdd', 'resetAch', 'achSet'].includes(k) && /^[a-zA-Z0-9]{1,30}$/.test(k) && (typeof v === 'number' || typeof v === 'boolean' || v === null)) { if (v === null) delete st[k]; else st[k] = v; }
       if (d.resetAch) st.ach = {};
+      if (Array.isArray(d.achSet)) { st.ach = st.ach || {}; for (const id of d.achSet.slice(0, 40)) if (typeof id === 'string' && /^[a-z0-9_]{1,30}$/.test(id)) st.ach[id] = Date.now(); } // seed old (pre-tier) achievements
       if (Array.isArray(d.quests)) { st.daily = { day: C.dayKey(), q: d.quests.filter(q => isObj(q) && has(C.QUEST_BY_ID, q.id)).slice(0, 3).map(q => ({ id: q.id, p: 0, done: false, rw: isObj(q.rw) ? q.rw : { orbs: 10 } })), bonus: false }; }
       if (Number.isFinite(d.dayShift) && st.daily) st.daily.day += d.dayShift;
       if (Number.isFinite(d.playMsAdd)) st.playMs = (st.playMs || 0) + d.playMsAdd;

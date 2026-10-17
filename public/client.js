@@ -263,12 +263,12 @@
   socket.on('kicked', msg => { paused = true; stage = 'auth'; hideGameUi(); showResume(msg, true); });
 
   function addPlayer(p) {
-    players.set(p.id, { id: p.id, name: p.name, ti: p.ti || '', eq: p.eq, trail: [], dir: { x: 1, y: 0 }, pos: { x: p.x, y: p.y }, last: { x: p.x, y: p.y } });
+    players.set(p.id, { id: p.id, name: p.name, eq: p.eq, trail: [], dir: { x: 1, y: 0 }, pos: { x: p.x, y: p.y }, last: { x: p.x, y: p.y } });
   }
   socket.on('pjoin', p => { if (!players.has(p.id)) addPlayer(p); });
   socket.on('pleave', id => players.delete(id));
   socket.on('chat', m => addChat(m, true));
-  socket.on('pmeta', p => { const pl = players.get(p.id); if (pl) { pl.eq = p.eq; pl.name = p.name; pl.ti = p.ti || ''; } });
+  socket.on('pmeta', p => { const pl = players.get(p.id); if (pl) { pl.eq = p.eq; pl.name = p.name; } });
   socket.on('sping', v => socket.emit('spong', v));
   socket.on('announce', a => toast('✨ ' + a.text));
   // ------------------------------------------------------------ temporary obstacles + rotating lasers (server-run)
@@ -946,7 +946,6 @@
     if (opts.name) {
       const ny = -top * r - hatRoom(hat, r);
       drawNameTag(g, opts.name, 0, ny, itemVal(eq.nameColor) || '#fff', t, opts.isMe ? 14 : 13);
-      if (opts.title) { g.font = '700 10.5px Segoe UI, system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'bottom'; g.lineWidth = 3; g.strokeStyle = 'rgba(0,0,0,0.65)'; const tt = '« ' + opts.title + ' »'; g.strokeText(tt, 0, ny - 15); g.fillStyle = '#ffd76a'; g.fillText(tt, 0, ny - 15); }
     }
     g.restore();
   }
@@ -1383,7 +1382,7 @@
     for (const pl of order) {
       if (!pl.pos) continue;
       if (pl.pos.x < cam.x - 120 || pl.pos.x > cam.x + VW + 120 || pl.pos.y < cam.y - 120 || pl.pos.y > cam.y + VH + 120) continue;
-      drawAvatar(ctx, pl.pos.x, pl.pos.y, G.PLAYER_R, pl.eq, t, { name: pl.name, title: pl.ti, dir: pl.dir, isMe: pl.id === myId, phase: pl.id });
+      drawAvatar(ctx, pl.pos.x, pl.pos.y, G.PLAYER_R, pl.eq, t, { name: pl.name, dir: pl.dir, isMe: pl.id === myId, phase: pl.id });
     }
     // floating texts
     for (let i = floaters.length - 1; i >= 0; i--) {
@@ -1881,37 +1880,48 @@
     ctx.restore();
   }
   // ---- achievements
-  const achProfile = p => ({ total: p.total, stats: p.stats || {}, codesUsed: p.codesUsed || 0, liveMs: 0 });
+  const achProfile = p => ({ total: p.total, stats: p.stats || {}, codesUsed: p.codesUsed || 0, items: C.itemsOwned(p.inventory), liveMs: 0 });
   socket.on('ach', d => {
-    const a = d && C.ACH_BY_ID[d.id]; if (!a) return;
-    toast(`🏆 Достижение «${a.name}»! ${C.rewardText(d.reward)}${a.title ? ` · титул «${a.title}» (🏆 → выбрать)` : ''}`, 'ok');
+    if (!d) return;
+    if (d.ids) { toast(`🏆 Достижения: ${d.ids.length ? d.ids.length + ' ступеней получено' : 'пересчитаны'} · ${C.rewardText(d.reward)}`, 'ok'); return; }
+    const a = C.ACH_BY_ID[d.id]; if (a) toast(`🏆 Достижение «${a.name}»! ${C.rewardText(d.reward)}`, 'ok');
   });
+  let achCat = C.ACH_CATS[0].key;
+  function chainState(ch, p, got) { // tiers done (prefix of paid tiers), the next tier and progress to it
+    let done = 0; while (done < ch.tiers.length && got[ch.tiers[done].id]) done++;
+    const next = ch.tiers[done] || null, v = C.achValue(ch.tiers[0], p);
+    return { done, next, v, max: done === ch.tiers.length };
+  }
   function renderAch() {
     if (!profile) return;
-    const p = achProfile(profile), got = (profile.stats && profile.stats.ach) || {}, list = $('achList'); list.textContent = '';
-    $('achCount').textContent = `${Object.keys(got).length} / ${C.ACH.length}`;
-    const sorted = C.ACH.slice().sort((x, y) => (!!got[y.id] - !!got[x.id]) || (C.achValue(y, p) / y.goal - C.achValue(x, p) / x.goal));
-    for (const a of sorted) {
-      const v = Math.min(a.goal, C.achValue(a, p)), done = !!got[a.id];
-      const el = document.createElement('div'); el.className = 'ach-item' + (done ? ' done' : ''); el.dataset.id = a.id;
-      const ic = document.createElement('div'); ic.className = 'ach-ic'; ic.textContent = a.icon;
+    const p = achProfile(profile), got = (profile.stats && profile.stats.ach) || {};
+    $('achCount').textContent = `${C.ACH.filter(a => got[a.id]).length} / ${C.ACH.length}`;
+    const tabs = $('achTabs'); tabs.textContent = '';
+    for (const c of C.ACH_CATS) {
+      const tiers = C.ACH.filter(a => a.cat === c.key), n = tiers.filter(a => got[a.id]).length;
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'ach-tab' + (c.key === achCat ? ' active' : '') + (n === tiers.length ? ' full' : ''); b.dataset.cat = c.key; b.setAttribute('role', 'tab');
+      b.innerHTML = `<span class="ic">${c.icon}</span><span class="nm">${esc(c.name)}</span><span class="cnt">${n}/${tiers.length}</span>`;
+      b.onclick = () => { achCat = c.key; renderAch(); };
+      tabs.appendChild(b);
+    }
+    const list = $('achList'); list.textContent = '';
+    for (const ch of C.CHAINS.filter(x => x.cat === achCat)) {
+      const s = chainState(ch, p, got), n = ch.tiers.length;
+      const el = document.createElement('div'); el.className = 'ach-item' + (s.max ? ' done' : ''); el.dataset.chain = ch.id;
+      const ic = document.createElement('div'); ic.className = 'ach-ic'; ic.textContent = ch.icon;
       const body = document.createElement('div'); body.className = 'ach-body';
-      const nm = document.createElement('b'); nm.textContent = a.name + (done ? ' ✓' : '');
-      const ds = document.createElement('div'); ds.className = 'ach-desc'; ds.textContent = a.desc;
-      const bar = document.createElement('div'); bar.className = 'ach-bar'; const fill = document.createElement('i'); fill.style.width = (v / a.goal * 100) + '%'; bar.appendChild(fill);
+      const nm = document.createElement('b'); nm.textContent = (s.done ? ch.tiers[s.done - 1].name : ch.name) + (s.max ? ' ✓' : '');
+      const pips = document.createElement('span'); pips.className = 'ach-pips'; pips.textContent = n > 1 ? ' ' + ch.tiers.map((t, i) => (i < s.done ? '★' : '☆')).join('') : '';
+      nm.appendChild(pips);
+      const ds = document.createElement('div'); ds.className = 'ach-desc';
+      ds.textContent = s.max ? 'Все ступени пройдены!' : `Дальше: ${s.next.name} — ${s.next.desc}`;
+      const bar = document.createElement('div'); bar.className = 'ach-bar'; const fill = document.createElement('i');
+      const goal = s.max ? ch.tiers[n - 1].goal : s.next.goal; fill.style.width = Math.min(100, s.v / goal * 100) + '%'; bar.appendChild(fill);
       const meta = document.createElement('div'); meta.className = 'ach-meta';
-      meta.textContent = `${fmt(v)} / ${fmt(a.goal)}${a.unit ? ' ' + a.unit : ''} · награда: ${C.rewardText(a.reward)}${a.title ? ` · титул «${a.title}»` : ''}`;
+      meta.textContent = `${fmt(Math.min(s.v, goal))} / ${fmt(goal)}${ch.unit ? ' ' + ch.unit : ''}` + (s.max ? '' : ` · награда: ${C.rewardText(s.next.reward)}`);
       body.append(nm, ds, bar, meta); el.append(ic, body); list.appendChild(el);
     }
-    const sel = $('titleSel'); sel.textContent = '';
-    const none = document.createElement('option'); none.value = ''; none.textContent = '— без титула —'; sel.appendChild(none);
-    for (const a of C.ACH) if (a.title && got[a.id]) { const o = document.createElement('option'); o.value = a.id; o.textContent = a.title; sel.appendChild(o); }
-    sel.value = profile.stats && profile.stats.title && got[profile.stats.title] ? profile.stats.title : '';
-    $('titleMsg').textContent = sel.options.length > 1 ? '' : 'Титулы дают некоторые достижения.';
   }
-  $('titleSel').addEventListener('change', () => {
-    socket.emit('title:set', $('titleSel').value || null, r => { if (r && r.ok) { setProfile(r.profile); toast(r.profile.title ? `Титул «${r.profile.title}» показан рядом с ником` : 'Титул снят', 'ok'); } else toast((r && r.error) || 'Ошибка', 'err'); });
-  });
   // ---- daily quests + boosts
   socket.on('quest', d => {
     if (!d) return;
@@ -2498,7 +2508,6 @@
     pruneHidden('profile');
     addPreview($('pfAvatar'), Object.assign({}, p.equipped), 'all', { owner: 'profile', size: 120, r: 28, name: p.name });
     $('pfName').textContent = p.name;
-    $('pfTitle').textContent = p.title ? '« ' + p.title + ' »' : '';
     $('pfShards').innerHTML = shardsH(p.shards || 0);
     $('pfAch').textContent = `${Object.keys((p.stats && p.stats.ach) || {}).length} / ${C.ACH.length}`;
     $('pfEq').replaceChildren(...G.CATEGORIES.map(c => {
@@ -2848,7 +2857,7 @@
   function chatLine(m) {
     const el = document.createElement('div');
     el.className = 'chat-msg' + (m.sys ? ' sys' : '') + (m.notice ? ' notice' : '') + (m.n && m.n === myName ? ' mine' : '');
-    if (m.n) { if (m.ti) { const ti = document.createElement('span'); ti.className = 'ti'; ti.textContent = '[' + String(m.ti) + '] '; el.appendChild(ti); } const n = document.createElement('span'); n.className = 'n'; n.textContent = String(m.n); nameColorize(n, m.c); el.append(n, ': '); }
+    if (m.n) { const n = document.createElement('span'); n.className = 'n'; n.textContent = String(m.n); nameColorize(n, m.c); el.append(n, ': '); }
     const t = document.createElement('span'); t.className = 't'; t.textContent = String(m.t == null ? '' : m.t); el.appendChild(t);
     return el;
   }

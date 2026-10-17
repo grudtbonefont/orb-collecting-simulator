@@ -60,7 +60,7 @@ async function shardSuite(url) {
   ok(r.ok && A.profile.shards === 6, `promo code shards go to the balance (${A.profile.shards})`);
   await A.emit('test:spawn', { types: ['l'], ring: 1, x: A.pos.x + 30, y: A.pos.y });
   await A.hold(A.pos.x + 30, A.pos.y, 900);
-  ok(A.profile.shards === 8 && A.events('ach').some(a => a.id === 'legend'), `legendary orb shard (+1) and «Легенда» achievement (+1) go to the balance (${A.profile.shards})`);
+  ok(A.profile.shards >= 8 && A.events('ach').some(a => a.id === 'legend_1'), `legendary orb shard (+1) and «Легенда I» achievement (+1, plus other tiers) go to the balance (${A.profile.shards})`);
   A.close();
 }
 async function migrationSuite() {
@@ -89,28 +89,42 @@ async function migrationSuite() {
   A2.close(); await srv.stop(); fs.rmSync(file, { force: true });
 }
 async function achSuite(url) {
-  console.log('--- achievements + titles');
-  ok(C.ACH.length >= 15 && C.ACH.length <= 20 && C.ACH.filter(a => a.title).length >= 10 && new Set(C.ACH.map(a => a.id)).size === C.ACH.length, `${C.ACH.length} achievements, ${C.ACH.filter(a => a.title).length} with a title`);
+  console.log('--- tiered achievements (no titles)');
+  const cats = {}; for (const t of C.ACH) cats[t.cat] = (cats[t.cat] || 0) + 1;
+  const grows = C.CHAINS.every(ch => ch.tiers.every((t, i) => t.reward.orbs > 0 && t.reward.shards >= 1 && (i === 0 || (t.goal > ch.tiers[i - 1].goal && t.reward.orbs > ch.tiers[i - 1].reward.orbs && t.reward.shards >= ch.tiers[i - 1].reward.shards))));
+  ok(C.ACH.length >= 60 && C.ACH.length <= 80 && Object.keys(cats).length === 8 && C.ACH_CATS.every(c => cats[c.key] >= 5) && new Set(C.ACH.map(a => a.id)).size === C.ACH.length && grows && C.ACH.every(a => !a.title),
+    `${C.ACH.length} tiers in ${C.CHAINS.length} chains: ${C.ACH_CATS.map(c => c.name + ' ' + cats[c.key]).join(', ')}; every tier pays orbs + shards, growing per tier`);
+  ok(C.CHAIN_BY_ID.bosskill.tiers.map(t => t.goal).join('/') === '1/3/10/25/50' && C.ACH_BY_ID.bosskill_5.name === 'Победитель босса V', '«Победитель босса I…V» = 1/3/10/25/50 kills');
+  // old account: 3 old achievements already paid -> covered tiers marked, only the difference paid, once
   const name = 'Ach' + rnd(), A = client(url); await A.register(name, false); // lobby only
-  await A.emit('test:stats', { minigames: 30, unlockedDoor2: true });
-  ok(!(A.profile.stats.ach && A.profile.stats.ach.games), 'lobby: nothing unlocked until the arena');
-  const b0 = A.profile.balance; A.enter(await A.call('play', null));
-  await waitFor(() => A.events('ach').length >= 2, 3000);
-  const ids = A.events('ach').map(a => a.id);
-  ok(ids.includes('games') && ids.includes('zone2') && A.profile.stats.ach.games && A.profile.balance >= b0 + 200, `backfill on join from existing stats: ${ids.join(', ')} (+${A.profile.balance - b0} orbs)`);
-  await A.emit('test:stats', { total: 150 }); await waitFor(() => A.events('ach').some(a => a.id === 'first100'), 2000);
-  ok(A.events('ach').some(a => a.id === 'first100' && a.reward.orbs === 20), 'unlock while playing: «Первые шаги» +20 orbs, toast event');
-  const n = A.events('ach').length; await A.emit('test:stats', { minigames: 31 }); await sleep(1300);
-  ok(A.events('ach').length === n, 'each achievement is paid once');
+  await A.emit('test:stats', { resetAch: true, achV2: null, achSet: ['first100', 'collector', 'games'], total: 1500, minigames: 30 });
+  const b0 = A.profile.balance, s0 = A.profile.shards;
+  A.enter(await A.call('play', null));
+  await waitFor(() => A.events('ach').length >= 1, 3000); await sleep(1500);
+  const ev = A.events('ach'), st = A.profile.stats;
+  ok(ev.length === 1 && ev[0].ids && st.achV2 === true && st.ach.total_1 && st.ach.total_2 && st.ach.games_1 && !st.ach.total_3 && !st.ach.games_2 && A.profile.balance - b0 === 10 && A.profile.shards - s0 === 4,
+    `migration: «Первые шаги»/«Собиратель»/«Игрок» → Собиратель I, II and Игрок I marked; only the difference paid (+${A.profile.balance - b0} orbs, +${A.profile.shards - s0} shards; expected +10 / +4), one summary toast`);
+  await A.emit('test:stats', { minigames: 31 }); await sleep(1300);
+  ok(A.events('ach').length === 1 && A.profile.balance - b0 === 10, 'nothing is paid twice (re-check after a stat change)');
+  // progression: several tiers at once, then the next one
+  const b1 = A.profile.balance, s1 = A.profile.shards;
+  await A.emit('test:stats', { bossKills: 3 }); await waitFor(() => A.events('ach').length >= 3, 3000);
+  const k = A.events('ach').slice(1).map(e => e.id).join(',');
+  ok(k === 'bosskill_1,bosskill_2' && A.profile.balance - b1 === 40 + 105 && A.profile.shards - s1 === 1 + 3, `3 kills → «Победитель босса I» and «II» (+${A.profile.balance - b1} orbs, +${A.profile.shards - s1} shards)`);
+  await A.emit('test:stats', { bossKills: 9 }); await sleep(1300);
+  ok(A.events('ach').length === 3, '9 kills: tier III (10) not yet');
+  await A.emit('test:stats', { bossKills: 10 }); await waitFor(() => A.events('ach').length >= 4, 3000);
+  ok(A.events('ach')[3].id === 'bosskill_3' && A.events('ach')[3].reward.orbs === C.ACH_BY_ID.bosskill_3.reward.orbs, '10 kills → «Победитель босса III»');
+  // new counters
+  await A.emit('test:tp', { x: 2000, y: 2000 }); await sleep(300);
+  const d0 = A.profile.stats.distM || 0;
+  await A.moveTo(2700, 2000, 6000); await sleep(1300); await A.emit('test:stats', {});
+  ok((A.profile.stats.distM || 0) - d0 >= 50, `distance travelled is tracked (+${(A.profile.stats.distM || 0) - d0} m walked ~700 px)`);
+  // titles are gone everywhere
   const B = client(url); await B.register('Obs' + rnd());
-  let r = await A.emit('title:set', 'magnate');
-  ok(!r.ok, 'an unearned title is refused');
-  r = await A.emit('title:set', 'games');
-  await waitFor(() => { const m = B.metas.get(A.id); return m && m.ti; }, 2000);
-  ok(r.ok && r.profile.title === 'Игрок' && B.metas.get(A.id).ti === 'Игрок', 'title «Игрок» set: in own profile and in the public player data');
   await A.call('chat', 'привет'); await waitFor(() => B.chat.some(m => m.n === name), 2000);
-  ok(B.chat.some(m => m.n === name && m.ti === 'Игрок'), 'chat messages carry the title');
-  r = await A.emit('title:set', null); ok(r.ok && !r.profile.title, 'title can be cleared');
+  const meta = B.metas.get(A.id);
+  ok(!('title' in A.profile) && B.chat.some(m => m.n === name && !('ti' in m)) && (!meta || !('ti' in meta)), 'no titles: not in the profile, chat or public player data');
   A.close(); B.close();
 }
 async function questSuite(url) {
@@ -257,6 +271,7 @@ async function hitboxSuite(url) {
     'robot shot, boss shot and boss ring all test against the ball radius (+ projectile / ring half-width only)');
   ok(G.laserHits({ k: 'laser', x: 0, y: 0, len: 300, w: 0, a0: 0, t0: 0, armAt: 0 }, 150, -R, 1, R) && !G.laserHits({ k: 'laser', x: 0, y: 0, len: 300, w: 0, a0: 0, t0: 0, armAt: 0 }, 150, -R - 0.5, 1, R) && !G.laserHits({ k: 'laser', x: 0, y: 0, len: 300, w: 0, a0: 0, t0: 0, armAt: 0 }, 300 + R + 1, 0, 1, R),
     'segment-to-circle distance: tangent hits, 0.5 px off misses, past the beam end misses');
+  A.close(); await sleep(300);
 }
 
 (async () => {

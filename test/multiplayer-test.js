@@ -510,7 +510,7 @@ async function eventSuite(URL) {
   await waitEv('A', 'ev:end', 3, 7000); await sleep(300);
   const te = last('A', 'ev:end');
   ok(tr.length === 2 && tmsg && tmsg.name === A.profile.name && tmsg.left === 1 && JSON.stringify(Object.keys(tmsg)) === '["name","left"]', 'treasure grabbed by A: everyone told who found it and how many are left');
-  ok(te && te.you && te.you.score === 1 && te.remaining === 1 && te.total === 2 && shards(A) - sA0 === 1 && A.profile.balance - bA0 >= G.EVENTS.treasure.reward.orbs && !A.orbs.has(tr.find(o => o !== near).id),
+  ok(te && te.you && te.you.score === 1 && te.remaining === 1 && te.total === 2 && shards(A) - sA0 >= 1 && A.profile.balance - bA0 >= G.EVENTS.treasure.reward.orbs && !A.orbs.has(tr.find(o => o !== near).id),
     `treasure reward ${G.EVENTS.treasure.reward.orbs} ◉ + 1 💎 (fixed), unfound treasure removed at the end`);
   // random treasure spots are far from players
   r = await A.emit('test:event', { kind: 'treasure', announceMs: 100, durationMs: 8000 });
@@ -536,7 +536,7 @@ async function eventSuite(URL) {
   const r0 = rn[0] || [], rIds = new Set(rn.flat().map(q => q[0]));
   ok(r0.length === 3 && rIds.size === 3 && re && re.caught === 1 && re.total === 3 && re.outcome === 'partial' && rn.every(l => l.every(q => q.length === 3)), `3 runaway orbs spawned (${r0.map(q => q[0] + '@' + q[1] + ',' + q[2]).join(' ')}); caught ${re && re.caught}/${re && re.total} → outcome «${re && re.outcome}»`);
   ok(rn.length > 10 && re && re.kind === 'runner' && re.results[0].name === A.profile.name && JSON.stringify(re.you.reward) === JSON.stringify(G.EVENTS.runner.reward) &&
-    shards(A) - sA1 === G.EVENTS.runner.reward.shards && A.profile.balance - bA1 >= G.EVENTS.runner.reward.orbs, `«Раннеры»: A caught one (+${G.EVENTS.runner.reward.orbs} ◉ + ${G.EVENTS.runner.reward.shards} 💎), position streamed while active`);
+    shards(A) - sA1 >= G.EVENTS.runner.reward.shards && A.profile.balance - bA1 >= G.EVENTS.runner.reward.orbs, `«Раннеры»: A caught one (+${G.EVENTS.runner.reward.orbs} ◉ + ${G.EVENTS.runner.reward.shards} 💎), position streamed while active`);
   ok(rb && rb.kind === 'runner' && rb.you === null && rb.caught === 1, 'others learn how many runners were caught');
   const st = A.profile.stats;
   ok(st.eventsPlayed >= 3 && st.eventWins >= 2, `event stats counted (played ${st.eventsPlayed}, won ${st.eventWins})`);

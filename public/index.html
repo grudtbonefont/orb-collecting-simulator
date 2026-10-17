@@ -61,7 +61,6 @@
       <canvas id="pfAvatar" width="240" height="240" aria-label="Ваш персонаж"></canvas>
       <div class="pf-id">
         <div id="pfName" class="pf-name"></div>
-        <div id="pfTitle" class="pf-title"></div>
         <div id="pfRankLine" class="pf-rank"></div>
         <div id="pfSince" class="muted"></div>
         <div id="pfEq" class="pf-eq" aria-label="Надето"></div>
@@ -316,7 +315,7 @@
 <div id="ach" class="modal hidden">
   <div class="modal-card wide">
     <div class="modal-head"><h2>🏆 Достижения</h2><div class="pill" id="achCount">0 / 0</div><button class="close" aria-label="Закрыть">✕</button></div>
-    <div class="ach-title"><label for="titleSel">Титул рядом с ником:</label> <select id="titleSel"></select> <span id="titleMsg" class="muted"></span></div>
+    <div id="achTabs" class="ach-tabs" role="tablist"></div>
     <div id="achList" class="ach-list"></div>
   </div>
 </div>

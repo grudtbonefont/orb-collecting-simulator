@@ -38,10 +38,9 @@ const CHROME = process.env.CHROME || ['/usr/bin/google-chrome', '/usr/bin/chromi
   await call('test:tp', { name: 'Viewer', x: P.x, y: P.y });
   await call('test:tp', { x: P.x - 120, y: P.y + 60 });
   // progress so the panels have content: some achievements unlocked, a title, quests in progress
-  ok((await call('test:stats', { name: 'Viewer', total: 5200, runnersCaught: 3, treasures: 3, minigames: 9, zaps: 12, chests: 2, legendaryCaught: 1,
+  ok((await call('test:stats', { name: 'Viewer', total: 12000, rareCaught: 340, epicCaught: 40, bossKills: 4, bossDmg: 900, runnersCaught: 3, treasures: 3, minigames: 9, zaps: 12, chests: 2, legendaryCaught: 1,
     quests: [{ id: C_q(1), rw: { boost: 'orbs', min: 5 } }, { id: C_q(2), rw: { shards: 1 } }, { id: C_q(3), rw: { item: 'c_coral' } }] })).ok, 'viewer stats + quests seeded');
   await sleep(800);
-  ok((await call('test:stats', { name: 'Viewer', title: 'collector' })).ok, 'title «Собиратель» selected');
   await sleep(4500); // let toasts fade
   const hud = await vp.evaluate(() => ({ shards: document.getElementById('hudShards').textContent, q: document.getElementById('qTrack').textContent }));
   ok(Number(hud.shards) >= 1 && /Задания 0\/3/.test(hud.q), `HUD shows shard balance (${hud.shards}) and quest tracker`);
@@ -78,19 +77,20 @@ const CHROME = process.env.CHROME || ['/usr/bin/google-chrome', '/usr/bin/chromi
   ok(!(await vp.isHidden('#evResult')), 'boss result panel shown');
   await vp.click('#evResult .close').catch(() => {});
   // ---- panels
-  await vp.keyboard.press('KeyJ'); await sleep(500);
-  const ach = await vp.evaluate(() => ({ n: document.querySelectorAll('#achList .ach-item').length, done: document.querySelectorAll('#achList .ach-item.done').length, opts: document.getElementById('titleSel').options.length, cnt: document.getElementById('achCount').textContent }));
-  ok(ach.n === 20 && ach.done >= 4 && ach.opts >= 4, `achievements tab: ${ach.n} cards, ${ach.done} done (${ach.cnt}), ${ach.opts - 1} titles`);
+  await sleep(4000); await vp.keyboard.press('KeyJ'); await sleep(500);
+  const ach = await vp.evaluate(() => ({ tabs: document.querySelectorAll('#achTabs .ach-tab').length, n: document.querySelectorAll('#achList .ach-item').length, cnt: document.getElementById('achCount').textContent, t0: document.querySelector('#achList .ach-item b').textContent }));
+  ok(ach.tabs === 8 && ach.n === 5 && /Собиратель III/.test(ach.t0), `achievements: 8 category tabs, «Сбор сфер» shows ${ach.n} chains (first: ${ach.t0}), ${ach.cnt} tiers`);
+  await vp.click('#achTabs [data-cat=boss]'); await sleep(200);
+  const bt = await vp.evaluate(() => Array.from(document.querySelectorAll('#achList .ach-item')).map(e => e.querySelector('b').textContent + ' | ' + e.querySelector('.ach-desc').textContent + ' | ' + e.querySelector('.ach-meta').textContent));
+  ok(bt.length === 2 && /Победитель босса II/.test(bt[0]) && /Победитель босса III/.test(bt[0]) && /награда: \+\d+ сфер, \+\d+ оск/.test(bt[0]), 'tap «Босс» tab: current tier, next tier, progress and its reward: ' + bt[0]);
+  await vp.click('#achTabs [data-cat=orbs]'); await sleep(200);
   await vp.screenshot({ path: path.join(ROOT, 'screenshot-achievements.png') });
-  ok(await vp.evaluate(() => document.getElementById('titleSel').value === 'collector'), 'title select shows «Собиратель»');
   await vp.keyboard.press('Escape'); await sleep(200);
   await vp.keyboard.press('KeyQ'); await sleep(500);
   const qs = await vp.evaluate(() => ({ n: document.querySelectorAll('#qList .q-item').length, txt: document.getElementById('qList').textContent, b: document.getElementById('qBonus').textContent }));
   ok(qs.n === 3 && /буст|Сферы ×1.5/.test(qs.txt) && /оск/.test(qs.txt) && /предмет/.test(qs.txt), 'quests panel: 3 quests with varied rewards');
   await vp.screenshot({ path: path.join(ROOT, 'screenshot-quests.png') });
   await vp.keyboard.press('Escape');
-  // title visible next to the nick (in-world tag is canvas; check the player record and the profile)
-  ok(await vp.evaluate(() => document.getElementById('titleSel').value === 'collector'), 'title select shows «Собиратель»');
   const dl = await vp.evaluate(() => { const r = s => document.querySelector(s).getBoundingClientRect(); const bs = Array.from(document.querySelectorAll('.menu-buttons .btn')).map(b => b.getBoundingClientRect()); const ch = r('.chat'), rd = r('#radar');
     return { first: bs[0].left, last: bs[bs.length - 1].right, chat: ch.right, chatTop: ch.top, menuTop: bs[0].top, radar: rd.left }; });
   ok(dl.first > dl.chat && dl.last < dl.radar, `desktop: 7 menu buttons clear of chat and radar (${Math.round(dl.first)}–${Math.round(dl.last)}, chat→${Math.round(dl.chat)}, radar ${Math.round(dl.radar)})`);
@@ -112,6 +112,11 @@ const CHROME = process.env.CHROME || ['/usr/bin/google-chrome', '/usr/bin/chromi
   ok(lay.n >= 7 && !lay.overlap && lay.fit, `mobile: ${lay.n} menu buttons fit ${lay.w}px without overlap`);
   ok(lay.q.b < 400 && lay.boss.t >= lay.q.t - 200, 'mobile: quest tracker at the top-left under stats (joystick area stays free)');
   await m.vp.screenshot({ path: path.join(ROOT, 'screenshot-mobile-content.png') });
+  await sleep(5000); await m.vp.click('#achBtn'); await sleep(400); await m.vp.click('#achTabs [data-cat=events]'); await sleep(300);
+  const ma = await m.vp.evaluate(() => { const t = Array.from(document.querySelectorAll('#achTabs .ach-tab')).map(b => b.getBoundingClientRect()); return { n: t.length, fit: t.every(r => r.left >= 0 && r.right <= innerWidth && r.width >= 40), cards: document.querySelectorAll('#achList .ach-item').length, active: document.querySelector('#achTabs .active').dataset.cat }; });
+  ok(ma.n === 8 && ma.fit && ma.cards === 4 && ma.active === 'events', `mobile: 8 category tabs fit the screen, tap «Эвенты» → ${ma.cards} chains`);
+  await m.vp.evaluate(() => { document.getElementById('toasts').textContent = ''; }); // clear join/boss toasts for a clean shot
+  await m.vp.screenshot({ path: path.join(ROOT, 'screenshot-achievements-mobile.png') });
   ok(m.errors.length === 0, 'no page errors (mobile): ' + m.errors.slice(0, 3).join(' | '));
   await browser.close(); s.close();
   console.log(fails ? `${fails} FAIL` : 'ALL PASS');

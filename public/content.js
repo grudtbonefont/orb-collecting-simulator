@@ -20,33 +20,61 @@
   // the bonus room lies outside the arena (below zone 1); applyInput keeps players inside it while they are there
   const ROOM = G.BONUS_ROOM, inRoom = G.inBonusRoom;
 
-  // ---------------------------------------------------------------- achievements (one-time reward, some give a title)
-  // stat(p): p = own profile (total, stats, codesUsed); playMs includes the running session (p.liveMs)
-  const ACH = [
-    { id: 'first100', icon: '✨', name: 'Первые шаги', desc: 'Соберите 100 сфер', stat: p => p.total, goal: 100, reward: { orbs: 20 } },
-    { id: 'collector', icon: '🧺', name: 'Собиратель', desc: 'Соберите 5 000 сфер', stat: p => p.total, goal: 5000, reward: { orbs: 150 }, title: 'Собиратель' },
-    { id: 'magnate', icon: '💎', name: 'Магнат', desc: 'Соберите 50 000 сфер', stat: p => p.total, goal: 50000, reward: { shards: 3 }, title: 'Магнат' },
-    { id: 'legend', icon: '🟡', name: 'Легенда', desc: 'Поймайте легендарную сферу', stat: p => p.stats.legendaryCaught, goal: 1, reward: { shards: 1 }, title: 'Легендарный' },
-    { id: 'myth', icon: '🔴', name: 'Миф', desc: 'Поймайте мифическую сферу', stat: p => p.stats.mythicCaught, goal: 1, reward: { shards: 2 }, title: 'Мифический' },
-    { id: 'runners', icon: '💨', name: 'Ловец Раннеров', desc: 'Поймайте 5 Раннеров', stat: p => p.stats.runnersCaught, goal: 5, reward: { orbs: 100 }, title: 'Ловец Раннеров' },
-    { id: 'treasure', icon: '💰', name: 'Кладоискатель', desc: 'Найдите 3 сокровища', stat: p => p.stats.treasures, goal: 3, reward: { orbs: 100 }, title: 'Кладоискатель' },
-    { id: 'bosshit', icon: '👊', name: 'Смельчак', desc: 'Нанесите боссу 100 урона', stat: p => p.stats.bossDmg, goal: 100, reward: { orbs: 80 } },
-    { id: 'bosskill', icon: '👹', name: 'Победитель босса', desc: 'Победите босса', stat: p => p.stats.bossKills, goal: 1, reward: { shards: 3 }, title: 'Победитель босса' },
-    { id: 'games', icon: '🎮', name: 'Игрок', desc: 'Сыграйте 25 мини-игр', stat: p => p.stats.minigames, goal: 25, reward: { orbs: 100 }, title: 'Игрок' },
-    { id: 'zone2', icon: '🚪', name: 'Первопроходец', desc: 'Откройте дверь во 2-ю зону', stat: p => (p.stats.unlockedDoor2 ? 1 : 0), goal: 1, reward: { orbs: 100 }, title: 'Первопроходец' },
-    { id: 'codes', icon: '🎟️', name: 'Охотник за кодами', desc: 'Активируйте 3 промокода', stat: p => p.codesUsed, goal: 3, reward: { orbs: 50 } },
-    { id: 'play1h', icon: '⏱️', name: 'Час на арене', desc: 'Проведите в игре 1 час', stat: p => Math.floor(((p.stats.playMs || 0) + (p.liveMs || 0)) / MIN), goal: 60, reward: { orbs: 100 }, unit: 'мин' },
-    { id: 'play10h', icon: '🕰️', name: 'Ветеран', desc: 'Проведите в игре 10 часов', stat: p => Math.floor(((p.stats.playMs || 0) + (p.liveMs || 0)) / MIN), goal: 600, reward: { shards: 5 }, title: 'Ветеран', unit: 'мин' },
-    { id: 'zaps', icon: '⚡', name: 'Под обстрелом', desc: 'Переживите 10 попаданий лазеров и выстрелов', stat: p => p.stats.zaps, goal: 10, reward: { orbs: 50 }, title: 'Несгибаемый' },
-    { id: 'chests', icon: '🧰', name: 'Взломщик', desc: 'Откройте 5 сундуков', stat: p => p.stats.chests, goal: 5, reward: { shards: 1 }, title: 'Взломщик' },
-    { id: 'portals', icon: '🌀', name: 'Путешественник', desc: 'Побывайте в бонусной комнате 3 раза', stat: p => p.stats.portals, goal: 3, reward: { orbs: 80 } },
-    { id: 'quests', icon: '📜', name: 'Исполнительный', desc: 'Выполните 10 ежедневных заданий', stat: p => p.stats.questsDone, goal: 10, reward: { shards: 2 }, title: 'Исполнительный' },
-    { id: 'streak7', icon: '🔥', name: 'Неудержимый', desc: 'Серия: 7 дней подряд все задания', stat: p => p.stats.bestStreak, goal: 7, reward: { shards: 5 }, title: 'Неудержимый' },
-    { id: 'events', icon: '🏅', name: 'Чемпион', desc: 'Выиграйте 10 событий арены', stat: p => p.stats.eventWins, goal: 10, reward: { orbs: 150 }, title: 'Чемпион' },
+  // ---------------------------------------------------------------- achievements: tiered chains by category (I…V), every tier pays orbs + shards
+  // stat(p): p = { total, stats, codesUsed, items, liveMs }. Tier ids: `${chain}_${tier}` (1-based), stored in stats.ach like before.
+  const ACH_CATS = [
+    { key: 'orbs', name: 'Сбор сфер', icon: '🔮' }, { key: 'boss', name: 'Босс', icon: '👹' }, { key: 'events', name: 'Эвенты', icon: '🎪' },
+    { key: 'games', name: 'Мини-игры', icon: '🎮' }, { key: 'quests', name: 'Задания', icon: '📜' }, { key: 'danger', name: 'Опасности', icon: '⚡' },
+    { key: 'explore', name: 'Исследование', icon: '🧭' }, { key: 'collect', name: 'Коллекция', icon: '🎒' },
   ];
+  const ROMAN = ['I', 'II', 'III', 'IV', 'V'];
+  const TIER_ORBS = [30, 80, 180, 350, 600], TIER_SHARDS = [1, 2, 3, 5, 8]; // × chain difficulty (orbs), shards rounded, min 1
+  const playMin = p => Math.floor(((p.stats.playMs || 0) + (p.liveMs || 0)) / MIN);
+  const CHAINS = [
+    { id: 'total', cat: 'orbs', icon: '🧺', name: 'Собиратель', desc: n => `Соберите ${fmtN(n)} сфер`, stat: p => p.total, goals: [100, 1000, 10000, 50000, 200000] },
+    { id: 'rare', cat: 'orbs', icon: '🔷', name: 'Знаток редкостей', desc: n => `Поймайте ${fmtN(n)} редких или лучше сфер`, stat: p => p.stats.rareCaught, goals: [25, 300, 2500] },
+    { id: 'epic', cat: 'orbs', icon: '🟣', name: 'Эпик', desc: n => `Поймайте ${fmtN(n)} эпических или лучше сфер`, stat: p => p.stats.epicCaught, goals: [5, 60, 500], k: 1.1 },
+    { id: 'legend', cat: 'orbs', icon: '🟡', name: 'Легенда', desc: n => `Поймайте ${fmtN(n)} ${pl(n, 'легендарную сферу', 'легендарные сферы', 'легендарных сфер')}`, stat: p => p.stats.legendaryCaught, goals: [1, 8, 30], k: 1.2 },
+    { id: 'myth', cat: 'orbs', icon: '🔴', name: 'Миф', desc: n => `Поймайте ${fmtN(n)} ${pl(n, 'мифическую сферу', 'мифические сферы', 'мифических сфер')}`, stat: p => p.stats.mythicCaught, goals: [1, 5, 20], k: 1.4 },
+    { id: 'bosskill', cat: 'boss', icon: '👹', name: 'Победитель босса', desc: n => `Победите босса ${fmtN(n)} ${pl(n, 'раз', 'раза', 'раз')}`, stat: p => p.stats.bossKills, goals: [1, 3, 10, 25, 50], k: 1.3 },
+    { id: 'bossdmg', cat: 'boss', icon: '👊', name: 'Сокрушитель', desc: n => `Нанесите боссам ${fmtN(n)} урона`, stat: p => p.stats.bossDmg, goals: [100, 1500, 8000] },
+    { id: 'runners', cat: 'events', icon: '💨', name: 'Ловец Раннеров', desc: n => `Поймайте ${fmtN(n)} ${pl(n, 'Раннера', 'Раннеров', 'Раннеров')}`, stat: p => p.stats.runnersCaught, goals: [1, 10, 50] },
+    { id: 'treasure', cat: 'events', icon: '💰', name: 'Кладоискатель', desc: n => `Найдите ${fmtN(n)} ${pl(n, 'сокровище', 'сокровища', 'сокровищ')}`, stat: p => p.stats.treasures, goals: [1, 10, 50] },
+    { id: 'lucky', cat: 'events', icon: '🍀', name: 'Везунчик', desc: n => `Поучаствуйте в «Волне удачи» ${fmtN(n)} ${pl(n, 'раз', 'раза', 'раз')}`, stat: p => p.stats.luckyPlayed, goals: [1, 8, 30], k: 0.8 },
+    { id: 'mini', cat: 'events', icon: '🌟', name: 'Охотник за чудесами', desc: n => `Мини-события: ${fmtN(n)} ${pl(n, 'раз', 'раза', 'раз')} (золотой дождь, сундуки, порталы)`, stat: p => (p.stats.goldRains || 0) + (p.stats.chests || 0) + (p.stats.portals || 0), goals: [3, 25, 120] },
+    { id: 'games', cat: 'games', icon: '🎮', name: 'Игрок', desc: n => `Сыграйте ${fmtN(n)} мини-игр`, stat: p => p.stats.minigames, goals: [5, 50, 300], k: 0.8 },
+    { id: 'mgwins', cat: 'games', icon: '🥇', name: 'Мастер игр', desc: n => `Выиграйте приз в ${fmtN(n)} мини-играх`, stat: p => p.stats.mgWins, goals: [3, 30, 200], k: 0.9 },
+    { id: 'quests', cat: 'quests', icon: '📜', name: 'Исполнительный', desc: n => `Выполните ${fmtN(n)} ежедневных заданий`, stat: p => p.stats.questsDone, goals: [3, 10, 50, 200] },
+    { id: 'streak', cat: 'quests', icon: '🔥', name: 'Неудержимый', desc: n => `Серия: ${fmtN(n)} дней подряд все задания`, stat: p => p.stats.bestStreak, goals: [2, 7, 14, 30], k: 1.3 },
+    { id: 'zaps', cat: 'danger', icon: '⚡', name: 'Несгибаемый', desc: n => `Переживите ${fmtN(n)} попаданий лазеров, выстрелов и ударов`, stat: p => p.stats.zaps, goals: [1, 25, 150], k: 0.7 },
+    { id: 'nearlaser', cat: 'danger', icon: '🔥', name: 'По краю', desc: n => `Проведите ${fmtN(n)} с рядом с лазером, не попав под луч`, stat: p => p.stats.nearLaserSec, goals: [30, 180, 900, 3000], unit: 'с' },
+    { id: 'zone2', cat: 'explore', icon: '🚪', name: 'Первопроходец', desc: () => 'Откройте дверь во 2-ю зону', stat: p => (p.stats.unlockedDoor2 ? 1 : 0), goals: [1], k: 1.5 },
+    { id: 'dist', cat: 'explore', icon: '👣', name: 'Путешественник', desc: n => `Пройдите ${fmtN(n)} м`, stat: p => p.stats.distM, goals: [2000, 25000, 150000, 600000], unit: 'м' },
+    { id: 'play', cat: 'explore', icon: '⏱️', name: 'Ветеран', desc: n => `Проведите в игре ${n >= 60 ? fmtN(n / 60) + ' ч' : n + ' мин'}`, stat: playMin, goals: [60, 300, 1500, 6000], unit: 'мин' },
+    { id: 'items', cat: 'collect', icon: '🎨', name: 'Коллекционер', desc: n => `Соберите ${fmtN(n)} разных предметов`, stat: p => p.items, goals: [3, 10, 20, 40] },
+    { id: 'buys', cat: 'collect', icon: '🛒', name: 'Покупатель', desc: n => `Совершите ${fmtN(n)} ${pl(n, 'покупку', 'покупки', 'покупок')} в магазине`, stat: p => p.stats.buys, goals: [1, 5, 20, 60], k: 0.8 },
+    { id: 'codes', cat: 'collect', icon: '🎟️', name: 'Охотник за кодами', desc: n => `Активируйте ${fmtN(n)} ${pl(n, 'промокод', 'промокода', 'промокодов')}`, stat: p => p.codesUsed, goals: [1, 3, 6], k: 0.7 },
+  ];
+  function pl(n, one, few, many) { const a = n % 10, b = n % 100; return a === 1 && b !== 11 ? one : a >= 2 && a <= 4 && (b < 12 || b > 14) ? few : many; }
+  function fmtN(n) { return Number(n).toLocaleString('ru-RU'); }
+  const tierReward = (chain, i) => { const k = chain.k || 1, n = chain.goals.length; i = n >= 5 || n === 1 ? i : Math.round(i * 4 / (n - 1)); // short chains: their last tier pays like tier V
+    return { orbs: Math.round(TIER_ORBS[i] * k / 5) * 5, shards: Math.max(1, Math.round(TIER_SHARDS[i] * k)) }; };
+  const ACH = [];
+  for (const ch of CHAINS) ch.tiers = ch.goals.map((goal, i) => {
+    const a = { id: `${ch.id}_${i + 1}`, chain: ch.id, cat: ch.cat, tier: i + 1, icon: ch.icon, name: ch.goals.length > 1 ? `${ch.name} ${ROMAN[i]}` : ch.name, desc: ch.desc(goal), stat: ch.stat, goal, unit: ch.unit, reward: tierReward(ch, i) };
+    ACH.push(a); return a;
+  });
+  const CHAIN_BY_ID = Object.fromEntries(CHAINS.map(c => [c.id, c]));
   const ACH_BY_ID = Object.fromEntries(ACH.map(a => [a.id, a]));
   const achValue = (a, p) => Math.max(0, Math.floor(Number(a.stat(p)) || 0));
-  const titleOf = stats => { const a = stats && stats.title && ACH_BY_ID[stats.title]; return a && a.title && stats.ach && stats.ach[a.id] ? a.title : ''; };
+  // distinct non-base cosmetics in the inventory (slots: [{id,q}])
+  const itemsOwned = slots => new Set((slots || []).filter(s => s && G.ITEM_BY_ID[s.id] && G.ITEM_BY_ID[s.id].type === 'cosmetic' && !G.ITEM_BY_ID[s.id].base).map(s => s.id)).size;
+  // pre-tier achievements (paid once) → the tier they cover (highest tier with goal ≤ the old goal) and what they paid
+  const OLD_ACH = { first100: ['total', 100, { orbs: 20 }], collector: ['total', 5000, { orbs: 150 }], magnate: ['total', 50000, { shards: 3 }], legend: ['legend', 1, { shards: 1 }],
+    myth: ['myth', 1, { shards: 2 }], runners: ['runners', 5, { orbs: 100 }], treasure: ['treasure', 3, { orbs: 100 }], bosshit: ['bossdmg', 100, { orbs: 80 }], bosskill: ['bosskill', 1, { shards: 3 }],
+    games: ['games', 25, { orbs: 100 }], zone2: ['zone2', 1, { orbs: 100 }], codes: ['codes', 3, { orbs: 50 }], play1h: ['play', 60, { orbs: 100 }], play10h: ['play', 600, { shards: 5 }],
+    zaps: ['zaps', 10, { orbs: 50 }], chests: ['mini', 5, { shards: 1 }], portals: ['mini', 3, { orbs: 80 }], quests: ['quests', 10, { shards: 2 }], streak7: ['streak', 7, { shards: 5 }], };
+  const oldTier = id => { const o = OLD_ACH[id]; if (!o) return null; const ch = CHAIN_BY_ID[o[0]]; let t = null; for (const a of ch.tiers) if (a.goal <= o[1]) t = a; return t; };
 
   // ---------------------------------------------------------------- daily quests: 3 per day, reset 00:00 Moscow time
   const dayKey = (now = Date.now()) => Math.floor((now + MSK) / DAY);
@@ -124,7 +152,7 @@
     return r;
   }
 
-  const api = { MINI, MINI_KEYS, ROOM, inRoom, ACH, ACH_BY_ID, achValue, titleOf, dayKey, resetIn, QUESTS, QUEST_BY_ID, BOOSTS, QUEST_REWARDS, ALL_DONE, allDoneBonus,
+  const api = { MINI, MINI_KEYS, ROOM, inRoom, ACH, ACH_BY_ID, ACH_CATS, CHAINS, CHAIN_BY_ID, achValue, itemsOwned, OLD_ACH, oldTier, tierReward, dayKey, resetIn, QUESTS, QUEST_BY_ID, BOOSTS, QUEST_REWARDS, ALL_DONE, allDoneBonus,
     rollQuests, questItems, rewardText, boostMult, BOSS, bossHp, bossPenalty, bossReward };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.C = api;
