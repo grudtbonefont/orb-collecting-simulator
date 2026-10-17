@@ -382,12 +382,12 @@ function bot(url, name) {
       ev('pointerup', 12, 180, 400); ev('pointerup', 11, 150, 400);
       return [zin, zout];
     });
-    ok(pinch[0] > 0.75 && pinch[1] < pinch[0] && pinch[1] >= 0.5, `mobile: two-finger pinch zooms (${pinch.map(z => z.toFixed(2)).join(' → ')})`);
+    ok(pinch[0] > 0.75 && pinch[1] < pinch[0] && pinch[1] >= 0.25, `mobile: two-finger pinch zooms (${pinch.map(z => z.toFixed(2)).join(' → ')})`);
     await mob.tap('#zoomIn'); await mob.tap('#zoomIn');
     const zUp = await mob.evaluate(() => window.OCSZoom());
-    for (let i = 0; i < 6 && !(await mob.isDisabled('#zoomOut')); i++) await mob.tap('#zoomOut');
+    for (let i = 0; i < 14 && !(await mob.isDisabled('#zoomOut')); i++) await mob.tap('#zoomOut');
     const zb = await mob.evaluate(() => [window.OCSZoom(), document.getElementById('zoomOut').disabled]);
-    ok(zUp > 0.6 && zb[0] === 0.5 && zb[1], 'mobile: «+» / «−» buttons work; «−» zooms out to the 0.5× limit (button disabled there)');
+    ok(zUp > 0.6 && zb[0] === 0.25 && zb[1], 'mobile: «+» / «−» buttons work; «−» zooms out to the 0.25× limit (button disabled there)');
     await sleep(300);
     await shot(mob, 'screenshot-zoom-mobile.png');
   }

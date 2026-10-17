@@ -553,10 +553,10 @@
   window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; pointer.down = false; joy = null; });
   // camera zoom: wheel / pinch / +− buttons; 0.5×–1.5×, saved in localStorage. Phones start zoomed out (see more of the arena).
   // A second finger on the arena starts a pinch: movement pauses until all fingers are lifted (no jump to a stray finger).
-  const ZOOM_MIN = 0.5, ZOOM_MAX = 1.5, ZOOM_KEY = 'ocs_zoom';
-  const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches, touchUI = coarse || window.innerWidth <= 760;
+  const ZOOM_MIN = touchUI ? 0.25 : 0.5, ZOOM_MAX = 1.5, ZOOM_KEY = 'ocs_zoom'; // phones / tablets may zoom out 2× further (the server sends the whole world)
   const clampZ = z => Math.round(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z)) * 1000) / 1000;
-  zoom = clampZ(parseFloat(store.get(ZOOM_KEY)) || (coarse || window.innerWidth <= 760 ? 0.75 : 1));
+  zoom = clampZ(parseFloat(store.get(ZOOM_KEY)) || (touchUI ? 0.75 : 1));
   function setZoom(z) {
     zoom = clampZ(z); store.set(ZOOM_KEY, String(zoom));
     $('zoomIn').disabled = zoom >= ZOOM_MAX; $('zoomOut').disabled = zoom <= ZOOM_MIN;
