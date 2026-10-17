@@ -176,6 +176,9 @@
     X('t_crystal', 'trail', 'Кристальный след', 270, 'legendary', 'crystal'),
     X('c_prism', 'color', 'Призма', 330, 'legendary', 'prism'),
     X('h_shard_crown', 'hat', 'Осколочная корона', 540, 'legendary', 'shardcrown'),
+    // final achievement reward: only granted by the server when ALL achievement tiers are done (never sold)
+    { id: 'h_trophy', type: 'cosmetic', cat: 'hat', name: 'Кубок', price: null, rarity: 'legendary', value: 'trophy', stackable: false, maxStack: 1, base: false, award: true,
+      desc: 'Награда за все достижения. Не продаётся.', sources: ['achievement', 'admin'] },
   ];
   const SHARD_ID = 'x_legend_shard';
   const SHARD_EXCHANGE = { orbs: 25, maxPerTrade: 99 }; // «Лавка осколков»: 1 shard → 25 orbs (was 40) (balance only, not the all-time total)

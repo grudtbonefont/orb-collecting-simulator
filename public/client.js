@@ -823,6 +823,19 @@
     } else if (hat === 'halo') {
       g.strokeStyle = '#ffe680'; g.lineWidth = 3.5; g.shadowColor = '#ffd84d'; g.shadowBlur = 16;
       g.beginPath(); g.ellipse(0, y - 9 + Math.sin(t * 2.5) * 2, r * 0.75, r * 0.24, 0, 0, Math.PI * 2); g.stroke();
+    } else if (hat === 'trophy') { // golden cup: two handles, bowl, stem, base
+      const w = r * 0.62, by = y + 4, cy = by - r * 0.95;
+      g.shadowColor = '#ffcc33'; g.shadowBlur = 14;
+      const gr = g.createLinearGradient(-w, 0, w, 0); gr.addColorStop(0, '#b8860b'); gr.addColorStop(0.45, '#fff3a0'); gr.addColorStop(1, '#d4a017');
+      g.fillStyle = gr; g.strokeStyle = '#8a6508'; g.lineWidth = 1.2;
+      g.fillRect(-w * 0.75, by - 4, w * 1.5, 4); g.strokeRect(-w * 0.75, by - 4, w * 1.5, 4); // base
+      g.fillRect(-w * 0.16, by - r * 0.38, w * 0.32, r * 0.36); // stem
+      g.beginPath(); g.moveTo(-w, cy); g.lineTo(w, cy); g.quadraticCurveTo(w * 0.95, by - r * 0.3, 0, by - r * 0.36); g.quadraticCurveTo(-w * 0.95, by - r * 0.3, -w, cy); g.closePath(); g.fill(); g.stroke(); // bowl
+      g.shadowBlur = 0; g.lineWidth = 3; g.strokeStyle = '#e6b422';
+      g.beginPath(); g.arc(-w, cy + r * 0.25, r * 0.22, Math.PI * 0.5, Math.PI * 1.5); g.stroke();
+      g.beginPath(); g.arc(w, cy + r * 0.25, r * 0.22, -Math.PI * 0.5, Math.PI * 0.5); g.stroke();
+      g.fillStyle = 'rgba(255,255,255,.55)'; g.fillRect(-w * 0.55, cy + 2, w * 0.18, r * 0.3); // shine
+      g.fillStyle = '#ff4d6d'; g.beginPath(); g.arc(0, cy + r * 0.22, 2.6, 0, Math.PI * 2); g.fill(); // gem
     } else if (hat === 'crown') {
       const w = r * 0.85, h = r * 0.75, by = y + 3;
       g.fillStyle = '#ffcc33'; g.shadowColor = '#ffcc33'; g.shadowBlur = 14;
@@ -925,7 +938,7 @@
   }
   // vertical room the hat takes above the body (nickname is drawn above it)
   const HAT_ROOM = { none: () => 10, tophat: r => r * 1.05 + 8, party: r => r * 1.25 + 4, bunny: r => r * 1.2 + 4, wizard: r => r * 1.62 + 6,
-    propeller: r => r * 0.95 + 6, viking: r => r * 0.85 + 6, cowboy: r => r * 0.62 + 8, headphones: () => 14, cat: r => r * 0.5 + 8, shardcrown: r => r * 1.08 + 8, satellites: r => r * 0.5 + 8 };
+    trophy: r => r * 0.95 + 6, propeller: r => r * 0.95 + 6, viking: r => r * 0.85 + 6, cowboy: r => r * 0.62 + 8, headphones: () => 14, cat: r => r * 0.5 + 8, shardcrown: r => r * 1.08 + 8, satellites: r => r * 0.5 + 8 };
   const hatRoom = (hat, r) => (HAT_ROOM[hat] ? HAT_ROOM[hat](r) : 22);
 
   function drawAvatar(g, x, y, r, eq, t, opts = {}) {
@@ -1935,6 +1948,7 @@
   }
   // ---- achievements
   const achProfile = p => ({ total: p.total, stats: p.stats || {}, codesUsed: p.codesUsed || 0, items: C.itemsOwned(p.inventory), liveMs: 0 });
+  socket.on('trophy', () => { toast('🏆 Все достижения выполнены! Награда: «Кубок» — он в инвентаре (шапка).', 'ok'); floaters.push({ x: me.x, y: me.y - 50, text: '🏆 Кубок!', color: '#ffcc33', start: performance.now(), big: true }); });
   socket.on('ach', d => {
     if (!d) return;
     if (d.ids) { toastC('ach', `🏆 Достижения: ${d.ids.length ? d.ids.length + ' ступеней получено' : 'пересчитаны'} · ${C.rewardText(d.reward)}`, 'ok'); return; }
@@ -1949,7 +1963,9 @@
   function renderAch() {
     if (!profile) return;
     const p = achProfile(profile), got = (profile.stats && profile.stats.ach) || {};
-    $('achCount').textContent = `${C.ACH.filter(a => got[a.id]).length} / ${C.ACH.length}`;
+    const nDone = C.ACH.filter(a => got[a.id]).length;
+    $('achCount').textContent = `${nDone} / ${C.ACH.length}`;
+    const tr = $('achTrophy'); if (tr) { tr.classList.toggle('done', nDone >= C.ACH.length); $('achTrophyTxt').textContent = nDone >= C.ACH.length ? 'Получено!' : `${nDone} / ${C.ACH.length}`; $('achTrophyBar').style.width = Math.round(nDone / C.ACH.length * 100) + '%'; }
     const tabs = $('achTabs'); tabs.textContent = '';
     for (const c of C.ACH_CATS) {
       const tiers = C.ACH.filter(a => a.cat === c.key), n = tiers.filter(a => got[a.id]).length;
