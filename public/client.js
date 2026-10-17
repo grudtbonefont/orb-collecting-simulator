@@ -174,32 +174,29 @@
   }
   // ------------------------------------------------------------ menu music: loops on start / login / lobby screens, fades out in the arena
   const music = (() => {
-    const el = $('menuMusic'), btn = $('musicBtn'), KEY = 'ocs_music', VOL = 0.5;
-    let muted = store.get(KEY) === '0', want = true, fadeT = null;
-    const paint = () => { btn.textContent = muted ? '🔇' : '🔊'; btn.setAttribute('aria-pressed', muted ? 'true' : 'false'); };
-    const tryPlay = () => { if (muted || !want || !el.paused) return; clearInterval(fadeT); el.volume = VOL; const p = el.play(); if (p && p.catch) p.catch(() => {}); };
-    const fadeOut = () => {
-      clearInterval(fadeT); if (el.paused) return;
-      fadeT = setInterval(() => { const v = el.volume - 0.05; if (v <= 0.01) { clearInterval(fadeT); el.pause(); el.volume = VOL; } else el.volume = v; }, 60); // iOS ignores volume: it simply pauses at the end
+    // single audio element: in-game background playlist only (no menu music)
+    const btn = $('musicBtn'), KEY = 'ocs_music', TR = ['/audio/bg1.m4a', '/audio/bg2.m4a', '/audio/bg3.m4a'], VOL = 0.3;
+    const a = new Audio(); a.preload = 'none'; a.setAttribute('playsinline', ''); a.volume = VOL;
+    let muted = store.get(KEY) === '0', on = false, loaded = false, pending = false, idx = Math.floor(Math.random() * TR.length);
+    const load = i => { idx = (i + TR.length) % TR.length; a.src = TR[idx]; loaded = true; };
+    const play = () => {
+      if (muted || !on || pending || !a.paused) return; // guard: never start twice
+      if (!loaded) load(idx);
+      for (const x of document.querySelectorAll('audio')) if (x !== a) x.pause();
+      a.volume = VOL; pending = true;
+      const p = a.play(); const done = () => { pending = false; if (muted || !on) a.pause(); };
+      if (p && p.then) p.then(done, done); else done();
     };
-    for (const ev of ['pointerdown', 'touchend', 'keydown', 'click']) document.addEventListener(ev, tryPlay, { capture: true, passive: true }); // autoplay blocked → first interaction
-    const setMuted = m => { muted = !!m; store.set(KEY, muted ? '0' : '1'); paint(); if (muted) { clearInterval(fadeT); el.pause(); } else tryPlay(); document.dispatchEvent(new Event('ocs-music')); };
+    a.addEventListener('ended', () => { load(idx + 1); play(); });
+    a.addEventListener('error', () => { if (on && loaded) { load(idx + 1); setTimeout(play, 500); } });
+    const kick = () => play();
+    for (const ev of ['pointerdown', 'touchend', 'keydown', 'click']) document.addEventListener(ev, kick, { capture: true, passive: true }); // autoplay blocked → first interaction
+    const paint = () => { btn.textContent = muted ? '🔇' : '🔊'; btn.setAttribute('aria-pressed', muted ? 'true' : 'false'); };
+    const setMuted = m => { muted = !!m; store.set(KEY, muted ? '0' : '1'); paint(); if (muted) a.pause(); else play(); document.dispatchEvent(new Event('ocs-music')); };
     btn.addEventListener('click', e => { e.stopPropagation(); setMuted(!muted); });
     paint();
-    // in-game background playlist (bg1..bg3): shuffled start, loops the list, lazy-loaded
-    const bg = (() => {
-      const TR = ['/audio/bg1.m4a', '/audio/bg2.m4a', '/audio/bg3.m4a'], BVOL = 0.3;
-      const a = new Audio(); a.preload = 'none'; a.setAttribute('playsinline', ''); a.volume = BVOL;
-      let idx = Math.floor(Math.random() * TR.length), on = false, loaded = false;
-      const load = i => { idx = (i + TR.length) % TR.length; a.src = TR[idx]; loaded = true; };
-      const play = () => { if (muted || !on) return; if (!loaded) load(idx); if (!a.paused) return; a.volume = BVOL; const p = a.play(); if (p && p.catch) p.catch(() => {}); };
-      a.addEventListener('ended', () => { load(idx + 1); play(); });
-      a.addEventListener('error', () => { if (on && loaded) { load(idx + 1); setTimeout(play, 500); } });
-      return { el: a, play, start() { on = true; play(); }, stop() { on = false; a.pause(); }, next() { a.pause(); load(idx + 1); play(); }, get idx() { return idx; }, get on() { return on; } };
-    })();
-    for (const ev of ['pointerdown', 'touchend', 'keydown', 'click']) document.addEventListener(ev, () => bg.play(), { capture: true, passive: true });
-    document.addEventListener('ocs-music', () => { if (muted) bg.el.pause(); else bg.play(); });
-    return { menu() { want = true; bg.stop(); document.body.classList.remove('in-game'); tryPlay(); }, game() { want = false; document.body.classList.add('in-game'); fadeOut(); bg.start(); }, el, bg, setMuted, get muted() { return muted; } };
+    const bg = { el: a, get idx() { return idx; }, next() { a.pause(); load(idx + 1); play(); } };
+    return { menu() { on = false; document.body.classList.remove('in-game'); a.pause(); }, game() { on = true; document.body.classList.add('in-game'); play(); }, el: a, bg, setMuted, get muted() { return muted; } };
   })();
   // ------------------------------------------------------------ ⚙️ settings (localStorage): top notifications, music (same switch as 🔊/🔇)
   function buildSettings() {
@@ -216,7 +213,8 @@
   $('setMusic').addEventListener('change', () => music.setMuted(!$('setMusic').checked));
   document.addEventListener('ocs-music', () => { $('setMusic').checked = !music.muted; });
   $('setBtn').addEventListener('click', e => { e.stopPropagation(); buildSettings(); toggleModal('settings'); });
-  window.OCSMusic = () => ({ bgPaused: music.bg.el.paused, bgSrc: music.bg.el.currentSrc || music.bg.el.src, bgIdx: music.bg.idx, bgPreload: music.bg.el.preload, bgNext: () => music.bg.next(), paused: music.el.paused, muted: music.muted, volume: music.el.volume, src: music.el.currentSrc });
+  window.OCSMusic = () => ({ bgPaused: music.el.paused, bgSrc: music.el.currentSrc || music.el.src, bgIdx: music.bg.idx, bgPreload: music.el.preload, bgNext: () => music.bg.next(), muted: music.muted, playing: [...document.querySelectorAll("audio")].concat([music.el]).filter((x, i, s) => s.indexOf(x) === i && !x.paused).length });
+  window.OCSMusicCtl = { menu: () => music.menu(), game: () => music.game() };
   music.menu(); // try autoplay on load
   function enterGame(res, reconnect) {
     music.game();
