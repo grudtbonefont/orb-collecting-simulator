@@ -95,6 +95,7 @@
     <div class="balance"><i class="cur-orb" aria-hidden="true"></i><span id="hudBalance">0</span><small>сфер</small></div>
     <div class="balance shard-bal" title="Осколки — вторая валюта: «Лавка осколков» в магазине"><i class="cur-shard" aria-hidden="true"></i><span id="hudShards">0</span><small>осколков</small></div>
     <div id="hudBoosts" class="row boosts hidden"></div>
+    <div id="hudPotions" class="hud-potions hidden"></div>
     <div class="row">Всего собрано: <b id="hudTotal">0</b></div>
     <div class="row">За сессию: <b id="hudSession">0</b></div>
     <div class="row online"><i class="live"></i>Онлайн: <b id="hudOnline">1</b></div>
@@ -114,6 +115,7 @@
     <button class="btn" data-open="ach" id="achBtn" title="Достижения (J)"><i>🏆</i><span>Достижения</span></button>
     <button class="btn" data-open="lb" title="Рейтинг (L)"><i>📊</i><span>Рейтинг</span></button>
   </div>
+  <button id="emoteBtn" class="emote-btn" type="button" title="Эмоции" aria-label="Эмоции">😀</button><div id="emotePicker" class="emote-picker hidden"></div>
   <div id="radar" class="radar"><canvas id="minimap" width="150" height="150" aria-label="Радар"></canvas><button id="radarToggle" class="radar-toggle" type="button" title="Свернуть / развернуть радар">–</button></div>
   <div class="zoom-btns"><button type="button" id="zoomIn" title="Приблизить (колесо мыши / два пальца)" aria-label="Приблизить">+</button><button type="button" id="zoomOut" title="Отдалить" aria-label="Отдалить">−</button></div>
   <button type="button" id="doorBtn" class="door-btn btn primary hidden"></button>
@@ -404,11 +406,18 @@
 <!-- Daily quests -->
 <div id="quests" class="modal hidden">
   <div class="modal-card">
-    <div class="modal-head"><h2>📜 Задания дня</h2><div class="pill" id="qStreak">🔥 0</div><button class="close" aria-label="Закрыть">✕</button></div>
+    <div class="modal-head"><h2 id="questsTitle">📜 Задания дня</h2><div class="pill" id="qStreak">🔥 0</div><button class="close" aria-label="Закрыть">✕</button></div>
+    <div class="tabs" id="qTabs"><button class="tab active" type="button" data-qtab="daily">📜 Ежедневные</button><button class="tab" type="button" data-qtab="weekly">🗓 Еженедельные</button></div>
     <p class="muted note" id="qReset"></p>
     <div id="qList" class="q-list"></div>
     <div id="qBonus" class="q-bonus"></div>
   </div>
+</div>
+
+<div id="pcard" class="pcard hidden" role="dialog" aria-label="Профиль игрока">
+  <div class="pc-head"><canvas id="pcAvatar" width="84" height="84"></canvas><div><h3 id="pcName"></h3><span id="pcAdmin" class="pill hidden">👑 Админ</span> <span id="pcTrophy" class="pill gold hidden">🏆 Кубок</span></div><button id="pcClose" class="close" type="button" aria-label="Закрыть">✕</button></div>
+  <div id="pcStats" class="pc-stats"></div>
+  <div class="pc-sub">Надето</div><div id="pcEq" class="pc-eqs"></div>
 </div>
 
 <!-- Leaderboard -->

@@ -176,10 +176,33 @@
     X('t_crystal', 'trail', 'Кристальный след', 270, 'legendary', 'crystal'),
     X('c_prism', 'color', 'Призма', 330, 'legendary', 'prism'),
     X('h_shard_crown', 'hat', 'Осколочная корона', 540, 'legendary', 'shardcrown'),
+    // potions (зелья): picked up on the map, stack in the inventory, «Выпить» starts a short boost (same kind refreshes, never stacks)
+    { id: 'p_speed', type: 'potion', cat: 'misc', name: 'Зелье скорости', rarity: 'rare', icon: '💨', potion: 'speed', desc: 'Скорость +20 % на 60 с', stackable: true, maxStack: 20, base: false, price: null, sources: ['arena', 'admin'] },
+    { id: 'p_orbs', type: 'potion', cat: 'misc', name: 'Зелье богатства', rarity: 'rare', icon: '💰', potion: 'orbs', desc: 'Сферы +25 % на 90 с', stackable: true, maxStack: 20, base: false, price: null, sources: ['arena', 'admin'] },
+    { id: 'p_luck', type: 'potion', cat: 'misc', name: 'Зелье удачи', rarity: 'rare', icon: '🍀', potion: 'luck', desc: 'Шанс удачи ×1,25 на 90 с', stackable: true, maxStack: 20, base: false, price: null, sources: ['arena', 'admin'] },
+    { id: 'p_magnet', type: 'potion', cat: 'misc', name: 'Зелье магнита', rarity: 'rare', icon: '🧲', potion: 'magnet', desc: 'Радиус сбора +30 % на 60 с', stackable: true, maxStack: 20, base: false, price: null, sources: ['arena', 'admin'] },
+    { id: 'p_shard', type: 'potion', cat: 'misc', name: 'Зелье осколков', rarity: 'epic', icon: '✦', potion: 'shard', desc: '3 % шанс получить осколок за редкую (и ценнее) сферу, 120 с', stackable: true, maxStack: 20, base: false, price: null, sources: ['arena', 'admin'] },
+    // emotes: shown above the head for 3 s; two are free for everyone, the rest are sold in the shop («Эмоции»)
+    { id: 'e_wave', type: 'emote', cat: 'emote', name: 'Привет', rarity: 'common', icon: '👋', value: '👋', free: true, price: 0, stackable: false, maxStack: 1, base: false, sources: [] },
+    { id: 'e_smile', type: 'emote', cat: 'emote', name: 'Улыбка', rarity: 'common', icon: '😀', value: '😀', free: true, price: 0, stackable: false, maxStack: 1, base: false, sources: [] },
+    { id: 'e_laugh', type: 'emote', cat: 'emote', name: 'Смех', rarity: 'common', icon: '😂', value: '😂', price: 300, stackable: false, maxStack: 1, base: false, sources: ['shop', 'admin'] },
+    { id: 'e_cry', type: 'emote', cat: 'emote', name: 'Слёзы', rarity: 'common', icon: '😭', value: '😭', price: 300, stackable: false, maxStack: 1, base: false, sources: ['shop', 'admin'] },
+    { id: 'e_cool', type: 'emote', cat: 'emote', name: 'Крутой', rarity: 'rare', icon: '😎', value: '😎', price: 450, stackable: false, maxStack: 1, base: false, sources: ['shop', 'admin'] },
+    { id: 'e_heart', type: 'emote', cat: 'emote', name: 'Сердце', rarity: 'rare', icon: '❤️', value: '❤️', price: 450, stackable: false, maxStack: 1, base: false, sources: ['shop', 'admin'] },
+    { id: 'e_angry', type: 'emote', cat: 'emote', name: 'Злость', rarity: 'rare', icon: '😡', value: '😡', price: 450, stackable: false, maxStack: 1, base: false, sources: ['shop', 'admin'] },
+    { id: 'e_fire', type: 'emote', cat: 'emote', name: 'Огонь', rarity: 'rare', icon: '🔥', value: '🔥', price: 750, stackable: false, maxStack: 1, base: false, sources: ['shop', 'admin'] },
+    { id: 'e_party', type: 'emote', cat: 'emote', name: 'Праздник', rarity: 'epic', icon: '🎉', value: '🎉', price: 900, stackable: false, maxStack: 1, base: false, sources: ['shop', 'admin'] },
+    { id: 'e_skull', type: 'emote', cat: 'emote', name: 'Череп', rarity: 'epic', icon: '💀', value: '💀', price: 1200, stackable: false, maxStack: 1, base: false, sources: ['shop', 'admin'] },
+    { id: 'e_crown', type: 'emote', cat: 'emote', name: 'Корона', rarity: 'legendary', icon: '👑', value: '👑', price: 2250, stackable: false, maxStack: 1, base: false, sources: ['shop', 'admin'] },
     // final achievement reward: only granted by the server when ALL achievement tiers are done (never sold)
     { id: 'h_trophy', type: 'cosmetic', cat: 'hat', name: 'Кубок', price: null, rarity: 'legendary', value: 'trophy', stackable: false, maxStack: 1, base: false, award: true,
       desc: 'Награда за все достижения. Не продаётся.', sources: ['achievement', 'admin'] },
   ];
+  const POTIONS = { speed: { mult: 1.2, sec: 60 }, orbs: { mult: 1.25, sec: 90 }, luck: { mult: 1.25, sec: 90 }, magnet: { mult: 1.3, sec: 60 }, shard: { chance: 0.03, sec: 120 } };
+  const POTION_MAP = { everyMinMs: 35000, everyMaxMs: 70000, maxAlive: 4, lifeMs: 90000, r: 16, weights: { p_speed: 26, p_orbs: 24, p_luck: 22, p_magnet: 22, p_shard: 6 } };
+  const potionOn = (stats, k, now = Date.now()) => !!(stats && stats.potions && stats.potions[k] > now);
+  const potionMult = (stats, k, now = Date.now()) => (potionOn(stats, k, now) && POTIONS[k].mult ? POTIONS[k].mult : 1);
+  const EMOTE_MS = 3000, EMOTE_GAP_MS = 2500;
   const SHARD_ID = 'x_legend_shard';
   const SHARD_EXCHANGE = { orbs: 25, maxPerTrade: 99 }; // «Лавка осколков»: 1 shard → 25 orbs (was 40) (balance only, not the all-time total)
   const ITEM_BY_ID = {};
@@ -203,7 +226,7 @@
     luck: { key: 'luck', name: 'Удача', desc: 'Шанс ×2 за сферу; с 3-го уровня ещё и «находка»: обычная или необычная сфера становится эпической (+10)', max: 5, prices: [220, 600, 1500, 3380, 6750],
       values: [0, 1.1, 2.2, 3.3, 4.4, 5.5], jackpot: [0, 0, 0, 0.3, 0.4, 0.6], unit: '%' },
     sense: { key: 'sense', name: 'Чутьё легенды', desc: 'Компас: стрелки к самым редким сферам и к событиям', max: 3, prices: [300, 900, 2250], values: [0, 1, 2, 3], unit: '' },
-    skill: { key: 'skill', name: 'Мастер мини-игр', desc: 'Бонус к выигрышам в мини-играх', max: 3, prices: [150, 450, 1050], values: [0, 11, 22, 33], unit: '%' },
+    skill: { key: 'skill', name: 'Мастер мини-игр', desc: 'Бонус к выигрышам в мини-играх', max: 3, prices: [150, 450, 1050], values: [0, 11.6, 23.1, 34.7], unit: '%' }, // +5 % stronger (was 11/22/33)
   };
   // Prices players actually paid before the soft-reset (used once to refund → then upgrades reset to 0)
   const UPGRADE_REFUND_PRICES = {
@@ -385,7 +408,8 @@
   }
   const laserPenalty = balance => (balance >= 1 ? Math.min(OBSTACLES.penaltyMax, Math.max(1, Math.round(balance * OBSTACLES.penaltyPct))) : 0);
 
-  const skillPrize = (prize, level) => prize > 0 ? Math.round(prize * (1 + upValue('skill', level) / 100)) : prize;
+  const MG_PRIZE_MULT = 2; // mini-game rewards ×2 (buff)
+  const skillPrize = (prize, level) => prize > 0 ? Math.round(prize * MG_PRIZE_MULT * (1 + upValue('skill', level) / 100)) : prize;
 
   // Apply one movement input step (STEP_DT seconds). dx,dy is a direction vector with length <= 1.
   // Player pushing (server-authoritative): players are solid circles. Overlaps are split so that whoever walks INTO the
@@ -446,7 +470,7 @@
   const api = {
     WORLD, ZONE_W, ZONE_H, DOOR, doorDist, DOOR_COST, ZONE2_WEIGHTS, zoneOf, zoneGate, PLAYER_R, BASE_SPEED, TICK_MS, STEP_DT, ORB_TYPES, ORB_RANK, ORB_LEGEND, POOL_WEIGHTS, RAIN_WEIGHTS, rollOrbType, expectedOrbValue, CATEGORIES, INV_CATEGORIES, RARITIES, ITEMS, ITEM_BY_ID, INV_SLOTS, INV_CAP, BUY_MAX_QTY, PAINTS,
     DEFAULT_EQUIPPED, DEFAULT_OWNED, UPGRADES, UPGRADE_KEYS, UPGRADE_REFUND_PRICES, upLevel, upValue, jackpotChance, upgradeText, orbReward, skillPrize, compassTargets, SENSE_EPIC_RANGE, RADAR, radarBlips, PUSH, separatePlayers,
-    EVENTS, EVENT_KEYS, AUTO_EVENT_KEYS, EVENT_SCHEDULE, luckyWeights, OBSTACLES, laserAngle, resolveObstacles, laserHits, laserPenalty, robotPenalty, WEEKEND, weekendInfo, SHARD_ID, SHARD_EXCHANGE,
+    EVENTS, EVENT_KEYS, AUTO_EVENT_KEYS, EVENT_SCHEDULE, luckyWeights, OBSTACLES, laserAngle, resolveObstacles, laserHits, laserPenalty, robotPenalty, WEEKEND, weekendInfo, SHARD_ID, SHARD_EXCHANGE, POTIONS, POTION_MAP, potionOn, potionMult, EMOTE_MS, EMOTE_GAP_MS, MG_PRIZE_MULT,
     MINIGAMES, REACTION_PRIZES, rushPrize, memoryPrize, memoryShowMs, shellFinal, shellShuffleMs, throwPos, throwPoints, throwPrize, chainPrize, minigameMinMs, speedFor, pickupFor, applyInput, BONUS_ROOM, inBonusRoom,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

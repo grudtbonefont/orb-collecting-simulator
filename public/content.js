@@ -79,6 +79,17 @@
   // ---------------------------------------------------------------- daily quests: 3 per day, reset 00:00 Moscow time
   const dayKey = (now = Date.now()) => Math.floor((now + MSK) / DAY);
   const resetIn = (now = Date.now()) => (dayKey(now) + 1) * DAY - MSK - now;
+  // weekly quests: the same 5 every week, reset Monday 00:00 MSK (bigger rewards than the dailies)
+  const weekKey = (now = Date.now()) => Math.floor((dayKey(now) + 3) / 7); // day 0 (1970-01-01) was a Thursday → +3 makes weeks start on Monday
+  const weekResetIn = (now = Date.now()) => ((weekKey(now) + 1) * 7 - 3) * DAY - MSK - now;
+  const WEEKLY = [
+    { id: 'w_orbs', kind: 'orbs', goal: 15000, text: 'Соберите 15 000 сфер', rw: { orbs: 1500, shards: 3 } },
+    { id: 'w_rare', kind: 'rare', goal: 150, text: 'Соберите 150 редких (или ценнее) сфер', rw: { orbs: 1000, shards: 2 } },
+    { id: 'w_mg', kind: 'mg', goal: 25, text: 'Сыграйте 25 мини-игр', rw: { orbs: 1000, shards: 2 } },
+    { id: 'w_event', kind: 'event', goal: 5, text: 'Поучаствуйте в 5 событиях арены', rw: { orbs: 1200, shards: 3 } },
+    { id: 'w_play', kind: 'play', goal: 180, text: 'Проведите на арене 3 часа', rw: { orbs: 1500, shards: 4 } },
+  ];
+  const WEEKLY_BY_ID = Object.fromEntries(WEEKLY.map(q => [q.id, q]));
   // kind = counter that grows (server: questProgress(acc, kind, n)); diff 1–3 scales the reward
   const QUESTS = [
     { id: 'orbs300', kind: 'orbs', goal: 300, diff: 1, text: 'Соберите 300 сфер' },
@@ -153,7 +164,7 @@
   }
 
   const api = { MINI, MINI_KEYS, ROOM, inRoom, ACH, ACH_BY_ID, ACH_CATS, CHAINS, CHAIN_BY_ID, achValue, itemsOwned, OLD_ACH, oldTier, tierReward, dayKey, resetIn, QUESTS, QUEST_BY_ID, BOOSTS, QUEST_REWARDS, ALL_DONE, allDoneBonus,
-    rollQuests, questItems, rewardText, boostMult, BOSS, bossHp, bossPenalty, bossReward };
+    WEEKLY, WEEKLY_BY_ID, weekKey, weekResetIn, rollQuests, questItems, rewardText, boostMult, BOSS, bossHp, bossPenalty, bossReward };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.C = api;
 })(typeof window !== 'undefined' ? window : this);

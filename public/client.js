@@ -43,7 +43,7 @@
 
   const itemVal = id => (G.ITEM_BY_ID[id] || {}).value;
   let selfFx = { spd: 1, frozen: false, god: false, invis: false }, cevSpd = 1, lastSnapIds = null; // admin effects on this player (server-authoritative; mirrored for prediction)
-  const mySpeed = () => G.speedFor(profile ? profile.upgrades.speed : 0) * C.boostMult(profile && profile.stats, 'speed', Date.now() + srvSkew) * (selfFx.frozen ? 0 : selfFx.spd || 1) * (cevSpd || 1) * funSpeedMult(); // quest boost «Скорость +10 %»
+  const mySpeed = () => G.speedFor(profile ? profile.upgrades.speed : 0) * C.boostMult(profile && profile.stats, 'speed', Date.now() + srvSkew) * (selfFx.frozen ? 0 : selfFx.spd || 1) * (cevSpd || 1) * funSpeedMult() * G.potionMult(profile && profile.stats, 'speed', Date.now() + srvSkew); // quest boost «Скорость +10 %»
   let srvSkew = 0;
   const myPickup = () => G.pickupFor(profile ? profile.upgrades.magnet : 0);
   const fmt = n => Number(n).toLocaleString('ru-RU');
@@ -239,7 +239,7 @@
     $('hudName').textContent = '👤 ' + myName;
     resetChat(res.chat || []);
     runners.clear(); evResultHide(); setEvent(res.event || null); setObstacles(res.obstacles || []); setWeekend(res.weekend || 0);
-    setFx(res.fx || null, true); setFun(res.fun || null); pollS = res.poll || null; myVote = null; renderPoll(); $('admBtn').classList.toggle('hidden', !res.admin); isAdminMe = !!res.admin; selfFx = { spd: 1, frozen: false, god: false, invis: false };
+    setFx(res.fx || null, true); mapPots = res.pots || []; setFun(res.fun || null); pollS = res.poll || null; myVote = null; renderPoll(); $('admBtn').classList.toggle('hidden', !res.admin); isAdminMe = !!res.admin; selfFx = { spd: 1, frozen: false, god: false, invis: false };
     setMini(res.mini || null); setBoss(res.boss || null); roomUntil = 0; bossRings.length = 0; updateRoomBar();
     updateHud();
     if (!reconnect) toastC('other', `Добро пожаловать, ${myName}! Собирайте сферы.`, 'ok');
@@ -622,10 +622,107 @@
   // analog speed up to JOY_R px); the right part keeps hold-to-move towards the finger. A second finger cancels it (pinch).
   const JOY_R = 58, JOY_ZONE = 0.55;
   let joy = null;
+  // ------------------------------------------------------------ potions on the map, emotes over heads, public profile cards
+  let mapPots = [];
+  const emotes = new Map(); // player id → { e, at }
+  socket.on('pots', l => { mapPots = Array.isArray(l) ? l : []; });
+  socket.on('emote', d => { if (d && G.ITEM_BY_ID[d.e]) emotes.set(d.id, { e: G.ITEM_BY_ID[d.e].value, at: performance.now() }); });
+  window.OCSPots = () => mapPots.slice();
+  function drawPotions(g, t) {
+    for (const [, x, y, item] of mapPots) {
+      if (x < cam.x - 60 || x > cam.x + VW + 60 || y < cam.y - 60 || y > cam.y + VH + 60) continue;
+      const def = G.ITEM_BY_ID[item]; if (!def) continue;
+      const bob = Math.sin(t * 3 + x) * 3, r = G.POTION_MAP.r;
+      g.save(); g.shadowColor = '#c78bff'; g.shadowBlur = 16;
+      g.fillStyle = 'rgba(160,90,255,0.28)'; g.beginPath(); g.arc(x, y + bob, r + 4 + Math.sin(t * 5) * 2, 0, Math.PI * 2); g.fill();
+      g.shadowBlur = 0; g.font = `${r * 1.6}px system-ui, "Apple Color Emoji", "Segoe UI Emoji", sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText('🧪', x, y + bob); g.font = `${r}px system-ui, "Apple Color Emoji", "Segoe UI Emoji", sans-serif`; g.fillText(def.icon, x + r * 0.8, y + bob - r * 0.8); g.restore();
+    }
+  }
+  function drawEmotes(g) {
+    const n = performance.now();
+    for (const [id, em] of emotes) {
+      const k = (n - em.at) / G.EMOTE_MS, pl = players.get(id), pos = id === myId ? dispMe : pl && pl.pos;
+      if (k >= 1 || !pl || !pos) { emotes.delete(id); continue; }
+      const pop = Math.min(1, k * 8), a = k > 0.85 ? (1 - k) / 0.15 : 1, r = G.PLAYER_R * (pl.sz || 1);
+      g.save(); g.globalAlpha = a; g.font = `${Math.round(30 * pop)}px system-ui, "Apple Color Emoji", "Segoe UI Emoji", sans-serif`; g.textAlign = 'center'; g.textBaseline = 'bottom';
+      g.fillStyle = 'rgba(10,14,32,0.65)'; g.beginPath(); g.arc(pos.x, pos.y - r - 46 - k * 8, 22 * pop, 0, Math.PI * 2); g.fill();
+      g.fillText(em.e, pos.x, pos.y - r - 30 - k * 8); g.restore();
+    }
+  }
+  // emote picker (button next to the radar)
+  const emoteOwned = def => def.free || owns(def.id);
+  function renderEmotePicker() {
+    const box = $('emotePicker'); box.innerHTML = '';
+    const list = G.ITEMS.filter(i => i.type === 'emote');
+    for (const def of list) {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'emo' + (emoteOwned(def) ? '' : ' locked'); b.dataset.emote = def.id;
+      b.title = def.name + (emoteOwned(def) ? '' : ` — в магазине за ${def.price} сфер`); b.textContent = def.value;
+      b.onclick = () => {
+        if (!emoteOwned(def)) { toast(`«${def.name}» продаётся в магазине (раздел «Эмоции») за ${fmt(def.price)} сфер`, 'err'); return; }
+        socket.emit('emote', def.id, r => { if (r && !r.ok) toast(r.error, 'err'); });
+        box.classList.add('hidden');
+      };
+      box.appendChild(b);
+    }
+  }
+  $('emoteBtn').addEventListener('click', e => { e.stopPropagation(); const box = $('emotePicker'); if (box.classList.contains('hidden')) renderEmotePicker(); box.classList.toggle('hidden'); });
+  document.addEventListener('pointerdown', e => { const box = $('emotePicker'); if (!box.classList.contains('hidden') && !box.contains(e.target) && e.target !== $('emoteBtn')) box.classList.add('hidden'); });
+  // potion HUD: active potion icons with timers
+  function updatePotionHud() {
+    const el = $('hudPotions'), p = profile && profile.stats && profile.stats.potions, now = Date.now() + srvSkew;
+    const on = p ? Object.keys(G.POTIONS).filter(k => p[k] > now) : [];
+    el.classList.toggle('hidden', !on.length);
+    el.innerHTML = on.map(k => { const def = G.ITEMS.find(i => i.potion === k); return `<span class="pot-chip" data-pot="${k}" title="${esc(def.name)}: ${esc(def.desc)}"><i>${def.icon}</i>${mmss(p[k] - now)}</span>`; }).join('');
+  }
+  setInterval(() => { if (joined && profile) updatePotionHud(); }, 500);
+  function drinkPotion(def) {
+    socket.emit('potion:use', def.id, r => {
+      if (!r || !r.ok) { toast((r && r.error) || 'Не получилось', 'err'); return; }
+      if (r.profile) setProfile(r.profile);
+      toastC('rewards', `🧪 ${def.name}: ${def.desc}`, 'ok'); renderInv(); updatePotionHud(); updateHud();
+    });
+  }
+  // public profile card: click / tap a player on the map
+  const fmtMin = m => (m >= 60 ? `${Math.floor(m / 60)} ч ${m % 60} мин` : `${m} мин`);
+  function openCard(id) {
+    let tries = 0;
+    const ask = () => socket.emit('profile:public', id, r => {
+      if (r && r.ok) return showCard(r.card);
+      if (r && r.error === 'Подождите…' && ++tries < 4) return setTimeout(ask, 350);
+      toast((r && r.error) || 'Профиль недоступен', 'err');
+    });
+    ask();
+  }
+  function showCard(c) {
+    const box = $('pcard'), eq = Object.values(c.equipped || {}).map(id => G.ITEM_BY_ID[id]).filter(d => d && !d.base);
+    $('pcName').textContent = c.name + (c.me ? ' (вы)' : ''); $('pcAdmin').classList.toggle('hidden', !c.admin);
+    $('pcTrophy').classList.toggle('hidden', !c.trophy);
+    const av = $('pcAvatar'), ag = av.getContext('2d'); ag.setTransform(1, 0, 0, 1, 0, 0); ag.clearRect(0, 0, av.width, av.height);
+    try { drawAvatar(ag, av.width / 2, av.height / 2 + 6, 26, c.equipped || {}, performance.now() / 1000, { dir: 1, phase: 1 }); } catch (e) {}
+    const rows = [['Всего собрано', `${fmt(c.total)} ${ORB_I}`], ['Сейчас сфер', `${fmt(c.balance)} ${ORB_I}`], ['Осколки', shardsH(c.shards)], ['Достижения', `${c.ach}/${c.achMax}`],
+      ['Кубок', c.trophy ? '🏆 есть' : '—'], ['Время в игре', fmtMin(c.playMin)], ['Побеждено боссов', fmt(c.bossKills)], ['Мини-игр выиграно', fmt(c.mgWins)], ['Заданий выполнено', fmt(c.questsDone)]];
+    $('pcStats').innerHTML = rows.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('');
+    $('pcEq').innerHTML = ''; if (!eq.length) $('pcEq').textContent = 'Стандартный образ';
+    for (const d of eq) { const t = document.createElement('span'); t.className = 'pc-eq rar-' + d.rarity; t.appendChild(iconEl(d.id, 'sm')); t.append(d.name); $('pcEq').appendChild(t); }
+    box.classList.remove('hidden');
+  }
+  $('pcClose').addEventListener('click', () => $('pcard').classList.add('hidden'));
+  window.OCSCard = openCard;
+  window.OCSWorldToClient = (x, y) => ({ x: (x - cam.x) * zoom, y: (y - cam.y) * zoom });
+  function playerAt(cx, cy) { // client px → player under the pointer (or null)
+    const wx = cam.x + cx / zoom, wy = cam.y + cy / zoom; let best = null, bd = 1e9;
+    for (const pl of players.values()) {
+      if (!pl.pos || (pl.id !== myId && lastSnapIds && !lastSnapIds.has(pl.id))) continue;
+      const d = Math.hypot(pl.pos.x - wx, pl.pos.y - wy); if (d < G.PLAYER_R * (pl.sz || 1) + 10 && d < bd) { bd = d; best = pl; }
+    }
+    return best;
+  }
   window.OCSJoy = () => (joy ? { bx: joy.bx, by: joy.by, kx: joy.kx, ky: joy.ky } : null); // read-only hook for the UI test
   window.OCSMe = () => ({ x: me.x, y: me.y });
   const joyMove = (x, y) => { const dx = x - joy.bx, dy = y - joy.by, d = Math.hypot(dx, dy), k = d > JOY_R ? JOY_R / d : 1; joy.kx = joy.bx + dx * k; joy.ky = joy.by + dy * k; };
   canvas.addEventListener('pointerdown', e => {
+    if (joined && stage === 'game') { const hit = playerAt(e.clientX, e.clientY); if (hit) { openCard(hit.id); return; } }
     if (e.pointerType === 'touch') {
       touchPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (touchPts.size >= 2) { if (!pinch && touchPts.size === 2) pinch = { d: pinchDist(), z: zoom }; pointer.down = false; joy = null; return; }
@@ -1438,6 +1535,7 @@
     }
     fxLod = onScreen > 22 || fpsEma < 30 ? 0 : onScreen > 10 || fpsEma < 45 || mobileUI() ? 1 : 2;
     drawFunUnder(ctx, t);
+    drawPotions(ctx, t);
     for (const pl of players.values()) if (pl.trailVis && (pl.id === myId || !lastSnapIds || lastSnapIds.has(pl.id))) drawTrail(ctx, pl, t, now);
     const order = Array.from(players.values()).sort((p, q) => (p.id === myId) - (q.id === myId));
     for (const pl of order) {
@@ -1449,6 +1547,7 @@
       if (ghost) ctx.globalAlpha = 1;
     }
     drawFunOver(ctx, t);
+    drawEmotes(ctx);
     // floating texts
     for (let i = floaters.length - 1; i >= 0; i--) {
       const f = floaters[i], k = (now - f.start) / 900;
@@ -1996,6 +2095,7 @@
   socket.on('quest', d => {
     if (!d) return;
     if (d.all) { toastC('quests', `📜 Все задания дня выполнены! Серия: ${d.streak} 🔥 · ${C.rewardText(d.reward)}`, 'ok'); return; }
+    if (d.weekly) { const w = C.WEEKLY_BY_ID[d.id]; if (w) toastC('quests', `🗓 Еженедельное задание выполнено: «${w.text}» · ${C.rewardText(d.reward)}`, 'ok'); return; }
     const q = C.QUEST_BY_ID[d.id]; if (q) toastC('quests', `📜 Задание выполнено: «${q.text}» · ${C.rewardText(d.reward)}`, 'ok');
   });
   const streakNow = st => (st && st.streakDay != null && st.streakDay >= C.dayKey() - 1 ? st.streak || 0 : 0);
@@ -2023,8 +2123,31 @@
       row.textContent = `${q.done ? '✅' : '▫️'} ${def.text} ${q.done ? '' : `${fmt(q.p)}/${fmt(def.goal)}`}`; el.appendChild(row);
     }
   }
+  let questTab = 'daily';
+  document.querySelectorAll('#qTabs .tab').forEach(b => b.addEventListener('click', () => { questTab = b.dataset.qtab; renderQuests(); }));
+  function renderWeekly() {
+    const list = $('qList'), st = profile.stats || {}, wk = C.weekKey(Date.now() + srvSkew);
+    const w = st.weekly && st.weekly.wk === wk ? st.weekly : { q: C.WEEKLY.map(q => ({ id: q.id, p: 0, done: false })) };
+    const ms = C.weekResetIn(Date.now() + srvSkew), dd = Math.floor(ms / 86400000), hh = Math.floor(ms / 3600000) % 24, mm = Math.floor(ms / 60000) % 60;
+    $('qStreak').textContent = `🗓 ${w.q.filter(q => q.done).length}/${C.WEEKLY.length}`;
+    $('qReset').textContent = `5 больших заданий на неделю. Сброс в понедельник 00:00 по Москве (через ${dd ? dd + ' д ' : ''}${hh} ч ${mm} мин). Прогресс сохраняется.`;
+    $('qBonus').innerHTML = '';
+    for (const q of w.q) {
+      const def = C.WEEKLY_BY_ID[q.id]; if (!def) continue;
+      const el = document.createElement('div'); el.className = 'q-item weekly' + (q.done ? ' done' : ''); el.dataset.weekly = q.id;
+      const top = document.createElement('div'); top.className = 'q-top';
+      const nm = document.createElement('b'); nm.textContent = (q.done ? '✅ ' : '') + def.text;
+      const df = document.createElement('span'); df.className = 'q-diff'; df.textContent = '🗓'; top.append(nm, df);
+      const bar = document.createElement('div'); bar.className = 'ach-bar'; const fill = document.createElement('i'); fill.style.width = Math.min(100, q.p / def.goal * 100) + '%'; bar.appendChild(fill);
+      const meta = document.createElement('div'); meta.className = 'ach-meta'; meta.textContent = `${fmt(Math.floor(q.p))} / ${fmt(def.goal)} · награда: ${C.rewardText(def.rw)}`;
+      el.append(top, bar, meta); list.appendChild(el);
+    }
+  }
   function renderQuests() {
     if (!profile) return;
+    document.querySelectorAll('#qTabs .tab').forEach(b => b.classList.toggle('active', b.dataset.qtab === questTab));
+    $('questsTitle').textContent = questTab === 'weekly' ? '🗓 Еженедельные задания' : '📜 Задания дня';
+    if (questTab === 'weekly') { $('qList').textContent = ''; renderWeekly(); return; }
     const d = profile.stats && profile.stats.daily, list = $('qList'); list.textContent = '';
     $('qStreak').textContent = `🔥 Серия: ${streakNow(profile.stats)}`;
     const ms = C.resetIn(Date.now()), hh = Math.floor(ms / 3600000), mm = Math.floor(ms / 60000) % 60;
@@ -2347,7 +2470,7 @@
     if (!profile) return;
     pruneHidden('shop');
     if (shopTab === 'upgrades') shopTab = 'color'; // upgrades have their own window now («Улучшения», U)
-    const tabs = G.CATEGORIES.concat([{ key: 'shards', name: 'Лавка осколков', icon: SHARD_I }, { key: 'codes', name: '🎟 Коды' }]);
+    const tabs = G.CATEGORIES.concat([{ key: 'emote', name: 'Эмоции', icon: '😀' }, { key: 'shards', name: 'Лавка осколков', icon: SHARD_I }, { key: 'codes', name: '🎟 Коды' }]);
     $('shopTabs').innerHTML = tabs.map(c => `<button class="tab ${c.key === shopTab ? 'active' : ''}" data-tab="${c.key}">${c.icon ? c.icon + ' ' : ''}${c.name}</button>`).join('');
     $('shopTabs').querySelectorAll('.tab').forEach(b => b.onclick = () => { shopTab = b.dataset.tab; renderShop(); });
     const grid = $('shopGrid');
@@ -2533,6 +2656,9 @@
         btn.className = on ? 'btn equipped' : 'btn primary'; btn.textContent = on ? '✓ Надето · Снять' : 'Надеть';
         btn.onclick = on ? () => socket.emit('inv:unequip', def.cat, res => afterAction(res, `Снято: ${def.name}`))
           : () => socket.emit('inv:equip', def.id, res => afterAction(res, `Надето: ${def.name}`));
+      } else if (def.type === 'potion') {
+        btn.className = 'btn primary'; btn.textContent = `🧪 Выпить · ${def.desc}`; btn.dataset.drink = def.id; btn.onclick = () => drinkPotion(def);
+      } else if (def.type === 'emote') { btn.className = 'btn'; btn.textContent = 'Эмоция — кнопка 😀 у радара'; btn.disabled = true;
       } else { btn.className = 'btn'; btn.textContent = def.stackable ? `Коллекция · до ${def.maxStack} в ячейке` : 'Коллекция'; btn.disabled = true; }
       el.appendChild(btn); grid.appendChild(el);
     });
@@ -2693,13 +2819,13 @@
   }
   (function gameTexts() {
     const re = G.MINIGAMES.reaction, ru = G.MINIGAMES.rush;
-    $('reactionPrizes').textContent = G.REACTION_PRIZES.map(([ms, p]) => `<${ms} мс: ${p}`).join(' · ') + ` · пауза ${re.cooldownMs / 1000} с`;
-    $('rushPrizes').textContent = `Выплата: ${Math.round(ru.payoutRate * 100)}% от очков, не больше ${ru.maxPrize} сфер · пауза ${ru.cooldownMs / 1000} с`;
+    $('reactionPrizes').textContent = G.REACTION_PRIZES.map(([ms, p]) => `<${ms} мс: ${p * G.MG_PRIZE_MULT}`).join(' · ') + ` · пауза ${re.cooldownMs / 1000} с`;
+    $('rushPrizes').textContent = `Выплата: ${Math.round(ru.payoutRate * 100 * G.MG_PRIZE_MULT)}% от очков, не больше ${ru.maxPrize * G.MG_PRIZE_MULT} сфер · пауза ${ru.cooldownMs / 1000} с`;
     const M = G.MINIGAMES;
-    $('memoryPrizes').innerHTML = `+${M.memory.perRound} за раунд после ${M.memory.freeRounds}-го, до ${orbsH(M.memory.maxPrize)} · пауза ${M.memory.cooldownMs / 1000} с`;
-    $('shellPrizes').innerHTML = `Угадали — ${orbsH(M.shell.prize)} · пауза ${M.shell.cooldownMs / 1000} с`;
-    $('throwPrizes').innerHTML = `Очки ${M.throw.points.map(p => p[1]).join('/')} за бросок → ${Math.round(M.throw.payoutRate * 100)}%, до ${orbsH(M.throw.maxPrize)} · пауза ${M.throw.cooldownMs / 1000} с`;
-    $('chainPrizes').innerHTML = M.chain.prizes.map(([ms, p]) => `<${ms / 1000} с: ${p}`).join(' · ') + ` · пауза ${M.chain.cooldownMs / 1000} с`;
+    $('memoryPrizes').innerHTML = `+${M.memory.perRound * G.MG_PRIZE_MULT} за раунд после ${M.memory.freeRounds}-го, до ${orbsH(M.memory.maxPrize * G.MG_PRIZE_MULT)} · пауза ${M.memory.cooldownMs / 1000} с`;
+    $('shellPrizes').innerHTML = `Угадали — ${orbsH(M.shell.prize * G.MG_PRIZE_MULT)} · пауза ${M.shell.cooldownMs / 1000} с`;
+    $('throwPrizes').innerHTML = `Очки ${M.throw.points.map(p => p[1]).join('/')} за бросок → ${Math.round(M.throw.payoutRate * 100 * G.MG_PRIZE_MULT)}%, до ${orbsH(M.throw.maxPrize * G.MG_PRIZE_MULT)} · пауза ${M.throw.cooldownMs / 1000} с`;
+    $('chainPrizes').innerHTML = M.chain.prizes.map(([ms, p]) => `<${ms / 1000} с: ${p * G.MG_PRIZE_MULT}`).join(' · ') + ` · пауза ${M.chain.cooldownMs / 1000} с`;
     document.querySelectorAll('[data-game]').forEach(b => { b.innerHTML = `Играть — взнос ${orbsH(G.MINIGAMES[b.dataset.game].fee)}`; });
   })();
   function updateGameButtons() {
@@ -3234,6 +3360,7 @@
   $('admChestGo').addEventListener('click', () => adm({ a: 'fun', kind: 'chest', o: { orbs: fv('admChestOrbs'), shards: fv('admChestShards'), min: 10 } }));
   $('admPollGo').addEventListener('click', () => adm({ a: 'fun', kind: 'poll', o: { q: fv('admPollQ'), opts: fv('admPollOpts').split('|').map(x => x.trim()).filter(Boolean), sec: fv('admPollSec') } }));
   $('admPollEnd').addEventListener('click', () => adm({ a: 'fun', kind: 'endpoll' }));
+  window.OCSEmit = (ev, d) => new Promise(r => socket.emit(ev, d, r)); // test/automation helper (same socket the UI uses; the server validates everything)
   window.OCSAdm = d => new Promise(r => socket.emit('adm', d, r)); // test/automation helper; the server authorizes every call
   window.OCSDebugSnap = () => (lastSnapIds ? Array.from(lastSnapIds) : null);
   window.OCSDebugPl = name => { for (const p of players.values()) if (p.name === name) return { sz: p.sz || 1, eq: p.eq }; return null; };

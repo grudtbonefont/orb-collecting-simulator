@@ -803,7 +803,7 @@ function finishMinigame(pl, info) {
   if (info.cheat) { prize = 0; result.message = 'Результат отклонён сервером (неправдоподобно быстро).'; }
   if (info.aborted && mg.kind !== 'rush') prize = 0;
   const basePrize = prize;
-  prize = G.skillPrize(prize, pl.acc.upgrades.skill); // «Мастер мини-игр»: +10/20/30 %, flawless rotation of all games stays below farming
+  prize = G.skillPrize(prize, pl.acc.upgrades.skill); // «Мастер мини-игр»: +11.6/23.1/34.7 % on top of the ×2 mini-game buff, flawless rotation of all games stays below farming
   if (prize !== basePrize) result.bonus = prize - basePrize;
   result.prize = prize;
   pl.acc.balance += prize;
@@ -1010,7 +1010,7 @@ io.on('connection', socket => {
       event: publicEvent(),
       obstacles: publicObstacles(),
       weekend: weekendState().left,
-      fx: fxState(), fun: funPublic(), poll: pollPublic(), admin: isAdmin(acc),
+      fx: fxState(), pots: publicPots(), fun: funPublic(), poll: pollPublic(), admin: isAdmin(acc),
       ...FX.joinState(),
     };
   }
@@ -1525,6 +1525,39 @@ io.on('connection', socket => {
       default: return { ok: false, error: 'Неизвестная команда' };
     }
   }
+  // ---- potions: drink one from the inventory (same kind refreshes the timer, never stacks)
+  socket.on('potion:use', (itemId, ack) => {
+    ack = safeAck(ack);
+    if (!acct) return ack({ ok: false, error: 'Сначала войдите в аккаунт' });
+    const def = INV.itemDef(itemId); if (!def || def.type !== 'potion' || !has(G.POTIONS, def.potion)) return ack({ ok: false, error: 'Это не зелье' });
+    if (!INV.hasItem(acct.acc, def.id)) return ack({ ok: false, error: 'Нет такого зелья' });
+    const r = INV.removeItem(acct.acc, def.id, 1, 'use'); if (!r || !r.ok) return ack({ ok: false, error: (r && r.error) || 'Не получилось' });
+    const st = acct.acc.stats; st.potions = st.potions || {}; const now = Date.now();
+    for (const k of Object.keys(st.potions)) if (st.potions[k] <= now) delete st.potions[k];
+    st.potions[def.potion] = now + G.POTIONS[def.potion].sec * 1000;
+    accountChanged(acct.acc); ack({ ok: true, profile: ownProfile(acct.acc), until: st.potions[def.potion] });
+  });
+  // ---- emotes (free ones for everyone, others must be owned); shown to everyone for G.EMOTE_MS, rate-limited
+  socket.on('emote', (itemId, ack) => {
+    ack = safeAck(ack);
+    if (!pl) return ack({ ok: false, error: 'Войдите в игру' });
+    const def = INV.itemDef(itemId); if (!def || def.type !== 'emote') return ack({ ok: false, error: 'Нет такой эмоции' });
+    if (!def.free && !INV.hasItem(pl.acc, def.id)) return ack({ ok: false, error: 'Эта эмоция не куплена' });
+    const now = Date.now(); if (now - (pl.emoteAt || 0) < G.EMOTE_GAP_MS) return ack({ ok: false, error: 'Не так часто!' });
+    pl.emoteAt = now; if (!pl.invis) io.to('arena').emit('emote', { id: pl.id, e: def.id }); else pl.socket.emit('emote', { id: pl.id, e: def.id });
+    ack({ ok: true });
+  });
+  // ---- public profile card of an online player (only public / leaderboard-level data)
+  socket.on('profile:public', (id, ack) => {
+    ack = safeAck(ack);
+    if (!pl) return ack({ ok: false });
+    const q = players.get(id); if (!q || (q.invis && q !== pl)) return ack({ ok: false, error: 'Игрок не найден' });
+    const now = Date.now(); if (now - (pl.cardAt || 0) < 300) return ack({ ok: false, error: 'Подождите…' }); pl.cardAt = now;
+    const a = q.acc, st = a.stats || {};
+    ack({ ok: true, card: { name: a.name, me: q === pl, total: a.total, balance: a.balance, shards: st.shards || 0, ach: C.ACH.filter(x => st.ach && st.ach[x.id]).length, achMax: C.ACH.length,
+      trophy: INV.hasItem(a, 'h_trophy'), equipped: a.equipped, playMin: Math.round(((st.playMs || 0) + (now - q.joinedAt)) / 60000), bossKills: st.bossKills || 0, mgWins: st.mgWins || 0,
+      eventWins: st.eventWins || 0, questsDone: st.questsDone || 0, bestStreak: st.bestStreak || 0, createdAt: a.createdAt, admin: isAdmin(a) } });
+  });
   socket.on('poll:vote', (d, ack) => {
     ack = safeAck(ack);
     if (!pl || !fun.poll || !isObj(d) || d.id !== fun.poll.id || !Number.isInteger(d.i) || d.i < 0 || d.i >= fun.poll.opts.length) return ack({ ok: false });
@@ -1617,6 +1650,8 @@ io.on('connection', socket => {
       if (r.ok) { accountChanged(acc); if (other) other.socket.emit('profile', ownProfile(acc)); }
       ack(Object.assign(r, { profile: ownProfile(acc) }));
     });
+    socket.on('test:potion', (d, ack) => { ack = safeAck(ack); if (!pl || !isObj(d) || !G.ITEM_BY_ID[d.item] || G.ITEM_BY_ID[d.item].type !== 'potion') return ack({ ok: false }); ack({ ok: true, pot: addMapPotion(d.item, Number(d.x) || pl.x, Number(d.y) || pl.y) }); });
+    socket.on('test:quest', (d, ack) => { ack = safeAck(ack); if (!pl || !isObj(d) || typeof d.kind !== 'string' || !(d.n > 0)) return ack({ ok: false }); FX.questAdd(pl, d.kind, d.n); ack({ ok: true, weekly: pl.acc.stats.weekly }); });
     socket.on('test:upgrades', (d, ack) => {
       ack = safeAck(ack);
       if (!acct || !isObj(d)) return ack({ ok: false });
@@ -1793,10 +1828,11 @@ function collectAround(pl, radius, now) {
     const rw = G.orbReward(ot.value, pl.acc.upgrades, pl, Math.random, o.t);
     if (weekendOn(now)) { const f = (pl.wkFrac || 0) + rw.value * (G.WEEKEND.mult - 1), whole = Math.floor(f + 1e-9); pl.wkFrac = f - whole; rw.value += whole; } // «Выходные»: ×1.5 (fraction carried) // «находка», luck ×2, multiplier (fraction in pl.frac) — server-side only
     if (C.boostMult(pl.acc.stats, 'orbs', now) > 1) { const f = (pl.bFrac || 0) + rw.value * (C.BOOSTS.orbs.mult - 1), whole = Math.floor(f + 1e-9); pl.bFrac = f - whole; rw.value += whole; } // quest boost «Сферы ×1.5»
-    const lm = (discoOn(now) ? DISCO.luckMult : 1) * (customOn(now) ? customEv.luck : 1);
+    const lm = (discoOn(now) ? DISCO.luckMult : 1) * (customOn(now) ? customEv.luck : 1) * G.potionMult(pl.acc.stats, 'luck', now);
     if (lm > 1 && !rw.lucky) { const p = G.upValue('luck', pl.acc.upgrades.luck) / 100, extra = p > 0 && p < 1 ? Math.min(1, p * (lm - 1) / (1 - p)) : 0; if (extra > 0 && Math.random() < extra) { rw.value *= 2; rw.lucky = true; } } // disco: luck chance ×1.5
-    { const xm = (discoOn(now) ? DISCO.orbMult : 1) * (x2On(now) ? 2 : 1) * (customOn(now) ? customEv.orb : 1); if (xm > 1) { const f = (pl.xFrac || 0) + rw.value * (xm - 1), whole = Math.floor(f + 1e-9); pl.xFrac = f - whole; rw.value += whole; } } // disco ×1.5, admin /x2 ×2 (stack multiplicatively with weekend / boosts)
+    { const xm = (discoOn(now) ? DISCO.orbMult : 1) * (x2On(now) ? 2 : 1) * (customOn(now) ? customEv.orb : 1) * G.potionMult(pl.acc.stats, 'orbs', now); if (xm > 1) { const f = (pl.xFrac || 0) + rw.value * (xm - 1), whole = Math.floor(f + 1e-9); pl.xFrac = f - whole; rw.value += whole; } } // disco ×1.5, admin /x2 ×2 (stack multiplicatively with weekend / boosts)
     FX.onCollect(pl, o, rw.value);
+    if (G.ORB_RANK[o.t] >= G.ORB_RANK.r && G.potionOn(pl.acc.stats, 'shard', now) && Math.random() < G.POTIONS.shard.chance) { const g = INV.grantItem(pl.acc, G.SHARD_ID, 1, 'arena'); if (g.ok) { pl.socket.emit('item', { id: G.SHARD_ID, qty: 1, source: 'arena' }); emitProfile(pl); } } // «Зелье осколков»
     if (rw.lucky) pl.lucky++;
     if (rw.jackpot) pl.jackpots++;
     pl.gained += rw.value;
@@ -1890,6 +1926,29 @@ function lavaSecond(now) { // once per second: players outside every island lose
 }
 function pollPublic() { const p = fun.poll; if (!p) return null; const c = p.opts.map(() => 0); for (const v of p.votes.values()) c[v]++; return { id: p.id, q: p.q, opts: p.opts, counts: c, left: Math.max(0, p.until - Date.now()) }; }
 function pushPoll() { if (io) io.to('arena').emit('poll', pollPublic()); }
+// ---------------------------------------------------------------- potions on the map (rare pickups) + emotes
+let mapPots = [], nextPotId = 1, potDueAt = Date.now() + rand(G.POTION_MAP.everyMinMs, G.POTION_MAP.everyMaxMs);
+const publicPots = () => mapPots.map(p => [p.id, p.x, p.y, p.item]);
+function pushPots() { if (io) io.to('arena').emit('pots', publicPots()); }
+function potionSecond(now) {
+  const before = mapPots.length; mapPots = mapPots.filter(p => p.exp > now);
+  if (players.size && now >= potDueAt && mapPots.length < G.POTION_MAP.maxAlive) {
+    potDueAt = now + rand(G.POTION_MAP.everyMinMs, G.POTION_MAP.everyMaxMs);
+    const w = G.POTION_MAP.weights, tot = Object.values(w).reduce((a, b) => a + b, 0); let r = Math.random() * tot, item = 'p_speed';
+    for (const [k, v] of Object.entries(w)) { if ((r -= v) < 0) { item = k; break; } }
+    const at = randomSpot(120); mapPots.push({ id: nextPotId++, x: at.x, y: at.y, item, exp: now + G.POTION_MAP.lifeMs });
+  }
+  if (mapPots.length !== before || mapPots.some(p => p.exp - now > G.POTION_MAP.lifeMs - 1000)) pushPots();
+}
+function addMapPotion(item, x, y) { const p = { id: nextPotId++, x: Math.round(x), y: Math.round(y), item, exp: Date.now() + G.POTION_MAP.lifeMs }; mapPots.push(p); pushPots(); return p; }
+function potionPickup(pl) {
+  for (let i = 0; i < mapPots.length; i++) {
+    const p = mapPots[i]; if (Math.hypot(pl.x - p.x, pl.y - p.y) > G.PLAYER_R + G.POTION_MAP.r + 6) continue;
+    const r = INV.grantItem(pl.acc, p.item, 1, 'arena');
+    if (!r.ok) { if (!pl.potFullAt || Date.now() - pl.potFullAt > 5000) { pl.potFullAt = Date.now(); pl.socket.emit('item', { error: 'Зелье не поместилось — инвентарь полон.' }); } continue; }
+    mapPots.splice(i, 1); pushPots(); pl.socket.emit('item', { id: p.item, qty: 1, source: 'arena' }); accountChanged(pl.acc); return;
+  }
+}
 function tick() {
   const now = Date.now(), dt = Math.min(250, now - lastTickAt);
   lastTickAt = now;
@@ -1897,9 +1956,9 @@ function tick() {
     pl.x0 = pl.x; pl.y0 = pl.y;
     pl.budget = Math.min(pl.budget + 1, 6);
     while (pl.inputs.length > 12) pl.lastSeq = pl.inputs.shift().s; // keep latency bounded
-    const speed = G.speedFor(pl.acc.upgrades.speed) * C.boostMult(pl.acc.stats, 'speed', now) * (pl.frozen ? 0 : pl.spd || 1) * (customOn(now) ? customEv.spd : 1) * funSpeed(pl, now);
+    const speed = G.speedFor(pl.acc.upgrades.speed) * C.boostMult(pl.acc.stats, 'speed', now) * (pl.frozen ? 0 : pl.spd || 1) * (customOn(now) ? customEv.spd : 1) * funSpeed(pl, now) * G.potionMult(pl.acc.stats, 'speed', now);
     const solid = FX.solids();
-    const radius = G.pickupFor(pl.acc.upgrades.magnet);
+    const radius = G.pickupFor(pl.acc.upgrades.magnet) * G.potionMult(pl.acc.stats, 'magnet', now);
     while (pl.budget >= 1 && pl.inputs.length) {
       const inp = pl.inputs.shift();
       pl.budget -= 1;
@@ -1909,6 +1968,7 @@ function tick() {
       G.resolveObstacles(pl, obstacles); if (solid.length) G.resolveObstacles(pl, solid);
       pl.lastSeq = inp.s;
       collectAround(pl, radius, now);
+      if (mapPots.length) potionPickup(pl);
     }
     if (pl.gained > 0) {
       markDirty(pl.acc);
@@ -1955,6 +2015,7 @@ function everySecond() {
   for (const pl of players.values()) pl.socket.emit('sping', now);
   FX.everySecond(now);
   lavaSecond(now);
+  potionSecond(now);
   if (fun.poll && fun.poll.until <= now) { const r = pollPublic(); fun.poll = null; io.to('arena').emit('poll', Object.assign(r, { done: true })); }
 }
 

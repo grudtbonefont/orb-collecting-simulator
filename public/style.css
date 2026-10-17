@@ -652,3 +652,31 @@ body.in-game .music-btn { display: none; }
 .ach-trophy .at-bar i { display: block; height: 100%; background: linear-gradient(90deg, #ffcc33, #fff3a0); }
 .ach-trophy .at-n { font: 800 14px system-ui, sans-serif; color: #ffe08a; white-space: nowrap; }
 .ach-trophy.done { border-color: #ffcc33; box-shadow: 0 0 14px rgba(255,204,51,.35); }
+
+/* potions HUD, emotes, profile card */
+.hud-potions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.hud-potions.hidden, .emote-picker.hidden, .pcard.hidden { display: none; }
+.pot-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px 2px 4px; border-radius: 999px; background: rgba(140,80,255,.28); border: 1px solid rgba(199,139,255,.6); font: 700 12px system-ui, sans-serif; color: #f0e3ff; }
+.pot-chip i { font-style: normal; font-size: 15px; }
+.emote-btn { position: absolute; right: 210px; bottom: 14px; z-index: 5; width: 44px; height: 44px; border-radius: 50%; border: 1px solid rgba(255,255,255,.25); background: rgba(14,18,40,.8); font-size: 22px; cursor: pointer; pointer-events: auto; }
+.emote-picker { position: absolute; right: 210px; bottom: 64px; z-index: 6; display: grid; grid-template-columns: repeat(4, 44px); gap: 6px; padding: 8px; border-radius: 14px; background: rgba(14,18,40,.95); border: 1px solid rgba(255,255,255,.18); pointer-events: auto; }
+.emote-picker .emo { width: 44px; height: 44px; font-size: 24px; border-radius: 10px; border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.06); cursor: pointer; position: relative; }
+.emote-picker .emo.locked { opacity: .35; }
+.emote-picker .emo.locked::after { content: '🔒'; position: absolute; right: 1px; bottom: 0; font-size: 11px; }
+.pcard { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 40; width: min(340px, 92vw); padding: 14px; border-radius: 16px; background: rgba(16,20,44,.97); border: 1px solid rgba(255,255,255,.18); box-shadow: 0 12px 40px rgba(0,0,0,.5); color: #e8ecff; }
+.pc-head { display: flex; gap: 10px; align-items: center; }
+.pc-head h3 { margin: 0 0 4px; font-size: 18px; }
+.pc-head .close { margin-left: auto; align-self: flex-start; }
+.pill.gold { background: rgba(255,200,60,.25); color: #ffd866; }
+.pc-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 10px 0; }
+.pc-stats div { display: flex; flex-direction: column; padding: 6px 8px; border-radius: 10px; background: rgba(255,255,255,.06); font-size: 12px; }
+.pc-stats span { color: #9aa3c9; } .pc-stats b { font-size: 14px; }
+.pc-sub { font-size: 12px; color: #9aa3c9; margin-bottom: 4px; }
+.pc-eqs { display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px; }
+.pc-eq { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px 2px 2px; border-radius: 999px; background: rgba(255,255,255,.08); }
+#qTabs { margin: 4px 0 6px; }
+@media (max-width: 760px), (pointer: coarse) {
+  .emote-btn { right: 110px; bottom: 70px; width: 40px; height: 40px; font-size: 20px; }
+  .emote-picker { right: 10px; bottom: 170px; grid-template-columns: repeat(4, 40px); }
+  .emote-picker .emo { width: 40px; height: 40px; }
+}
