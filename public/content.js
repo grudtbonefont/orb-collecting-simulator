@@ -66,7 +66,7 @@
   });
   const CHAIN_BY_ID = Object.fromEntries(CHAINS.map(c => [c.id, c]));
   const ACH_BY_ID = Object.fromEntries(ACH.map(a => [a.id, a]));
-  const achValue = (a, p) => Math.max(0, Math.floor(Number(a.stat(p)) || 0));
+  const achValue = (a, p) => Math.max(0, Math.floor(Number(a.stat(p)) || 0) - ((p.stats && p.stats.achBase && p.stats.achBase[a.chain]) || 0)); // progress since the Oct 2026 reset
   // distinct non-base cosmetics in the inventory (slots: [{id,q}])
   const itemsOwned = slots => new Set((slots || []).filter(s => s && G.ITEM_BY_ID[s.id] && G.ITEM_BY_ID[s.id].type === 'cosmetic' && !G.ITEM_BY_ID[s.id].base).map(s => s.id)).size;
   // pre-tier achievements (paid once) → the tier they cover (highest tier with goal ≤ the old goal) and what they paid
@@ -136,7 +136,7 @@
 
   // ---------------------------------------------------------------- boss (about once an hour of online play, zone 1)
   const BOSS = {
-    name: 'Пожиратель сфер', icon: '👹', everyMinMs: 50 * MIN, everyMaxMs: 70 * MIN, announceMs: 25000, lifeMs: 3 * MIN,
+    name: 'Пожиратель сфер', icon: '👹', everyMinMs: 25 * MIN, everyMaxMs: 35 * MIN, announceMs: 25000, lifeMs: 3 * MIN,
     r: 70, speed: 70, hpBase: 300, hpPerPlayer: 250, hpMax: 6000, hitDmg: 10, hitCooldownMs: 600, hitPad: 8,
     ringEveryMinMs: 6000, ringEveryMaxMs: 8000, ringWarnMs: 1000, ringSpeed: 260, ringMax: 560, ringW: 26,
     shotEveryMs: 1800, shotRange: 700, shotSpeed: 280, pct: 0.03, cap: 60,

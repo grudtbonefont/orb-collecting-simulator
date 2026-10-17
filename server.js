@@ -77,6 +77,7 @@ async function loadAccount(key) {
   if (!acc) return null;
   if (profiles.has(key)) return profiles.get(key); // loaded concurrently
   profiles.set(key, acc);
+  if (FX) FX.achReset(acc); // one-time achievement reset (stats.achResetV2)
   return acc;
 }
 

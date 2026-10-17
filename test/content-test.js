@@ -97,7 +97,7 @@ async function achSuite(url) {
   ok(C.CHAIN_BY_ID.bosskill.tiers.map(t => t.goal).join('/') === '1/3/10/25/50' && C.ACH_BY_ID.bosskill_5.name === 'Победитель босса V', '«Победитель босса I…V» = 1/3/10/25/50 kills');
   // old account: 3 old achievements already paid -> covered tiers marked, only the difference paid, once
   const name = 'Ach' + rnd(), A = client(url); await A.register(name, false); // lobby only
-  await A.emit('test:stats', { resetAch: true, achV2: null, achSet: ['first100', 'collector', 'games'], total: 1500, minigames: 30 });
+  await A.emit('test:stats', { resetAch: true, achV2: null, achResetV2: 1, achSet: ['first100', 'collector', 'games'], total: 1500, minigames: 30 });
   const b0 = A.profile.balance, s0 = A.profile.shards;
   A.enter(await A.call('play', null));
   await waitFor(() => A.events('ach').length >= 1, 3000); await sleep(1500);
@@ -126,6 +126,28 @@ async function achSuite(url) {
   const meta = B.metas.get(A.id);
   ok(!('title' in A.profile) && B.chat.some(m => m.n === name && !('ti' in m)) && (!meta || !('ti' in meta)), 'no titles: not in the profile, chat or public player data');
   A.close(); B.close();
+}
+async function resetSuite(url) {
+  console.log('--- one-time achievement reset (stats.achResetV2)');
+  const name = 'Rst' + rnd(), A = client(url); await A.register(name, false);
+  await A.emit('test:stats', { achResetV2: null, achV2: true, achSet: ['total_1', 'total_2', 'total_3', 'bosskill_1', 'bosskill_2', 'games_1', 'zone2_1'], total: 60000, bossKills: 30, bossDmg: 5000, rareCaught: 500, distM: 5000, minigames: 100, unlockedDoor2: true, questsDone: 12, bestStreak: 5 });
+  await A.emit('test:grant', { id: G.SHARD_ID, qty: 7, source: 'admin' }); await A.emit('test:orbs', 1234);
+  const b0 = A.profile.balance, s0 = A.profile.shards, inv0 = JSON.stringify(A.profile.inventory), up0 = JSON.stringify(A.profile.upgrades);
+  A.enter(await A.call('play', null)); await sleep(2500);
+  let st = A.profile.stats; const p = { total: A.profile.total, stats: st, codesUsed: A.profile.codesUsed || 0, items: C.itemsOwned(A.profile.inventory), liveMs: 0 };
+  const allZero = C.CHAINS.every(ch => C.achValue(ch.tiers[0], p) === 0);
+  ok(A.events('ach').length === 0 && Object.keys(st.ach).length === 0 && st.achResetV2 && st.achV2 === true && allZero, `after load: no tiers, every chain at progress 0 (${C.CHAINS.length} chains), no achievement events`);
+  ok(A.profile.balance === b0 && A.profile.shards === s0 && JSON.stringify(A.profile.inventory) === inv0 && JSON.stringify(A.profile.upgrades) === up0 && st.unlockedDoor2 === true && A.profile.total === 60000 && st.minigames === 100 && st.questsDone === 12,
+    `balance (${b0}), shards (${s0}), inventory, upgrades, door, total, minigames, quests untouched; no payout`);
+  ok(st.bossKills === undefined && st.rareCaught === undefined && st.distM === undefined && st.bossDmg === undefined && st.achBase.total === 60000 && st.achBase.games === 100 && st.achBase.zone2 === 1, 'achievement-only counters zeroed; shared stats measured from a baseline');
+  await A.emit('test:stats', { bossKills: 1 }); await waitFor(() => A.events('ach').length >= 1, 3000);
+  await A.emit('test:stats', { total: 60100 }); await waitFor(() => A.events('ach').length >= 2, 3000);
+  const ids = A.events('ach').map(e => e.id).join(',');
+  ok(ids === 'bosskill_1,total_1' && A.profile.balance === b0 + 40 + 30 && A.profile.shards === s0 + 2, `progressing pays tier I again: ${ids} (+${A.profile.balance - b0} orbs, +${A.profile.shards - s0} shards)`);
+  A.close(); await sleep(300);
+  const A2 = client(url); await A2.login(name); A2.enter(await A2.call('play', null)); await sleep(2000);
+  ok(A2.events('ach').length === 0 && A2.profile.stats.ach.bosskill_1 && A2.profile.stats.ach.total_1 && A2.profile.stats.bossKills === 1 && A2.profile.stats.achBase.total === 60000, 'second load: reset not reapplied (tiers and counters kept)');
+  A2.close();
 }
 async function questSuite(url) {
   console.log('--- daily quests');
@@ -209,6 +231,7 @@ async function miniSuite(url) {
   A.close();
 }
 async function bossSuite(url) {
+  ok(C.BOSS.everyMinMs === 25 * 60000 && C.BOSS.everyMaxMs === 35 * 60000, 'boss every 25–35 min of online play');
   console.log('--- boss');
   const A = client(url); await A.register('Boss' + rnd());
   await A.emit('test:tp', { x: 2000, y: 2000, orbs: 1000 }); await sleep(200);
@@ -281,6 +304,7 @@ async function hitboxSuite(url) {
     if (want('hitbox')) await hitboxSuite(srv.url);
     if (want('shards')) await shardSuite(srv.url);
     if (want('ach')) await achSuite(srv.url);
+    if (want('reset')) await resetSuite(srv.url);
     if (want('quests')) await questSuite(srv.url);
     if (want('mini')) await miniSuite(srv.url);
     if (want('boss')) await bossSuite(srv.url);
