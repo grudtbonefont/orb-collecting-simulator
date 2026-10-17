@@ -2933,18 +2933,40 @@
     const t = document.createElement('span'); t.className = 't'; t.textContent = String(m.t == null ? '' : m.t); el.appendChild(t);
     return el;
   }
+  // two tabs: 'chat' (players, input) and 'sys' (system messages, read-only); choice kept in localStorage
+  const sysLog = $('sysLog'), tabUnread = { chat: 0, sys: 0 };
+  let chatTab = store.get('ocs_chat_tab') === 'sys' ? 'sys' : 'chat';
+  const tabLog = t => (t === 'sys' ? sysLog : chatLog);
+  function paintTabs() {
+    for (const t of ['chat', 'sys']) {
+      const btn = $(t === 'sys' ? 'tabSys' : 'tabChat'), b = $(t === 'sys' ? 'tabSysBadge' : 'tabChatBadge'), on = t === chatTab;
+      btn.classList.toggle('active', on); btn.setAttribute('aria-selected', on ? 'true' : 'false');
+      tabLog(t).classList.toggle('hidden', !on);
+      b.textContent = tabUnread[t] > 99 ? '99+' : String(tabUnread[t]); b.classList.toggle('hidden', on || !tabUnread[t]);
+    }
+    $('chatForm').classList.toggle('hidden', chatTab === 'sys');
+  }
+  function setChatTab(t) {
+    chatTab = t === 'sys' ? 'sys' : 'chat'; store.set('ocs_chat_tab', chatTab); tabUnread[chatTab] = 0; paintTabs();
+    const log = tabLog(chatTab); log.scrollTop = log.scrollHeight;
+    if (chatTab === 'sys' && document.activeElement === chatInput) chatInput.blur();
+  }
+  for (const b of document.querySelectorAll('.chat-tab')) b.addEventListener('click', e => { e.stopPropagation(); setChatTab(b.dataset.tab); });
+  paintTabs();
   function addChat(m, live) {
     if (!m || typeof m !== 'object') return;
-    const atBottom = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 40;
-    chatLog.appendChild(chatLine(m));
-    while (chatLog.childElementCount > 100) chatLog.firstElementChild.remove();
-    if (atBottom || m.notice || (m.n && m.n === myName)) chatLog.scrollTop = chatLog.scrollHeight;
+    const tab = m.sys ? 'sys' : 'chat', log = tabLog(tab);
+    const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+    log.appendChild(chatLine(m));
+    while (log.childElementCount > 100) log.firstElementChild.remove();
+    if (atBottom || m.notice || (m.n && m.n === myName)) log.scrollTop = log.scrollHeight;
+    if (live && tab !== chatTab) { tabUnread[tab]++; paintTabs(); }
     if (live && joined && mobileUI() && !chatOpen && m.n && m.n !== myName) { unread++; updateBadge(); showChatToast(m); }
   }
   function resetChat(history) {
-    chatLog.textContent = ''; unread = 0; updateBadge();
+    chatLog.textContent = ''; sysLog.textContent = ''; unread = 0; tabUnread.chat = tabUnread.sys = 0; updateBadge(); paintTabs();
     for (const m of history) addChat(m, false);
-    chatLog.scrollTop = chatLog.scrollHeight;
+    chatLog.scrollTop = chatLog.scrollHeight; sysLog.scrollTop = sysLog.scrollHeight;
   }
   function updateBadge() {
     const b = $('chatBadge');
@@ -2973,7 +2995,7 @@
     pointer.down = false;
     $('chat').classList.add('open'); $('chatToast').classList.add('hidden');
     fitSheet();
-    chatLog.scrollTop = chatLog.scrollHeight;
+    tabLog(chatTab).scrollTop = tabLog(chatTab).scrollHeight;
   }
   function closeChat() {
     chatOpen = false;

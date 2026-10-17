@@ -172,7 +172,9 @@
 <!-- Chat: compact panel on desktop, button + sheet on phones -->
 <div id="chat" class="chat hidden">
   <div class="chat-head"><span>💬 Чат арены</span><button type="button" id="chatClose" class="close" aria-label="Закрыть чат">✕</button></div>
+  <div class="chat-tabs" role="tablist"><button type="button" role="tab" class="chat-tab active" data-tab="chat" id="tabChat">Чат<span class="tab-badge hidden" id="tabChatBadge">0</span></button><button type="button" role="tab" class="chat-tab" data-tab="sys" id="tabSys">Система<span class="tab-badge hidden" id="tabSysBadge">0</span></button></div>
   <div id="chatLog" class="chat-log" aria-live="polite"></div>
+  <div id="sysLog" class="chat-log sys-log hidden" aria-live="polite"></div>
   <form id="chatForm" class="chat-form" autocomplete="off">
     <input id="chatInput" maxlength="120" placeholder="Enter — написать в чат" enterkeyhint="send" autocomplete="off" autocorrect="off">
     <button type="submit" class="btn chat-send" aria-label="Отправить">➤</button>

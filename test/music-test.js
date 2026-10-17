@@ -1,49 +1,28 @@
-// Browser test for the menu music: element + sources, autoplay blocked → starts on first interaction, fades out in the arena, mute persists.
-//   node test/music-test.js   -> starts its own server on :3111
-const { chromium } = require('playwright-core');
-const { spawn } = require('child_process');
-const path = require('path'), os = require('os'), fs = require('fs');
-const ROOT = path.join(__dirname, '..'), PORT = 3111, PW = 'demo-pass-123', URL = `http://localhost:${PORT}`;
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-let fails = 0; const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) fails++; };
-const CHROME = process.env.CHROME || ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find(p => fs.existsSync(p));
-(async () => {
-  const file = path.join(os.tmpdir(), `ocs-music-${process.pid}.json`);
-  const proc = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: Object.assign({}, process.env, { PORT: String(PORT), DATA_FILE: file, DATABASE_URL: '', EVENT_EVERY_MS: '0', OBSTACLES: '0' }), stdio: 'ignore' });
-  process.on('exit', () => { try { proc.kill('SIGTERM'); fs.rmSync(file, { force: true }); } catch (_) {} });
-  for (let i = 0; i < 100; i++) { try { if ((await fetch(URL + '/api/health')).ok) break; } catch (_) {} await sleep(200); }
-  for (const f of ['menu.m4a', 'menu.mp3']) { const r = await fetch(`${URL}/audio/${f}`); ok(r.ok && Number(r.headers.get('content-length')) > 500000, `/audio/${f} served (${r.headers.get('content-type')}, ${r.headers.get('content-length')} bytes)`); }
-  const browser = await chromium.launch({ executablePath: CHROME, args: ['--no-sandbox', '--autoplay-policy=user-gesture-required'] });
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
-  const page = await ctx.newPage(); const errors = []; page.on('pageerror', e => errors.push(e.message));
-  await page.goto(URL); await sleep(1200);
-  const m0 = await page.evaluate(() => window.OCSMusic());
-  const srcs = await page.$$eval('#menuMusic source', l => l.map(s => s.getAttribute('src') + ' ' + s.type));
-  ok(await page.$('#menuMusic') && srcs.join() === '/audio/menu.m4a audio/mp4,/audio/menu.mp3 audio/mpeg' && await page.evaluate(() => document.getElementById('menuMusic').loop), 'audio element (loop) with m4a + mp3 sources');
-  ok(m0.paused === true && await page.isVisible('#musicBtn') && (await page.textContent('#musicBtn')) === '🔊', 'autoplay blocked: silent until the first interaction, 🔊 button visible');
-  await page.click('.auth-tab[data-mode=register]'); await sleep(800);
-  const m1 = await page.evaluate(() => window.OCSMusic());
-  ok(m1.paused === false && Math.abs(m1.volume - 0.5) < 0.01 && /menu\.(m4a|mp3)$/.test(m1.src), `music starts on the first click (volume ${m1.volume}, ${m1.src.split('/').pop()})`);
-  await page.fill('#nick', 'Music' + Date.now() % 100000); await page.fill('#pass', PW); await page.fill('#pass2', PW); await page.click('#authSubmit');
-  await page.waitForSelector('#profile:not(.hidden)', { timeout: 10000 }); await sleep(300);
-  ok((await page.evaluate(() => window.OCSMusic())).paused === false, 'still playing on the lobby screen after registration');
-  await page.click('#pfPlay'); await page.waitForSelector('#hud:not(.hidden)', { timeout: 10000 }); await sleep(300);
-  const mid = await page.evaluate(() => window.OCSMusic()); await sleep(1500);
-  const m2 = await page.evaluate(() => window.OCSMusic());
-  ok(mid.volume < 0.5 && m2.paused === true && !(await page.isVisible('#musicBtn')), `fades out on entering the arena (volume ${mid.volume.toFixed(2)} → paused), toggle hidden`);
-  await page.keyboard.press('KeyW'); await sleep(300);
-  ok((await page.evaluate(() => window.OCSMusic())).paused === true, 'interaction in the arena does not restart the music');
-  // mute persists across reloads
-  const p2 = await ctx.newPage(); await p2.goto(URL); await sleep(800);
-  await p2.evaluate(() => { localStorage.removeItem('ocs_session'); }); await p2.reload(); await sleep(800);
-  await p2.click('#musicBtn'); await sleep(200);
-  ok((await p2.textContent('#musicBtn')) === '🔇' && (await p2.evaluate(() => window.OCSMusic())).paused === true && await p2.evaluate(() => localStorage.getItem('ocs_music')) === '0', 'first tap on the toggle (also the first interaction) mutes: 🔇, silent, saved');
-  await p2.reload(); await sleep(800); await p2.mouse.click(640, 360); await sleep(500);
-  const m3 = await p2.evaluate(() => window.OCSMusic());
-  ok(m3.muted && m3.paused && (await p2.textContent('#musicBtn')) === '🔇', 'mute survives a reload: interaction does not start the music');
-  await p2.click('#musicBtn'); await sleep(500);
-  ok((await p2.evaluate(() => window.OCSMusic())).paused === false && (await p2.textContent('#musicBtn')) === '🔊', 'unmute → music plays again');
-  ok(errors.length === 0, 'no page errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
-  await browser.close(); proc.kill('SIGTERM');
-  console.log(fails ? `${fails} failed` : 'all passed'); process.exit(fails ? 1 : 0);
-})().catch(e => { console.error(e); process.exit(1); });
+const { chromium } = require('playwright-core'); const { spawn } = require('child_process');
+const ROOT=process.cwd(), PORT=3138, URL='http://localhost:'+PORT, sleep=ms=>new Promise(r=>setTimeout(r,ms)); let f=0; const ok=(c,m)=>{console.log((c?'PASS ':'FAIL ')+m); if(!c)f++;};
+(async()=>{ const proc=spawn(process.execPath,['server.js'],{cwd:ROOT,env:Object.assign({},process.env,{PORT:String(PORT),DATA_FILE:'/tmp/bgm2.json',DATABASE_URL:'',EVENT_EVERY_MS:'0',OBSTACLES:'0'}),stdio:'ignore'});
+ for(let i=0;i<100;i++){try{if((await fetch(URL+'/api/health')).ok)break;}catch(_){} await sleep(200);}
+ for (const n of [1,2,3]) { const r=await fetch(URL+'/audio/bg'+n+'.m4a'); ok(r.status===200, 'bg'+n+' 200'); }
+ const b=await chromium.launch({executablePath:'/usr/bin/google-chrome',args:['--no-sandbox','--autoplay-policy=no-user-gesture-required']});
+ const ctx=await b.newContext(); await ctx.addInitScript(()=>{ window.__A=new Set(); window.__max=0; const P=HTMLMediaElement.prototype, op=P.play;
+   P.play=function(){ __A.add(this); const r=op.call(this); setTimeout(()=>{const n=[...__A].filter(x=>!x.paused).length; if(n>__max)__max=n;},50); return r; };
+   setInterval(()=>{const n=[...__A].filter(x=>!x.paused).length; if(n>__max)__max=n;},20); });
+ const vp=await ctx.newPage(); const errs=[], audioReq=[]; vp.on('pageerror',e=>errs.push(e.message)); vp.on('request',r=>{if(/\/audio\//.test(r.url()))audioReq.push(r.url());});
+ await vp.goto(URL); await sleep(400); for(let i=0;i<5;i++){await vp.mouse.click(10,10);} await sleep(300);
+ let m=await vp.evaluate(()=>OCSMusic()); ok(m.playing===0&&audioReq.length===0, 'menu: silent, no audio requests');
+ ok(await vp.evaluate(()=>!document.getElementById('menuMusic')), 'no menuMusic element');
+ await vp.click('.auth-tab[data-mode=register]'); await vp.fill('#nick','Bg2T'+Date.now()%1e5); await vp.fill('#pass','demo-pass-123'); await vp.fill('#pass2','demo-pass-123'); await vp.click('#authSubmit');
+ await vp.waitForSelector('#profile:not(.hidden)'); await vp.click('#pfPlay'); await vp.waitForSelector('#hud:not(.hidden)'); await sleep(1200);
+ for(let i=0;i<8;i++){await vp.mouse.click(400+i,300); await vp.keyboard.press('Shift');} await sleep(300);
+ m=await vp.evaluate(()=>OCSMusic()); ok(m.playing===1&&/bg\d/.test(m.bgSrc), 'game: exactly 1 playing '+m.bgSrc);
+ for(let r=0;r<3;r++){ await vp.evaluate(()=>OCSMusicCtl.menu()); await sleep(150); const a=await vp.evaluate(()=>OCSMusic().playing); ok(a===0,'menu again silent #'+r);
+   await vp.evaluate(()=>{OCSMusicCtl.game();OCSMusicCtl.game();OCSMusicCtl.game();}); for(let i=0;i<4;i++) await vp.mouse.click(420,320); await sleep(400);
+   const g=await vp.evaluate(()=>OCSMusic().playing); ok(g===1,'re-enter game: 1 playing #'+r); }
+ await vp.evaluate(()=>OCSMusic().bgNext()); await sleep(400); m=await vp.evaluate(()=>OCSMusic()); ok(m.playing===1,'next track, still 1 '+m.bgSrc);
+ await vp.evaluate(()=>{const e=document.getElementById('setMusic'); e.checked=false; e.dispatchEvent(new Event('change'));}); await vp.mouse.click(300,300); await sleep(300);
+ m=await vp.evaluate(()=>OCSMusic()); ok(m.playing===0&&m.muted&&await vp.evaluate(()=>localStorage.getItem('ocs_music'))==='0','toggle off silent+persisted');
+ await vp.evaluate(()=>{const e=document.getElementById('setMusic'); e.checked=true; e.dispatchEvent(new Event('change'));}); await sleep(400);
+ ok(await vp.evaluate(()=>OCSMusic().playing)===1,'toggle on: 1 playing');
+ const mx=await vp.evaluate(()=>[window.__max,window.__A.size]); ok(mx[0]<=1,'max simultaneous playing ever = '+mx[0]+' (elements '+mx[1]+')');
+ ok(!audioReq.some(u=>/menu\./.test(u)),'menu audio never requested'); ok(errs.length===0,'no page errors '+errs.join(';'));
+ await b.close(); proc.kill(); console.log(f?'FAILED '+f:'ALL PASS'); process.exit(f?1:0); })();
