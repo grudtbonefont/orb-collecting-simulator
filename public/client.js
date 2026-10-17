@@ -186,7 +186,20 @@
     const setMuted = m => { muted = !!m; store.set(KEY, muted ? '0' : '1'); paint(); if (muted) { clearInterval(fadeT); el.pause(); } else tryPlay(); document.dispatchEvent(new Event('ocs-music')); };
     btn.addEventListener('click', e => { e.stopPropagation(); setMuted(!muted); });
     paint();
-    return { menu() { want = true; document.body.classList.remove('in-game'); tryPlay(); }, game() { want = false; document.body.classList.add('in-game'); fadeOut(); }, el, setMuted, get muted() { return muted; } };
+    // in-game background playlist (bg1..bg3): shuffled start, loops the list, lazy-loaded
+    const bg = (() => {
+      const TR = ['/audio/bg1.m4a', '/audio/bg2.m4a', '/audio/bg3.m4a'], BVOL = 0.3;
+      const a = new Audio(); a.preload = 'none'; a.setAttribute('playsinline', ''); a.volume = BVOL;
+      let idx = Math.floor(Math.random() * TR.length), on = false, loaded = false;
+      const load = i => { idx = (i + TR.length) % TR.length; a.src = TR[idx]; loaded = true; };
+      const play = () => { if (muted || !on) return; if (!loaded) load(idx); if (!a.paused) return; a.volume = BVOL; const p = a.play(); if (p && p.catch) p.catch(() => {}); };
+      a.addEventListener('ended', () => { load(idx + 1); play(); });
+      a.addEventListener('error', () => { if (on && loaded) { load(idx + 1); setTimeout(play, 500); } });
+      return { el: a, play, start() { on = true; play(); }, stop() { on = false; a.pause(); }, next() { a.pause(); load(idx + 1); play(); }, get idx() { return idx; }, get on() { return on; } };
+    })();
+    for (const ev of ['pointerdown', 'touchend', 'keydown', 'click']) document.addEventListener(ev, () => bg.play(), { capture: true, passive: true });
+    document.addEventListener('ocs-music', () => { if (muted) bg.el.pause(); else bg.play(); });
+    return { menu() { want = true; bg.stop(); document.body.classList.remove('in-game'); tryPlay(); }, game() { want = false; document.body.classList.add('in-game'); fadeOut(); bg.start(); }, el, bg, setMuted, get muted() { return muted; } };
   })();
   // ------------------------------------------------------------ ⚙️ settings (localStorage): top notifications, music (same switch as 🔊/🔇)
   function buildSettings() {
@@ -203,7 +216,7 @@
   $('setMusic').addEventListener('change', () => music.setMuted(!$('setMusic').checked));
   document.addEventListener('ocs-music', () => { $('setMusic').checked = !music.muted; });
   $('setBtn').addEventListener('click', e => { e.stopPropagation(); buildSettings(); toggleModal('settings'); });
-  window.OCSMusic = () => ({ paused: music.el.paused, muted: music.muted, volume: music.el.volume, src: music.el.currentSrc });
+  window.OCSMusic = () => ({ bgPaused: music.bg.el.paused, bgSrc: music.bg.el.currentSrc || music.bg.el.src, bgIdx: music.bg.idx, bgPreload: music.bg.el.preload, bgNext: () => music.bg.next(), paused: music.el.paused, muted: music.muted, volume: music.el.volume, src: music.el.currentSrc });
   music.menu(); // try autoplay on load
   function enterGame(res, reconnect) {
     music.game();
