@@ -644,7 +644,29 @@
     if (shape === 'heart') { g.moveTo(0, -8); g.bezierCurveTo(10, -16, 26, -10, 24, 2); g.bezierCurveTo(22, 12, 8, 18, 0, 24); g.bezierCurveTo(-8, 18, -22, 12, -24, 2); g.bezierCurveTo(-26, -10, -10, -16, 0, -8); g.closePath(); return { top: -12, bot: 24, nw: 7, nt: -18, cw: 10, ct: -28 }; }
     g.ellipse(0, 7, 24, 15, 0, 0, Math.PI * 2); return { top: -8, bot: 22, nw: 7, nt: -16, cw: 11, ct: -27 }; // wide
   }
+  // hand-made SVG sprites (public/potion-art.js) rasterized once to 256px canvases; procedural bottle stays as a fallback
+  const POT_SPR = {};
+  (function loadPotionSprites() {
+    const A = window.OCSPotionArt; if (!A) return;
+    for (const k of Object.keys(BOTTLES)) {
+      if (!A[k]) continue;
+      const im = new Image();
+      im.onload = () => {
+        const cv = document.createElement('canvas'); cv.width = cv.height = 256; cv.getContext('2d').drawImage(im, 0, 0, 256, 256); POT_SPR[k] = cv;
+        for (const d of G.ITEMS) if (d.potion === k) { iconCache.delete(String(d.id)); document.querySelectorAll(`img[data-icon="${d.id}"]`).forEach(i => { i.src = iconUrl(d.id); }); }
+      };
+      im.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(A[k]);
+    }
+  })();
+  window.OCSPotSprites = () => Object.keys(POT_SPR);
   function drawPotionBottle(g, kind, x, y, s, t = 0, shadow = true) {
+    const spr = POT_SPR[kind];
+    if (spr) {
+      g.save(); g.translate(x, y); g.scale(s, s);
+      if (shadow) { g.fillStyle = 'rgba(5,8,20,0.35)'; g.beginPath(); g.ellipse(0, 27, kind === 'speed' ? 11 : 19, 4, 0, 0, Math.PI * 2); g.fill(); }
+      g.drawImage(spr, -36, -36, 72, 72);
+      g.restore(); return;
+    }
     const B = BOTTLES[kind] || BOTTLES.speed, line = '#16234a';
     g.save(); g.translate(x, y); g.scale(s, s); g.lineJoin = 'round';
     if (shadow) { g.fillStyle = 'rgba(5,8,20,0.45)'; g.beginPath(); g.ellipse(0, 27, B.shape === 'tube' ? 10 : 20, 4.5, 0, 0, Math.PI * 2); g.fill(); }
@@ -689,6 +711,9 @@
       g.globalAlpha = 0.75 + Math.sin(t * 4 + x) * 0.25; g.fillStyle = gl; g.beginPath(); g.arc(x, y + bob, r * 2.4, 0, Math.PI * 2); g.fill(); g.restore();
       g.save(); g.fillStyle = 'rgba(5,8,20,0.4)'; g.beginPath(); g.ellipse(x, y + r * 1.5, r * 1.1 - bob * 0.6, r * 0.25, 0, 0, Math.PI * 2); g.fill(); g.restore(); // shadow stays on the ground
       drawPotionBottle(g, def.potion, x, y + bob - 6, r / 16, t, false);
+      const sp = (t * 0.7 + (x % 97) / 97) % 1; // occasional twinkle
+      if (sp < 0.18) { const k = Math.sin(sp / 0.18 * Math.PI), sx = x + 12 * (r / 16), sy = y + bob - 22 * (r / 16), z = 5 * k * (r / 16);
+        g.save(); g.globalAlpha = k; g.fillStyle = '#fff'; g.beginPath(); g.moveTo(sx, sy - z); g.quadraticCurveTo(sx, sy, sx + z, sy); g.quadraticCurveTo(sx, sy, sx, sy + z); g.quadraticCurveTo(sx, sy, sx - z, sy); g.quadraticCurveTo(sx, sy, sx, sy - z); g.fill(); g.restore(); }
     }
   }
   function drawEmotes(g) {
