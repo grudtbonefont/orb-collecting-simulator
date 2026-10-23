@@ -753,7 +753,7 @@
     socket.emit('potion:use', def.id, r => {
       if (!r || !r.ok) { toast((r && r.error) || 'Не получилось', 'err'); return; }
       if (r.profile) setProfile(r.profile);
-      toastC('rewards', `🧪 ${def.name}: ${def.desc}`, 'ok'); renderInv(); updatePotionHud(); updateHud();
+      toastC('rewards', r.stacked ? `🧪 ${def.name}: +${mmss(r.added)} (осталось ${mmss(r.until - Date.now() - srvSkew)})` : `🧪 ${def.name}: ${def.desc}`, 'ok'); renderInv(); updatePotionHud(); updateHud();
     });
   }
   // public profile card: click / tap a player on the map

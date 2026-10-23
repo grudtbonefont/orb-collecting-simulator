@@ -41,10 +41,14 @@ const ROOT = process.cwd(), PORT = 3145, URL = 'http://localhost:' + PORT, sleep
   await A.click('[data-open=inv]').catch(() => A.keyboard.press('i')); await sleep(400);
   await A.click('[data-drink=p_speed]'); await sleep(500); await A.click('[data-drink=p_orbs]'); await sleep(500);
   pa = await prof(A); ok(pa.stats.potions && pa.stats.potions.speed > Date.now() && pa.stats.potions.orbs > Date.now() && !pa.inventory.some(s => s.id === 'p_speed'), 'drink: effect active, item consumed');
-  const u1 = pa.stats.potions.orbs; await sleep(1100); const r2 = await em(A, 'potion:use', 'p_orbs'); ok(r2.ok && r2.until > u1 && r2.until - Date.now() <= 90500 && r2.until - Date.now() > 88000, 'same type refreshes timer (no stacking)');
-  ok((await em(A, 'potion:use', 'p_magnet')).ok === false, 'cannot drink unowned potion');
+  const u1 = pa.stats.potions.orbs; await sleep(1100); const r2 = await em(A, 'potion:use', 'p_orbs'); ok(r2.ok && r2.stacked && Math.abs(r2.until - (u1 + 90000)) < 50 && r2.added === 90000, 'same type adds duration (stacking time)');
+  // quest rewards also drop random potions, so pick a kind the account really does not own (test was assuming p_magnet)
+  pa = await prof(A); const owned = new Set(pa.inventory.map(s => s.id)); const un = ['p_magnet', 'p_luck', 'p_shard', 'p_speed', 'p_orbs'].find(id => !owned.has(id));
+  console.log('INFO owned potions', [...owned].filter(i => /^p_/.test(i)).join(','));
+  if (un) ok((await em(A, 'potion:use', un)).ok === false, 'cannot drink unowned potion (' + un + ')');
   await A.evaluate(() => document.querySelectorAll('.modal').forEach(m => m.classList.add('hidden'))); await sleep(800);
-  ok((await A.$$('#hudPotions .pot-chip')).length === 2 && /\d:\d\d/.test(await A.textContent('#hudPotions')), 'potion HUD icons with timers');
+  pa = await prof(A); const act = Object.keys(pa.stats.potions || {}).filter(k => pa.stats.potions[k] > Date.now()).length;
+  ok(act >= 2 && (await A.$$('#hudPotions .pot-chip')).length === act && /\d:\d\d/.test(await A.textContent('#hudPotions')), 'potion HUD icons with timers (' + act + ')');
   await em(A, 'test:potion', { item: 'p_shard', x: 700, y: 840 }); await sleep(400); await A.screenshot({ path: ROOT + '/screenshot-potions.png' });
   // 4. emotes
   ok((await em(A, 'emote', 'e_crown')).ok === false, 'unowned emote rejected');

@@ -215,6 +215,7 @@
   ];
   const POTIONS = { speed: { mult: 1.2, sec: 60 }, orbs: { mult: 1.25, sec: 90 }, luck: { mult: 1.25, sec: 90 }, magnet: { mult: 1.3, sec: 60 }, shard: { chance: 0.03, sec: 120 } };
   const POTION_MAP = { everyMinMs: 35000, everyMaxMs: 70000, maxAlive: 4, lifeMs: 90000, r: 16, weights: { p_speed: 26, p_orbs: 24, p_luck: 22, p_magnet: 22, p_shard: 6 } };
+  const POTION_CAP_MS = 60 * 60 * 1000; // max remaining time of one potion kind (durations stack up to this)
   const potionOn = (stats, k, now = Date.now()) => !!(stats && stats.potions && stats.potions[k] > now);
   const potionMult = (stats, k, now = Date.now()) => (potionOn(stats, k, now) && POTIONS[k].mult ? POTIONS[k].mult : 1);
   const EMOTE_MS = 3000, EMOTE_GAP_MS = 2500;
@@ -486,7 +487,7 @@
   const api = {
     WORLD, ZONE_W, ZONE_H, DOOR, doorDist, DOOR_COST, ZONE2_WEIGHTS, zoneOf, zoneGate, PLAYER_R, BASE_SPEED, TICK_MS, STEP_DT, ORB_TYPES, ORB_RANK, ORB_LEGEND, POOL_WEIGHTS, RAIN_WEIGHTS, rollOrbType, expectedOrbValue, CATEGORIES, INV_CATEGORIES, RARITIES, ITEMS, ITEM_BY_ID, INV_SLOTS, INV_CAP, BUY_MAX_QTY, PAINTS,
     DEFAULT_EQUIPPED, DEFAULT_OWNED, UPGRADES, UPGRADE_KEYS, UPGRADE_REFUND_PRICES, upLevel, upValue, jackpotChance, upgradeText, orbReward, skillPrize, compassTargets, SENSE_EPIC_RANGE, RADAR, radarBlips, PUSH, separatePlayers,
-    EVENTS, EVENT_KEYS, AUTO_EVENT_KEYS, EVENT_SCHEDULE, luckyWeights, OBSTACLES, laserAngle, resolveObstacles, laserHits, laserPenalty, robotPenalty, WEEKEND, weekendInfo, SHARD_ID, SHARD_EXCHANGE, POTIONS, POTION_MAP, potionOn, potionMult, EMOTE_MS, EMOTE_GAP_MS, MG_PRIZE_MULT,
+    EVENTS, EVENT_KEYS, AUTO_EVENT_KEYS, EVENT_SCHEDULE, luckyWeights, OBSTACLES, laserAngle, resolveObstacles, laserHits, laserPenalty, robotPenalty, WEEKEND, weekendInfo, SHARD_ID, SHARD_EXCHANGE, POTIONS, POTION_CAP_MS, POTION_MAP, potionOn, potionMult, EMOTE_MS, EMOTE_GAP_MS, MG_PRIZE_MULT,
     MINIGAMES, REACTION_PRIZES, rushPrize, memoryPrize, memoryShowMs, shellFinal, shellShuffleMs, throwPos, throwPoints, throwPrize, chainPrize, minigameMinMs, speedFor, pickupFor, applyInput, BONUS_ROOM, inBonusRoom,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

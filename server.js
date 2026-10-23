@@ -1572,17 +1572,21 @@ io.on('connection', socket => {
       default: return { ok: false, error: 'Неизвестная команда' };
     }
   }
-  // ---- potions: drink one from the inventory (same kind refreshes the timer, never stacks)
+  // ---- potions: drink one from the inventory. Same kind while active ADDS its full duration to the remaining time
+  // (strength never stacks), capped at G.POTION_CAP_MS remaining; at the cap the potion is not consumed.
   socket.on('potion:use', (itemId, ack) => {
     ack = safeAck(ack);
     if (!acct) return ack({ ok: false, error: 'Сначала войдите в аккаунт' });
     const def = INV.itemDef(itemId); if (!def || def.type !== 'potion' || !has(G.POTIONS, def.potion)) return ack({ ok: false, error: 'Это не зелье' });
     if (!INV.hasItem(acct.acc, def.id)) return ack({ ok: false, error: 'Нет такого зелья' });
-    const r = INV.removeItem(acct.acc, def.id, 1, 'use'); if (!r || !r.ok) return ack({ ok: false, error: (r && r.error) || 'Не получилось' });
     const st = acct.acc.stats; st.potions = st.potions || {}; const now = Date.now();
-    for (const k of Object.keys(st.potions)) if (st.potions[k] <= now) delete st.potions[k];
-    st.potions[def.potion] = now + G.POTIONS[def.potion].sec * 1000;
-    accountChanged(acct.acc); ack({ ok: true, profile: ownProfile(acct.acc), until: st.potions[def.potion] });
+    for (const k of Object.keys(st.potions)) if (!(st.potions[k] > now)) delete st.potions[k];
+    const cur = Math.max(now, st.potions[def.potion] || 0), cap = now + G.POTION_CAP_MS;
+    if (cur >= cap - 1000) return ack({ ok: false, error: `Максимум ${Math.round(G.POTION_CAP_MS / 60000)} мин действия этого зелья`, code: 'cap' });
+    const r = INV.removeItem(acct.acc, def.id, 1, 'use'); if (!r || !r.ok) return ack({ ok: false, error: (r && r.error) || 'Не получилось' });
+    const until = Math.min(cur + G.POTIONS[def.potion].sec * 1000, cap);
+    st.potions[def.potion] = until;
+    accountChanged(acct.acc); ack({ ok: true, profile: ownProfile(acct.acc), until, added: until - cur, stacked: cur > now });
   });
   // ---- emotes (free ones for everyone, others must be owned); shown to everyone for G.EMOTE_MS, rate-limited
   socket.on('emote', (itemId, ack) => {
