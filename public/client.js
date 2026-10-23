@@ -856,24 +856,29 @@
 
   // ------------------------------------------------------------ rendering helpers
   const orbSprites = {};
+  // render-only tints: more saturated, and uncommon pushed to mint so it doesn't melt into the grass
+  const ORB_TINT = { c: ['#22d8ff', '#0a5a8a'], u: ['#9dffcf', '#0b6b45'], r: ['#b05cff', '#3d1478'], e: ['#ff8a12', '#7a3300'], l: ['#ffd21a', '#7a5600'], m: ['#ff2d63', '#7a0024'], t: ['#ffe680', '#7a5a00'] };
   function makeOrbSprite(t) {
     const size = Math.ceil(t.r * 8), c = document.createElement('canvas');
     c.width = c.height = size * 2;
-    const g = c.getContext('2d'), mid = size;
-    const grd = g.createRadialGradient(mid, mid, 0, mid, mid, size);
-    grd.addColorStop(0, t.glow + '0.55)'); grd.addColorStop(0.18, t.glow + '0.28)'); grd.addColorStop(0.45, t.glow + '0.08)'); grd.addColorStop(1, t.glow + '0)');
+    const g = c.getContext('2d'), mid = size, R = t.r * 2, [col, dark] = ORB_TINT[t.key] || [t.color, 'rgba(0,30,50,1)'];
+    const grd = g.createRadialGradient(mid, mid, R * 0.9, mid, mid, size);   // soft outer halo
+    grd.addColorStop(0, t.glow + '0.6)'); grd.addColorStop(0.25, t.glow + '0.25)'); grd.addColorStop(0.6, t.glow + '0.07)'); grd.addColorStop(1, t.glow + '0)');
     g.fillStyle = grd; g.fillRect(0, 0, size * 2, size * 2);
-    const core = g.createRadialGradient(mid - t.r * 0.35, mid - t.r * 0.35, 0, mid, mid, t.r * 2);
-    core.addColorStop(0, '#ffffff'); core.addColorStop(0.35, t.color); core.addColorStop(1, t.glow + '0.9)');
-    g.fillStyle = core; g.beginPath(); g.arc(mid, mid, t.r * 2, 0, Math.PI * 2); g.fill();
+    g.fillStyle = 'rgba(255,255,255,.9)'; g.beginPath(); g.arc(mid, mid, R * 1.12, 0, 6.2832); g.fill();          // white rim
+    g.fillStyle = dark; g.beginPath(); g.arc(mid, mid, R * 0.98, 0, 6.2832); g.fill();                          // dark outline ring
+    const core = g.createRadialGradient(mid - R * 0.3, mid - R * 0.35, 0, mid, mid, R * 0.84);
+    core.addColorStop(0, '#ffffff'); core.addColorStop(0.3, col); core.addColorStop(1, dark);
+    g.fillStyle = core; g.beginPath(); g.arc(mid, mid, R * 0.84, 0, 6.2832); g.fill();
+    g.fillStyle = 'rgba(255,255,255,.85)'; g.beginPath(); g.ellipse(mid - R * 0.3, mid - R * 0.38, R * 0.22, R * 0.14, -0.6, 0, 6.2832); g.fill(); // gloss
     return { c, half: size / 2 };
   }
   for (const t of Object.values(G.ORB_TYPES)) orbSprites[t.key] = makeOrbSprite(t);
-  orbSprites.runner = makeOrbSprite({ r: G.EVENTS.runner.r / 2 / 1.1, color: '#c6fdff', glow: 'rgba(125,252,255,' });
+  orbSprites.runner = makeOrbSprite({ key: 'runner', r: G.EVENTS.runner.r / 2 / 1.1, color: '#c6fdff', glow: 'rgba(125,252,255,' });
   const orbDef = type => (Object.prototype.hasOwnProperty.call(G.ORB_TYPES, type) ? G.ORB_TYPES[type] : G.ORB_TYPES.c); // unknown tier → common look
   function drawOrb(g, x, y, type, t, id, scale = 1) {
     const s = orbSprites[type] || orbSprites.c, ot = orbDef(type);
-    const pulse = (1 + 0.09 * Math.sin(t * 3.2 + id * 1.7)) * scale;
+    const pulse = (type === 'c' || type === 'u' ? 1 : 1 + 0.09 * Math.sin(t * 3.2 + id * 1.7)) * scale;
     const half = s.half * pulse;
     if (type === 't') { // treasure: a light pillar so it can be spotted from afar
       const gr = g.createLinearGradient(0, y - ot.r * 9, 0, y);

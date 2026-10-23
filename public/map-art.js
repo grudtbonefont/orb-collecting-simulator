@@ -140,43 +140,58 @@
     // ---------------------------------------------------------------- patterns: border + door wall + obstacle skins
     function pat(w, h, paint) { const c = document.createElement('canvas'); c.width = w; c.height = h; paint(c.getContext('2d'), w, h); return c; }
     const T = {};
-    // clean flat skins: base fill, soft top highlight, bottom edge shade, darker outline, 1 subtle detail. Sprites baked once and cached.
-    const SK = { stone: ['#cfcabd', '#8f8a7e', 'rgba(255,255,255,.28)', 'rgba(0,0,0,.13)'], fence: ['#c89a62', '#7a5530', 'rgba(255,240,210,.28)', 'rgba(60,30,10,.16)'],
-      mossy: ['#8b9182', '#4e5448', 'rgba(255,255,255,.18)', 'rgba(0,0,0,.16)'], log: ['#9a6c40', '#583a1e', 'rgba(255,230,190,.22)', 'rgba(40,20,5,.2)'] };
+    // polished flat skins (cached sprites). zone 1: warm stone slabs w/ grass rim, white picket fence; zone 2: bark logs w/ end rings, mossy stone w/ moss cap.
     const rr = (g, x, y, w, h, r) => { r = Math.max(0, Math.min(r, w / 2, h / 2)); g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); };
-    function skin(g, k, x, y, w, h) {
-      const [base, line, hi, lo] = SK[k], r = Math.min(14, Math.min(w, h) * 0.28);
-      rr(g, x, y, w, h, r); g.fillStyle = base; g.fill();
-      g.save(); rr(g, x, y, w, h, r); g.clip();
-      const e = Math.min(h, w) * 0.22, hh = Math.min(10, e);
-      g.fillStyle = hi; g.fillRect(x, y, w, hh); g.fillStyle = lo; g.fillRect(x, y + h - hh, w, hh);
-      if (k === 'mossy') { g.fillStyle = 'rgba(110,160,80,.45)'; g.beginPath(); g.ellipse(x + w * 0.3, y + 2, w * 0.22, Math.min(h * 0.12, 9), 0, 0, 6.283); g.fill(); }
-      if (k === 'stone' && w > 40 && h > 40) { g.strokeStyle = 'rgba(0,0,0,.08)'; g.lineWidth = 2; g.beginPath(); g.moveTo(x + w * 0.62, y + h * 0.3); g.lineTo(x + w * 0.72, y + h * 0.52); g.stroke(); }
-      if (k === 'log' || k === 'fence') { const along = w >= h; g.strokeStyle = 'rgba(0,0,0,.08)'; g.lineWidth = 2; g.beginPath(); if (along) { g.moveTo(x + r, y + h * 0.5); g.lineTo(x + w - r, y + h * 0.5); } else { g.moveTo(x + w * 0.5, y + r); g.lineTo(x + w * 0.5, y + h - r); } g.stroke(); }
-      g.restore(); rr(g, x + 1.5, y + 1.5, w - 3, h - 3, r - 1); g.strokeStyle = line; g.lineWidth = 3; g.stroke();
+    const circ = (g, x, y, r, c) => { g.fillStyle = c; g.beginPath(); g.arc(x, y, r, 0, 6.2832); g.fill(); };
+    function slab(g, x, y, w, h, top, bot, line, rim, seed) {           // stone block with optional moss/grass rim
+      const r = Math.min(12, Math.min(w, h) * 0.3);
+      rr(g, x, y, w, h, r); g.fillStyle = bot; g.fill();
+      rr(g, x, y, w, h - Math.min(14, h * 0.22), r); g.fillStyle = top; g.fill();
+      if (rim) { g.save(); rr(g, x, y, w, h, r); g.clip(); const d = Math.min(9, h * 0.2); g.fillStyle = rim; g.beginPath(); g.moveTo(x, y);
+        g.lineTo(x + w, y); g.lineTo(x + w, y + d * 0.8); for (let i = 1; i <= 8; i++) { const px = x + w - w * i / 8; g.quadraticCurveTo(px + w / 16, y + d * (i % 2 ? 1.5 : 0.9), px, y + d * 0.9); } g.closePath(); g.fill();
+        g.fillStyle = 'rgba(255,255,255,.25)'; g.fillRect(x, y, w, 2); g.restore(); }
+      rr(g, x + 1, y + 1, w - 2, h - 2, r - 1); g.strokeStyle = line; g.lineWidth = 2.5; g.stroke();
+      return r;
     }
-    const sprites = new Map(); let spriteN = 0;
+    function skin(g, k, w, h, id) {
+      if (k === 'stone') { slab(g, 0, 0, w, h, '#eadfc8', '#d2c4a6', '#8f7d5e', '#86c95a');
+        if (w > 30 && h > 30) { circ(g, w * 0.78, h * 0.66, 3, '#bfae8c'); circ(g, w * 0.7, h * 0.72, 2, '#c8b898'); circ(g, w * 0.22, 6, 2.6, '#fff4a8'); circ(g, w * 0.22, 6, 1.1, '#f2a33a'); } }
+      else if (k === 'mossy') { slab(g, 0, 0, w, h, '#a3a89b', '#868b7f', '#4a5045', '#5f9e3c'); if (w > 30 && h > 30) { circ(g, w * 0.72, h * 0.7, 3, '#757a6e'); } }
+      else if (k === 'fence') { const along = w >= h, L = along ? w : h, T = along ? h : w; g.save(); if (!along) { g.translate(w, 0); g.rotate(Math.PI / 2); }
+        const rail = Math.max(4, T * 0.16); for (const f of [0.3, 0.66]) { rr(g, 2, T * f - rail / 2, L - 4, rail, rail / 2); g.fillStyle = '#e9e4d8'; g.fill(); g.strokeStyle = '#8a8170'; g.lineWidth = 1.5; g.stroke(); }
+        const n = Math.max(2, Math.round(L / 34)), pw = Math.min(16, T * 0.42);
+        for (let i = 0; i < n; i++) { const px = 2 + (L - 4 - pw) * i / (n - 1); g.beginPath(); g.moveTo(px, T * 0.14 + pw * 0.4); g.lineTo(px + pw / 2, T * 0.06); g.lineTo(px + pw, T * 0.14 + pw * 0.4); g.lineTo(px + pw, T * 0.94 - 3); g.arcTo(px + pw, T * 0.94, px, T * 0.94, 3); g.arcTo(px, T * 0.94, px, 0, 3); g.closePath();
+          g.fillStyle = '#fbf8f0'; g.fill(); g.fillStyle = 'rgba(0,0,0,.08)'; g.fillRect(px + pw * 0.62, T * 0.2, pw * 0.38 - 1, T * 0.7); g.strokeStyle = '#8a8170'; g.lineWidth = 2; g.stroke(); }
+        g.restore(); }
+      else if (k === 'log') { const along = w >= h, L = along ? w : h, T = along ? h : w; g.save(); if (!along) { g.translate(w, 0); g.rotate(Math.PI / 2); }
+        const e = Math.min(T * 0.2, 16); rr(g, 1, 1, L - 2, T - 2, T / 2); g.fillStyle = '#7a4e2a'; g.fill(); rr(g, 1, 1, L - 2, T * 0.55, T * 0.27); g.fillStyle = '#956339'; g.fill();
+        g.strokeStyle = 'rgba(60,35,15,.35)'; g.lineWidth = 2; g.lineCap = 'round'; g.beginPath(); g.moveTo(L * 0.3, T * 0.72); g.lineTo(L * 0.55, T * 0.72); g.stroke();
+        g.fillStyle = 'rgba(110,170,70,.85)'; g.beginPath(); g.ellipse(L * 0.62, T * 0.14, Math.min(L * 0.12, 26), T * 0.12, 0, 0, 6.2832); g.fill();
+        rr(g, 1, 1, L - 2, T - 2, T / 2); g.strokeStyle = '#4a2c14'; g.lineWidth = 2.5; g.stroke();
+        for (const cx of [T / 2, L - T / 2]) { g.fillStyle = '#e0b277'; g.beginPath(); g.ellipse(cx, T / 2, e, Math.max(1, T / 2 - 3), 0, 0, 6.2832); g.fill(); g.strokeStyle = '#9a6a3a'; g.lineWidth = 1.5; g.beginPath(); g.ellipse(cx, T / 2, e * 0.55, Math.max(1, (T / 2 - 3) * 0.55), 0, 0, 6.2832); g.stroke();
+          circ(g, cx, T / 2, 1.6, '#9a6a3a'); g.strokeStyle = '#4a2c14'; g.lineWidth = 2; g.beginPath(); g.ellipse(cx, T / 2, e, Math.max(1, T / 2 - 3), 0, 0, 6.2832); g.stroke(); }
+        g.restore(); }
+    }
+    const sprites = new Map(); let spriteN = 0; const SS = 2, PAD = 12;
     function sprite(k, w, h) { const key = k + w + 'x' + h; let c = sprites.get(key); if (c) return c;
       if (sprites.size > 300) sprites.clear();
-      c = document.createElement('canvas'); c.width = Math.ceil(w) + 6; c.height = Math.ceil(h) + 8; const g = c.getContext('2d');
-      rr(g, 3, 6, w, h, Math.min(14, Math.min(w, h) * 0.28)); g.fillStyle = 'rgba(0,0,0,.16)'; g.fill(); skin(g, k, 0, 0, w, h); sprites.set(key, c); spriteN++; return c; }
-    function drawBorder(g, t) {
-      const B = 46;
-      g.fillStyle = SK.stone[0]; g.fillRect(-B, -B, Z + B, B); g.fillRect(-B, WH, Z + B, B); g.fillRect(-B, 0, B, WH);
-      g.fillStyle = SK.log[0]; g.fillRect(Z, -B, WW - Z + B, B); g.fillRect(Z, WH, WW - Z + B, B); g.fillRect(WW, 0, B, WH);
-      g.fillStyle = SK.stone[2]; g.fillRect(-B, -B, Z + B, 8); g.fillRect(-B, WH, Z + B, 8); g.fillStyle = SK.log[2]; g.fillRect(Z, -B, WW - Z + B, 8); g.fillRect(Z, WH, WW - Z + B, 8);
-      g.save(); g.lineWidth = 3; g.strokeStyle = 'rgba(60,50,30,.55)'; g.strokeRect(0, 0, WW, WH); g.strokeStyle = 'rgba(0,0,0,.35)'; g.lineWidth = 6; g.strokeRect(-B, -B, WW + 2 * B, WH + 2 * B); g.restore();
+      c = document.createElement('canvas'); c.width = (w + PAD * 2) * SS; c.height = (h + PAD * 2) * SS; const g = c.getContext('2d'); g.scale(SS, SS); g.translate(PAD, PAD);
+      rr(g, 2, 5, w, h, Math.min(w, h) / 2.2); g.fillStyle = 'rgba(20,40,10,.2)'; g.fill(); // soft contact shadow
+      skin(g, k, w, h); sprites.set(key, c); spriteN++; return c; }
+    const blit = (g, k, x, y, w, h) => g.drawImage(sprite(k, w, h), x - PAD, y - PAD, w + PAD * 2, h + PAD * 2);
+    function drawBorder(g, t) { // zone 1: stone slab wall; zone 2: log wall. Tiles are cached sprites.
+      const B = 46, S = 92, vis = g.getTransform(), inv = vis.inverse(), cw = g.canvas.width, ch = g.canvas.height;
+      const p0 = inv.transformPoint({ x: 0, y: 0 }), p1 = inv.transformPoint({ x: cw, y: ch }), X0 = p0.x - S, X1 = p1.x + S, Y0 = p0.y - S, Y1 = p1.y + S;
+      for (const y of [-B, WH]) { if (y + B < Y0 || y > Y1) continue; for (let x = -B; x < WW + B; x += S) { if (x + S < X0 || x > X1) continue; const z1 = x < Z; blit(g, z1 ? 'stone' : 'log', x, y, Math.min(S, (z1 ? Z : WW + B) - x), B); } }
+      for (const [x, k] of [[-B, 'stone'], [WW, 'log']]) { if (x + B < X0 || x > X1) continue; for (let y = 0; y < WH; y += S) { if (y + S < Y0 || y > Y1) continue; blit(g, k, x, y, B, Math.min(S, WH - y)); } }
     }
     function drawDoorWall(g, y0, y1) {
-      g.save(); g.fillStyle = SK.stone[0]; g.fillRect(Z - 22, y0, 22, y1 - y0); g.fillStyle = SK.log[0]; g.fillRect(Z, y0, 22, y1 - y0);
-      g.strokeStyle = 'rgba(0,0,0,.3)'; g.lineWidth = 2; g.strokeRect(Z - 22, y0, 44, y1 - y0);
-      for (let y = Math.floor(y0 / 220) * 220; y < y1; y += 220) g.drawImage(sprite('stone', 64, 32), Z - 32, y);
-      g.restore();
+      const S = 88; for (let y = Math.floor(y0 / S) * S; y < y1; y += S) { const a = Math.max(y, y0), b = Math.min(y + S, y1); if (b - a < 4) continue; blit(g, 'stone', Z - 22, a, 22, b - a); blit(g, 'log', Z, a, 22, b - a); }
     }
     function rectObs(g, o, zone) {
       const long = Math.max(o.w, o.h) > Math.min(o.w, o.h) * 1.8;
       const k = zone === 1 ? (long ? 'fence' : 'stone') : (long ? 'log' : 'mossy');
-      g.drawImage(sprite(k, Math.round(o.w), Math.round(o.h)), Math.round(o.x - o.w / 2), Math.round(o.y - o.h / 2));
+      blit(g, k, Math.round(o.x - o.w / 2), Math.round(o.y - o.h / 2), Math.round(o.w), Math.round(o.h));
     }
     function rockObs(g, o, zone) {
       const path = () => { g.beginPath(); for (let i = 0; i < 11; i++) { const a = i / 11 * Math.PI * 2, rr = o.r * (0.9 + 0.1 * Math.sin(o.id * 7 + i * 2.3)); i ? g.lineTo(o.x + Math.cos(a) * rr, o.y + Math.sin(a) * rr) : g.moveTo(o.x + Math.cos(a) * rr, o.y + Math.sin(a) * rr); } g.closePath(); };

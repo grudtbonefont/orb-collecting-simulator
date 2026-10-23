@@ -1735,7 +1735,7 @@ io.on('connection', socket => {
       if (!pl || !isObj(d) || !Array.isArray(d.types)) return ack({ ok: false });
       const ring = Number(d.ring) || 150, list = d.types.filter(t => has(G.ORB_TYPES, t)).slice(0, 20);
       const cx = Number.isFinite(d.x) ? d.x : pl.x, cy = Number.isFinite(d.y) ? d.y : pl.y; // centre: the caller, or a given point
-      list.forEach((t, i) => { const a = -Math.PI / 2 + i * 2 * Math.PI / list.length; const o = addOrb(t, { x: clampW(cx + Math.cos(a) * ring * 1.6), y: clampW(cy + Math.sin(a) * ring) });
+      list.forEach((t, i) => { const a = -Math.PI / 2 + i * 2 * Math.PI / list.length; const o = addOrb(t, { x: clampWorld(cx + Math.cos(a) * ring * 1.6, G.WORLD.w), y: clampWorld(cy + Math.sin(a) * ring, G.WORLD.h) });
         if (o && d.noExpiry) delete o.expires; else if (o && Number(d.lifeMs) > 0) o.expires = Date.now() + Number(d.lifeMs); }); // test: old orb without a lifetime / short life
       ack({ ok: true, n: list.length });
     });
