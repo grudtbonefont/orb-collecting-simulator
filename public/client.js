@@ -348,6 +348,7 @@
     floaters.push({ x: me.x, y: me.y - 26, text: (z.src === 'robot' ? '💥 −' : '⚡ −') + z.loss, color: '#ff4d5e', start: performance.now(), big: true });
     toastC('hits', `${z.src === 'robot' ? '🤖 Робот попал в вас!' : z.src === 'boss' ? '👹 Удар босса!' : '⚡ Лазер!'} Потеряно ${fmt(z.loss)} сфер — часть рассыпалась рядом. ${Math.round(z.inv / 1000)} с неуязвимости.`, 'err');
   });
+  const MA = window.OCSMapArtCreate(G); window.OCSMapStats = () => MA.stats(); // map visuals (public/map-art.js)
   function drawRobot(o, t, now) {
     const st = robotState.get(o.id) || { face: 0, aim: 0 }, r = o.r, a = st.face;
     if (st.aim) { // telegraph: blinking red aim line to the target
@@ -357,7 +358,7 @@
       ctx.beginPath(); ctx.arc(st.ax, st.ay, 18 + 4 * fl, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
     }
     ctx.strokeStyle = 'rgba(255,90,90,0.10)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(o.x, o.y, G.OBSTACLES.robotRange, 0, Math.PI * 2); ctx.stroke(); // range
-    const metal = (x0, y0, x1, y1) => { const g = ctx.createLinearGradient(x0, y0, x1, y1); g.addColorStop(0, '#e8edf5'); g.addColorStop(0.35, '#9aa3b4'); g.addColorStop(0.6, '#5d6576'); g.addColorStop(1, '#c3cad6'); return g; };
+    const rp = MA.robotPal(G.zoneOf(o.x)), metal = (x0, y0, x1, y1) => { const g = ctx.createLinearGradient(x0, y0, x1, y1); g.addColorStop(0, rp[0]); g.addColorStop(0.35, rp[1]); g.addColorStop(0.6, rp[2]); g.addColorStop(1, rp[3]); return g; };
     ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 14; ctx.shadowOffsetY = 6;
     ctx.fillStyle = metal(o.x - r, o.y - r, o.x + r, o.y + r); ctx.beginPath(); ctx.arc(o.x, o.y, r, 0, Math.PI * 2); ctx.fill(); // body (player-like round)
     ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
@@ -408,32 +409,13 @@
           ctx.strokeStyle = 'rgba(255,40,60,0.45)'; ctx.lineWidth = 16; ctx.beginPath(); ctx.moveTo(o.x, o.y); ctx.lineTo(ex, ey); ctx.stroke();
           ctx.strokeStyle = '#ff3b4e'; ctx.lineWidth = 7; ctx.stroke();
           ctx.shadowBlur = 0; ctx.strokeStyle = '#fff2f2'; ctx.lineWidth = 2.2; ctx.stroke();
+          MA.beamFx(ctx, o, ex, ey, G.zoneOf(o.x), now);
           ctx.fillStyle = 'rgba(255,80,80,0.9)'; ctx.beginPath(); ctx.arc(ex, ey, 6 + Math.sin(now / 60) * 1.5, 0, Math.PI * 2); ctx.fill();
           ctx.strokeStyle = 'rgba(255,60,60,0.12)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(o.x, o.y, o.len, 0, Math.PI * 2); ctx.stroke();
         }
-        const g = ctx.createRadialGradient(o.x - 6, o.y - 6, 2, o.x, o.y, o.r);
-        g.addColorStop(0, '#ffb3b3'); g.addColorStop(0.5, '#c0182a'); g.addColorStop(1, '#4a0610');
-        ctx.fillStyle = g; ctx.shadowColor = '#ff2030'; ctx.shadowBlur = armed ? 18 : 8;
-        ctx.beginPath(); ctx.arc(o.x, o.y, o.r, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
-        ctx.strokeStyle = '#ff6b78'; ctx.lineWidth = 3; ctx.stroke();
-      } else if (o.k === 'rect') {
-        const x0 = o.x - o.w / 2, y0 = o.y - o.h / 2;
-        const g = ctx.createLinearGradient(x0, y0, x0 + o.w, y0 + o.h); g.addColorStop(0, '#5a5f82'); g.addColorStop(1, '#2b2e48');
-        ctx.fillStyle = g; ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 16; ctx.shadowOffsetY = 6;
-        ctx.fillRect(x0, y0, o.w, o.h); ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
-        ctx.strokeStyle = 'rgba(180,190,255,0.55)'; ctx.lineWidth = 3; ctx.strokeRect(x0 + 1.5, y0 + 1.5, o.w - 3, o.h - 3);
-        ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 2; ctx.beginPath();
-        for (let k = 24; k < o.w + o.h; k += 28) { ctx.moveTo(x0 + Math.min(k, o.w), y0 + Math.max(0, k - o.w)); ctx.lineTo(x0 + Math.max(0, k - o.h), y0 + Math.min(k, o.h)); }
-        ctx.stroke();
-      } else { // rock
-        const g = ctx.createRadialGradient(o.x - o.r * 0.35, o.y - o.r * 0.35, o.r * 0.1, o.x, o.y, o.r);
-        g.addColorStop(0, '#8a8aa6'); g.addColorStop(1, '#34344c');
-        ctx.fillStyle = g; ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 16; ctx.shadowOffsetY = 6;
-        ctx.beginPath();
-        for (let i = 0; i < 11; i++) { const a = i / 11 * Math.PI * 2, rr = o.r * (0.9 + 0.1 * Math.sin(o.id * 7 + i * 2.3)); i ? ctx.lineTo(o.x + Math.cos(a) * rr, o.y + Math.sin(a) * rr) : ctx.moveTo(o.x + Math.cos(a) * rr, o.y + Math.sin(a) * rr); }
-        ctx.closePath(); ctx.fill(); ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
-        ctx.strokeStyle = 'rgba(200,200,255,0.35)'; ctx.lineWidth = 2.5; ctx.stroke();
-      }
+        MA.pylon(ctx, o, G.zoneOf(o.x), armed, now);
+      } else if (o.k === 'rect') MA.rectObs(ctx, o, G.zoneOf(o.x));
+      else MA.rockObs(ctx, o, G.zoneOf(o.x));
       ctx.restore();
     }
   }
@@ -535,8 +517,6 @@
   });
   function drawZones(t) {
     const Z = G.ZONE_W, H = G.ZONE_H, D = G.DOOR;
-    ctx.fillStyle = 'rgba(150,80,255,0.07)'; ctx.fillRect(0, 0, Z, H);          // zone 1: violet tint
-    ctx.fillStyle = 'rgba(40,130,255,0.11)'; ctx.fillRect(Z, 0, Z, H);          // zone 2: blue tint
     if (cam.x + VW < Z - 400 && cam.x > -1) return;                             // wall far off-screen
     const open = doorOpen(), pulse = 0.6 + 0.4 * Math.sin(t * 3), col = open ? '#5dff8f' : '#ffcc33';
     ctx.save(); // the whole wall is the door: glowing frame, bars when locked, labels follow the camera
@@ -544,6 +524,7 @@
     ctx.lineWidth = 5; ctx.strokeStyle = col; ctx.shadowColor = col; ctx.shadowBlur = 22 * pulse;
     ctx.beginPath(); ctx.moveTo(Z - 22, 0); ctx.lineTo(Z - 22, H); ctx.moveTo(Z + 22, 0); ctx.lineTo(Z + 22, H); ctx.stroke();
     const y0 = Math.max(0, Math.floor((cam.y - 60) / 28) * 28), y1 = Math.min(H, cam.y + VH + 60);
+    MA.drawDoorWall(ctx, y0, y1);
     ctx.shadowBlur = 0;
     if (!open) { ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,204,51,0.75)'; ctx.beginPath(); for (let y = y0; y < y1; y += 28) { ctx.moveTo(Z - 20, y); ctx.lineTo(Z + 20, y); } ctx.stroke(); }
     else { ctx.strokeStyle = 'rgba(93,255,143,0.35)'; ctx.lineWidth = 2; ctx.setLineDash([12, 16]); ctx.lineDashOffset = -t * 40; ctx.beginPath(); ctx.moveTo(Z, y0); ctx.lineTo(Z, y1); ctx.stroke(); ctx.setLineDash([]); }
@@ -1559,8 +1540,7 @@
     ctx.save(); ctx.translate(-cam.x, -cam.y);
     drawZones(t);
     // world border
-    ctx.strokeStyle = 'rgba(120,90,255,0.8)'; ctx.lineWidth = 4; ctx.shadowColor = '#7a5cff'; ctx.shadowBlur = 20;
-    ctx.strokeRect(0, 0, G.WORLD.w, G.WORLD.h); ctx.shadowBlur = 0;
+    MA.drawBorder(ctx, t);
 
     drawBonusRoom(t);
     drawEventZone(t, now);
@@ -1677,24 +1657,8 @@
     }
     ctx.restore();
   }
-  function drawBackground(t) {
-    ctx.fillStyle = '#060912'; ctx.fillRect(0, 0, VW, VH);
-    const vg = ctx.createRadialGradient(VW / 2, VH / 2, 0, VW / 2, VH / 2, Math.max(VW, VH) * 0.75);
-    vg.addColorStop(0, 'rgba(30,40,100,0.25)'); vg.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = vg; ctx.fillRect(0, 0, VW, VH);
-    const step = 64;
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = 'rgba(90,120,255,0.09)';
-    ctx.beginPath();
-    const x0 = Math.max(0, Math.floor(cam.x / step) * step), x1 = Math.min(G.WORLD.w, cam.x + VW);
-    const y0 = Math.max(0, Math.floor(cam.y / step) * step), y1 = Math.min(G.WORLD.h, cam.y + VH);
-    for (let x = x0; x <= x1; x += step) { ctx.moveTo(x - cam.x + 0.5, Math.max(0, -cam.y)); ctx.lineTo(x - cam.x + 0.5, Math.min(VH, G.WORLD.h - cam.y)); }
-    for (let y = y0; y <= y1; y += step) { ctx.moveTo(Math.max(0, -cam.x), y - cam.y + 0.5); ctx.lineTo(Math.min(VW, G.WORLD.w - cam.x), y - cam.y + 0.5); }
-    ctx.stroke();
-    ctx.strokeStyle = 'rgba(90,120,255,0.16)'; ctx.beginPath();
-    for (let x = Math.max(0, Math.floor(cam.x / 512) * 512); x <= x1; x += 512) { ctx.moveTo(x - cam.x + 0.5, Math.max(0, -cam.y)); ctx.lineTo(x - cam.x + 0.5, Math.min(VH, G.WORLD.h - cam.y)); }
-    for (let y = Math.max(0, Math.floor(cam.y / 512) * 512); y <= y1; y += 512) { ctx.moveTo(Math.max(0, -cam.x), y - cam.y + 0.5); ctx.lineTo(Math.min(VW, G.WORLD.w - cam.x), y - cam.y + 0.5); }
-    ctx.stroke();
+  function drawBackground(t) { // natural zone-themed ground from cached chunks (public/map-art.js), no grid
+    MA.drawGround(ctx, cam, VW, VH, zoom, DPR, t); MA.drawVignette(ctx, VW, VH);
   }
   const idleOrbs = Array.from({ length: 60 }, (_, i) => ({ x: Math.random(), y: Math.random(), t: i % 29 === 0 ? 'm' : i % 25 === 0 ? 'l' : i % 13 === 0 ? 'e' : i % 6 === 0 ? 'r' : i % 4 === 0 ? 'u' : 'c', v: 0.2 + Math.random() * 0.6, id: i }));
   function drawIdleBackground(t) {
