@@ -89,7 +89,7 @@
     { id: 'w_event', kind: 'event', goal: 5, text: 'Поучаствуйте в 5 событиях арены', rw: { orbs: 1200, shards: 3 } },
     { id: 'w_play', kind: 'play', goal: 180, text: 'Проведите на арене 3 часа', rw: { orbs: 1500, shards: 4 } },
   ];
-  // extra weekly variants: only reachable through a paid reroll (the default weekly set stays WEEKLY)
+  // weekly pool = WEEKLY + WEEKLY_ALT; every player rolls 5 (one per kind) per week, seeded by account + week
   const WEEKLY_ALT = [
     { id: 'w_orbs2', kind: 'orbs', goal: 20000, text: 'Соберите 20 000 сфер', rw: { orbs: 1800, shards: 4 } },
     { id: 'w_rare2', kind: 'rare', goal: 200, text: 'Соберите 200 редких (или ценнее) сфер', rw: { orbs: 1300, shards: 3 } },
@@ -111,6 +111,13 @@
     for (const q of fresh.concat(old)) { if (out.length >= WEEKLY.length) break; if (kinds.has(q.kind)) continue; kinds.add(q.kind); out.push({ id: q.id, p: 0, done: false }); }
     return out;
   }
+  // deterministic per-player RNG: same player + period → same roll; differs between players / periods
+  function seededRnd(str) {
+    let h = 1779033703 ^ str.length;
+    for (let i = 0; i < str.length; i++) { h = Math.imul(h ^ str.charCodeAt(i), 3432918353); h = (h << 13) | (h >>> 19); }
+    let a = h >>> 0;
+    return () => { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  }
   // kind = counter that grows (server: questProgress(acc, kind, n)); diff 1–3 scales the reward
   const QUESTS = [
     { id: 'orbs300', kind: 'orbs', goal: 300, diff: 1, text: 'Соберите 300 сфер' },
@@ -128,6 +135,21 @@
     { id: 'event1', kind: 'event', goal: 1, diff: 2, text: 'Примите участие в событии арены' },
     { id: 'play15', kind: 'play', goal: 15, diff: 1, text: 'Проведите на арене 15 минут' },
     { id: 'gold10', kind: 'gold', goal: 10, diff: 1, text: 'Соберите 10 сфер «Золотого дождя»' },
+    { id: 'orbs500', kind: 'orbs', goal: 500, diff: 1, text: 'Соберите 500 сфер' },
+    { id: 'mg3', kind: 'mg', goal: 3, diff: 1, text: 'Сыграйте 3 мини-игры' },
+    { id: 'play20', kind: 'play', goal: 20, diff: 1, text: 'Проведите на арене 20 минут' },
+    { id: 'orbs1500', kind: 'orbs', goal: 1500, diff: 2, text: 'Соберите 1 500 сфер' },
+    { id: 'play30', kind: 'play', goal: 30, diff: 2, text: 'Проведите на арене 30 минут' },
+    { id: 'gold25', kind: 'gold', goal: 25, diff: 2, text: 'Соберите 25 сфер «Золотого дождя»' },
+    { id: 'rare20', kind: 'rare', goal: 20, diff: 2, text: 'Соберите 20 редких (или ценнее) сфер' },
+    { id: 'orbs4000', kind: 'orbs', goal: 4000, diff: 3, text: 'Соберите 4 000 сфер' },
+    { id: 'rare60', kind: 'rare', goal: 60, diff: 3, text: 'Соберите 60 редких (или ценнее) сфер' },
+    { id: 'runner2', kind: 'runner', goal: 2, diff: 3, text: 'Поймайте Раннера 2 раза' },
+    { id: 'mg10', kind: 'mg', goal: 10, diff: 3, text: 'Сыграйте 10 мини-игр' },
+    { id: 'event3', kind: 'event', goal: 3, diff: 3, text: 'Примите участие в 3 событиях арены' },
+    { id: 'chest3', kind: 'chest', goal: 3, diff: 3, text: 'Откройте 3 сундука с замком' },
+    { id: 'play45', kind: 'play', goal: 45, diff: 3, text: 'Проведите на арене 45 минут' },
+    { id: 'gold40', kind: 'gold', goal: 40, diff: 3, text: 'Соберите 40 сфер «Золотого дождя»' },
   ];
   const QUEST_BY_ID = Object.fromEntries(QUESTS.map(q => [q.id, q]));
   // varied rewards, scaled by difficulty: orbs, shards, temporary boosts, rarely a cosmetic (trail / skin)
@@ -195,7 +217,7 @@
     { orbs: 350 }, { potions: ['p_luck', 'p_orbs'] }, { orbs: 500, shards: 5 }, { item: 't_pages', dup: 10, shards: 5 },
   ];
   const api = { CALENDAR, MINI, MINI_KEYS, ROOM, inRoom, ACH, ACH_BY_ID, ACH_CATS, CHAINS, CHAIN_BY_ID, achValue, itemsOwned, OLD_ACH, oldTier, tierReward, dayKey, resetIn, QUESTS, QUEST_BY_ID, BOOSTS, QUEST_REWARDS, ALL_DONE, allDoneBonus,
-    WEEKLY, WEEKLY_ALT, WEEKLY_POOL, WEEKLY_BY_ID, REROLL_COST, rollWeekly, weekKey, weekResetIn, rollQuests, questItems, rewardText, boostMult, BOSS, bossHp, bossPenalty, bossReward };
+    WEEKLY, WEEKLY_ALT, WEEKLY_POOL, WEEKLY_BY_ID, REROLL_COST, rollWeekly, seededRnd, weekKey, weekResetIn, rollQuests, questItems, rewardText, boostMult, BOSS, bossHp, bossPenalty, bossReward };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.C = api;
 })(typeof window !== 'undefined' ? window : this);

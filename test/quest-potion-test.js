@@ -16,7 +16,8 @@ const ROOT = process.cwd(), PORT = 3148, URL = 'http://localhost:' + PORT, sleep
   // daily quest
   let w = (await em('test:quest', { kind: 'mg', n: 0.0001 })); // ensure state
   await p.evaluate(() => { document.getElementById('toasts').textContent = ''; });
-  await em('test:quest', { kind: 'mg', n: 25 }); await sleep(700); // completes daily mg quests (if any) + weekly «25 мини-игр»
+  const wq = (await em('test:grant', { id: 'x', qty: 1 })).profile.stats.weekly.q.map(q => C.WEEKLY_BY_ID[q.id]); // weekly set is random per player
+  await em('test:quest', { kind: wq[0].kind, n: wq[0].goal }); await sleep(700); // completes weekly #1 (+ daily quests of that kind, if any)
   pr = (await em('test:grant', { id: 'p_luck', qty: 1 })).profile;
   const doneD = pr.stats.daily.q.filter(q => q.done).length, doneW = pr.stats.weekly.q.filter(q => q.done).length;
   ok(doneW === 1 && pots(pr) - p0 - 1 === doneD + doneW, `1 potion per completed quest (daily ${doneD}, weekly ${doneW})`);
@@ -27,7 +28,7 @@ const ROOT = process.cwd(), PORT = 3148, URL = 'http://localhost:' + PORT, sleep
   // full inventory → pending, delivered when room appears
   for (let i = 0; i < 40; i++) { const r = await em('test:grant', { id: 'p_magnet', qty: 20 }); if (!r.ok) break; }
   for (let i = 0; i < 20; i++) { const r = await em('test:grant', { id: 'p_magnet', qty: 1 }); if (!r.ok) break; }
-  await em('test:quest', { kind: 'event', n: 5 }); await sleep(700);
+  await em('test:quest', { kind: wq[1].kind, n: wq[1].goal }); await sleep(700);
   pr = (await em('test:grant', { id: 'x', qty: 1 })).profile;
   ok(Array.isArray(pr.stats.pendingPotions) && pr.stats.pendingPotions.length >= 1, 'full inventory → potion pending (' + JSON.stringify(pr.stats.pendingPotions) + ')');
   ok(/ждёт места/.test(await p.textContent('#toasts')), 'notification: waits for room');
