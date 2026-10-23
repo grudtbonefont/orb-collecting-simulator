@@ -2566,7 +2566,7 @@
     if (shopTab === 'upgrades') shopTab = 'color'; // upgrades have their own window now («Улучшения», U)
     const tabs = G.CATEGORIES.concat([{ key: 'emote', name: 'Эмоции', icon: '😀' }, { key: 'shards', name: 'Лавка осколков', icon: SHARD_I }, { key: 'codes', name: '🎟 Коды' }]);
     $('shopTabs').innerHTML = tabs.map(c => `<button class="tab ${c.key === shopTab ? 'active' : ''}" data-tab="${c.key}">${c.icon ? c.icon + ' ' : ''}${c.name}</button>`).join('');
-    $('shopTabs').querySelectorAll('.tab').forEach(b => b.onclick = () => { shopTab = b.dataset.tab; renderShop(); });
+    $('shopTabs').querySelectorAll('.tab').forEach(b => b.onclick = () => { shopTab = b.dataset.tab; renderShop(); }); $('shop').dataset.tab = shopTab;
     const grid = $('shopGrid');
     grid.innerHTML = '';
     $('shopTools').classList.toggle('hidden', shopTab === 'shards' || shopTab === 'codes');

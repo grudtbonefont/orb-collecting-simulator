@@ -6,7 +6,7 @@ const ROOT = process.cwd(), PORT = 3147, URL = 'http://localhost:' + PORT, sleep
   const proc = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: Object.assign({}, process.env, { PORT: String(PORT), DATA_FILE: '/tmp/eb.json', DATABASE_URL: '', EVENT_EVERY_MS: '0', OBSTACLES: '0' }), stdio: 'ignore' });
   for (let i = 0; i < 100; i++) { try { if ((await fetch(URL + '/api/health')).ok) break; } catch (_) {} await sleep(200); }
   const E = G.ITEMS.filter(i => i.type === 'emote'), shopE = E.filter(i => !i.free);
-  ok(E.length === 26 && E.filter(i => i.free).length === 3 && shopE.every(i => i.price >= 300 && i.price <= 2250 && i.sources.includes('shop')), `26 emotes (3 free), prices 300–2250`);
+  ok(E.length === 26 && E.filter(i => i.free).length === 3 && shopE.every(i => i.price >= 25 && i.price <= 670 && i.sources.includes('shop')), `26 emotes (3 free), prices 25–670`);
   ok(['🙏', '🤣', '🥺', '🤡', '🗿', '🫠', '🤯', '😳', '👍', '💯', '🤔', '😏', '👀', '🫡', '🥶'].every(e => E.some(i => i.value === e)), 'new social emotes present');
   const b = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox'] }); const errs = [];
   async function run(ctxOpts, name, shot) {
