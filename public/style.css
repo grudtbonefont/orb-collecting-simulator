@@ -681,3 +681,53 @@ body.in-game .music-btn { display: none; }
   .emote-picker { right: 8px; bottom: calc(262px + env(safe-area-inset-bottom)); grid-template-columns: repeat(6, 36px); max-height: calc(100vh - 380px); }
   .emote-picker .emo { width: 36px; height: 36px; font-size: 20px; }
 }
+/* admin panel v2 */
+.adm-card { position: relative; resize: both; min-width: 360px; min-height: 260px; display: flex; flex-direction: column; }
+.adm-card.placed { position: fixed; max-width: none; max-height: none; margin: 0; }
+.adm-head { cursor: move; user-select: none; position: sticky; top: -18px; z-index: 3; background: inherit; }
+.adm-head .link-btn { font-size: 18px; }
+.adm-kbd { font: 600 12px ui-monospace, monospace; border: 1px solid rgba(255,255,255,.2); border-radius: 4px; padding: 0 5px; vertical-align: middle; }
+.adm-top { display: flex; flex-direction: column; gap: 6px; margin-bottom: 4px; }
+.adm-tools input { flex: 1 1 200px; }
+.adm-pick { position: relative; flex: 1 1 160px; display: flex; }
+.adm-pick input { flex: 1; }
+.adm-ac { position: absolute; left: 0; right: 0; top: 100%; z-index: 6; background: #141a36; border: 1px solid rgba(140,160,255,.35); border-radius: 8px; max-height: 240px; overflow: auto; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+.adm-ac.hidden { display: none; }
+.adm-ac-i { padding: 6px 10px; cursor: pointer; font-size: 13px; }
+.adm-ac-i:hover, .adm-ac-i.on { background: #2d3a80; }
+.adm-ac-i.hint { cursor: default; background: rgba(255,255,255,.04); color: #ffd98a; }
+.adm-ac-i small { color: #a8b0d8; }
+.adm-cmdwrap { position: relative; flex: 1; display: flex; min-width: 180px; }
+.adm-cmdwrap #admCmd { flex: 1; }
+.adm-pick-acts { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; background: rgba(91,108,255,.12); border: 1px solid rgba(91,108,255,.35); border-radius: 10px; padding: 6px 8px; }
+.adm-pick-acts.hidden, .adm-fav.hidden, .adm-active.hidden, #admNoRes.hidden { display: none; }
+.adm-pick-acts b { font-size: 13px; margin-right: 4px; }
+.adm-pick-acts .btn { padding: 5px 8px; font-size: 12px; }
+.adm-fav { display: flex; flex-wrap: wrap; gap: 5px; }
+.adm-chip { display: inline-flex; border-radius: 999px; background: rgba(255,255,255,.07); overflow: hidden; }
+.adm-chip.fav { background: rgba(255,200,60,.16); }
+.adm-chip button { background: none; border: 0; color: #e8ecff; font: 600 12px system-ui, sans-serif; padding: 5px 8px; cursor: pointer; }
+.adm-chip-star { color: #ffcf4a !important; padding-right: 2px !important; }
+.adm-chip button:hover { background: rgba(255,255,255,.1); }
+.adm-active { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; font-size: 12px; background: rgba(60,220,140,.1); border: 1px solid rgba(60,220,140,.35); border-radius: 10px; padding: 5px 8px; }
+.adm-active > span { display: contents; }
+.adm-act { display: inline-flex; align-items: center; gap: 4px; background: rgba(255,255,255,.08); border-radius: 999px; padding: 2px 3px 2px 9px; }
+.adm-stop { background: #c2364f; color: #fff; border: 0; border-radius: 999px; width: 22px; height: 22px; cursor: pointer; font-size: 11px; }
+.adm-tabs.dim { opacity: .45; }
+.adm-sec.searching:not(.hidden) { display: block; border-top: 1px dashed rgba(255,255,255,.1); margin-top: 6px; }
+.adm-grp-h { cursor: pointer; user-select: none; }
+.adm-grp-h::before { content: '▾ '; color: #8a94c8; }
+.adm-grp.collapsed .adm-grp-h::before { content: '▸ '; }
+.adm-grp.collapsed .adm-grp-body, .adm-grp.adm-miss { display: none; }
+.adm-hit { outline: 2px solid #ffcf4a; }
+.adm-pl { cursor: pointer; }
+.adm-pl.sel { outline: 2px solid #5b6cff; background: rgba(91,108,255,.18); }
+.adm-confirm { position: sticky; bottom: 0; z-index: 7; background: #2a1420; border: 1px solid #c2364f; border-radius: 12px; padding: 10px 12px; margin-top: 8px; box-shadow: 0 -6px 24px rgba(0,0,0,.5); }
+.adm-confirm.hidden { display: none; }
+.adm-confirm p { margin: 0 0 8px; font-weight: 700; }
+@media (max-width: 640px) {
+  #admin.modal { align-items: stretch; }
+  #admin .adm-card { width: 100%; max-width: none; height: 100%; max-height: 100%; min-width: 0; min-height: 0; border-radius: 0; resize: none; padding-top: calc(10px + env(safe-area-inset-top)); }
+  .adm-head { cursor: default; top: calc(-10px - env(safe-area-inset-top)); }
+  .adm-tabs { flex-wrap: nowrap; overflow-x: auto; } .adm-tabs .adm-tab { flex: 0 0 auto; }
+}

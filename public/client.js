@@ -3289,16 +3289,17 @@
   function admPlayers(list) {
     const box = $('admPlayers'); box.textContent = '';
     for (const p of list) {
-      const row = document.createElement('div'); row.className = 'adm-pl';
+      const row = document.createElement('div'); row.className = 'adm-pl' + (p.name === admSel ? ' sel' : ''); row.dataset.name = p.name; row.title = 'Выбрать игрока';
       const n = document.createElement('b'); n.textContent = p.name + (p.admin ? ' 🛡️' : '') + (p.muted ? ' 🔇' : '') + (p.frozen ? ' ❄️' : ''); row.appendChild(n);
       if (!p.admin) {
         row.append(mkBtn('📍', () => adm({ a: 'cmd', text: '/tp ' + p.name })), mkBtn(p.frozen ? '🔥' : '❄️', () => adm({ a: 'cmd', text: (p.frozen ? '/unfreeze ' : '/freeze ') + p.name }, () => adm({ a: 'players' }))),
           mkBtn(p.muted ? '🔊' : '🔇', () => adm({ a: 'cmd', text: p.muted ? '/unmute ' + p.name : '/mute ' + p.name + ' 10' }, () => adm({ a: 'players' }))),
-          mkBtn('Кик', () => adm({ a: 'kick', name: p.name })), mkBtn('Бан', () => { if (confirm('Забанить ' + p.name + '?')) adm({ a: 'ban', name: p.name }); }, 'danger'));
+          mkBtn('Кик', () => adm({ a: 'kick', name: p.name })), mkBtn('Бан', () => admConfirm('Забанить ' + p.name + '?', () => adm({ a: 'ban', name: p.name })), 'danger'));
       }
       box.appendChild(row);
     }
     opt($('admGivePl'), list.map(p => [p.name, p.name])); opt($('admPl2'), list.map(p => [p.name, p.name]));
+    admOnline = list; if (admSel) admSelect(admSel);
   }
   function admBans(list) {
     const box = $('admBans'); box.textContent = '';
@@ -3308,6 +3309,7 @@
   function openAdmin() {
     if (!isAdminMe) return;
     openModal('admin');
+    if (window.OCSAdmOpened) window.OCSAdmOpened();
     adm({ a: 'init' }, r => {
       if (!r.ok) return;
       const ev = $('admEvents'); ev.textContent = ''; for (const e of r.events) ev.appendChild(mkBtn(e.name, () => adm({ a: 'event', kind: e.k })));
@@ -3332,7 +3334,7 @@
   $('admPlRefresh').addEventListener('click', () => { adm({ a: 'players' }); adm({ a: 'bans' }); });
   $('admGiveWhat').addEventListener('change', () => $('admGiveItem').classList.toggle('hidden', $('admGiveWhat').value !== 'item'));
   $('admGiveGo').addEventListener('click', () => adm({ a: 'give', name: $('admGivePl').value, what: $('admGiveWhat').value, item: $('admGiveItem').value, qty: Number($('admGiveQty').value) }));
-  $('admBanGo').addEventListener('click', () => { const n = $('admBanName').value.trim(); if (n && confirm('Забанить ' + n + '?')) adm({ a: 'ban', name: n }); });
+  $('admBanGo').addEventListener('click', () => { const n = $('admBanName').value.trim(); if (n) adm({ a: 'ban', name: n }); });
   $('admCmdGo').addEventListener('click', () => { const t = $('admCmd').value.trim(); if (t) adm({ a: 'cmd', text: t }, r => { if (r.ok) $('admCmd').value = ''; }); });
   $('admDiscoGo').addEventListener('click', () => adm({ a: 'disco', min: Number($('admDiscoMin').value) }));
   function admCodes(list) {
@@ -3352,7 +3354,7 @@
   for (const b of document.querySelectorAll('#admin [data-w]')) b.addEventListener('click', () => adm({ a: 'weather', w: b.dataset.w }));
   $('admNight').addEventListener('click', () => adm({ a: 'night' }));
   $('admInvis').addEventListener('click', () => adm({ a: 'invis' }));
-  $('admGiftGo').addEventListener('click', () => { if (confirm('Подарить всем онлайн?')) adm({ a: 'gift', what: $('admGiftWhat').value, n: Number($('admGiftN').value) }); });
+  $('admGiftGo').addEventListener('click', () => adm({ a: 'gift', what: $('admGiftWhat').value, n: Number($('admGiftN').value) }));
   $('admRestartGo').addEventListener('click', () => adm({ a: 'restart', sec: Number($('admRestartSec').value) }));
   $('admRestartOff').addEventListener('click', () => adm({ a: 'restart', sec: 0 }));
   $('admCodeGo').addEventListener('click', () => adm({ a: 'code:create', code: $('admCode').value, orbs: $('admCodeOrbs').value, shards: $('admCodeShards').value, item: $('admCodeItem').value, maxUses: $('admCodeMax').value, days: $('admCodeDays').value }, r => { if (r.ok) $('admCode').value = ''; }));
@@ -3412,6 +3414,187 @@
   $('admChestGo').addEventListener('click', () => adm({ a: 'fun', kind: 'chest', o: { orbs: fv('admChestOrbs'), shards: fv('admChestShards'), min: 10 } }));
   $('admPollGo').addEventListener('click', () => adm({ a: 'fun', kind: 'poll', o: { q: fv('admPollQ'), opts: fv('admPollOpts').split('|').map(x => x.trim()).filter(Boolean), sec: fv('admPollSec') } }));
   $('admPollEnd').addEventListener('click', () => adm({ a: 'fun', kind: 'endpoll' }));
+  // ------------------------------------------------------------ admin panel v2 UX (client-side only; the server still authorizes every 'adm' call)
+  const LS = { get: (k, d) => { try { const v = JSON.parse(localStorage.getItem('ocsAdm.' + k)); return v == null ? d : v; } catch (e) { return d; } }, set: (k, v) => { try { localStorage.setItem('ocsAdm.' + k, JSON.stringify(v)); } catch (e) {} } };
+  const admCard = document.querySelector('#admin .adm-card');
+  let admSel = '', admOnline = [];
+  // custom confirm (only for destructive actions)
+  let confirmCb = null;
+  function admConfirm(text, cb) { $('admConfirmText').textContent = text; confirmCb = cb; $('admConfirm').classList.remove('hidden'); $('admConfirmYes').focus(); }
+  $('admConfirmYes').addEventListener('click', () => { $('admConfirm').classList.add('hidden'); const f = confirmCb; confirmCb = null; if (f) f(); });
+  $('admConfirmNo').addEventListener('click', () => { $('admConfirm').classList.add('hidden'); confirmCb = null; });
+  const DESTRUCTIVE = { admBanGo: () => `Забанить ${$('admBanName').value || '?'}?`, admGiftGo: () => `Подарить всем онлайн ${$('admGiftN').value} ${$('admGiftWhat').value === 'shards' ? 'осколков' : 'сфер'}?`,
+    admRestartGo: () => `Запустить отсчёт перезапуска (${$('admRestartSec').value} с)?`, admFreezeAllGo: () => (funS.freeze ? 'Разморозить карту?' : 'Заморозить всю карту?') };
+  const CMD_DESTRUCTIVE = /^\/(clearchat|gift|restart(?! off))\b/i;
+  document.querySelector('#admin').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b || b._ok) { if (b) b._ok = false; return; }
+    let q = DESTRUCTIVE[b.id] && DESTRUCTIVE[b.id]();
+    if (b.id === 'admCmdGo' && CMD_DESTRUCTIVE.test($('admCmd').value.trim())) q = `Выполнить «${$('admCmd').value.trim()}»?`;
+    if (!q) return;
+    e.stopImmediatePropagation(); e.preventDefault(); admConfirm(q, () => { b._ok = true; b.click(); });
+  }, true);
+  // groups: wrap each <h4> + following nodes into a collapsible group
+  const collapsed = LS.get('collapsed', {});
+  for (const sec of document.querySelectorAll('#admin .adm-sec')) {
+    const kids = Array.from(sec.childNodes); let grp = null;
+    for (const n of kids) {
+      if (n.nodeType === 1 && n.tagName === 'H4') {
+        grp = document.createElement('div'); grp.className = 'adm-grp'; const key = sec.dataset.sec + ':' + n.textContent.trim().slice(0, 24); grp.dataset.key = key;
+        sec.insertBefore(grp, n); grp.appendChild(n); const body = document.createElement('div'); body.className = 'adm-grp-body'; grp.appendChild(body); grp._body = body;
+        n.classList.add('adm-grp-h'); n.tabIndex = 0; if (collapsed[key]) grp.classList.add('collapsed');
+        const gg = grp; n.addEventListener('click', e => { if (e.target.closest('button')) return; gg.classList.toggle('collapsed'); collapsed[key] = gg.classList.contains('collapsed'); LS.set('collapsed', collapsed); });
+      } else if (grp) grp._body.appendChild(n);
+    }
+  }
+  // tabs: remember last tab
+  const showTab = sec => { const t = document.querySelector(`.adm-tab[data-sec="${sec}"]`); if (t) t.click(); };
+  for (const t of document.querySelectorAll('.adm-tab')) t.addEventListener('click', () => LS.set('tab', t.dataset.sec));
+  // search: filters actions (buttons / groups) across all tabs
+  function admSearch() {
+    const q = $('admSearch').value.trim().toLowerCase(), tabs = document.querySelector('#admin .adm-tabs');
+    const secs = document.querySelectorAll('#admin .adm-sec'); let any = false;
+    tabs.classList.toggle('dim', !!q);
+    for (const s of secs) {
+      if (!q) { s.classList.toggle('hidden', s.dataset.sec !== (document.querySelector('.adm-tab.active') || {}).dataset?.sec); s.classList.remove('searching'); }
+      else s.classList.add('searching');
+      let secHit = false;
+      for (const g of s.querySelectorAll('.adm-grp')) {
+        const hit = !q || g.textContent.toLowerCase().includes(q) || Array.from(g.querySelectorAll('input[placeholder],option')).some(x => (x.placeholder || x.textContent).toLowerCase().includes(q));
+        g.classList.toggle('adm-miss', !hit); if (q && hit) g.classList.remove('collapsed'); if (hit) secHit = true;
+        if (q) for (const b of g.querySelectorAll('.adm-grid > .btn')) b.classList.toggle('adm-hit', b.textContent.toLowerCase().includes(q));
+        else for (const b of g.querySelectorAll('.adm-hit')) b.classList.remove('adm-hit');
+      }
+      const plain = !s.querySelector('.adm-grp') && (!q || s.textContent.toLowerCase().includes(q));
+      if (q) s.classList.toggle('hidden', !(secHit || plain)); if (secHit || plain) any = true;
+    }
+    $('admNoRes').classList.toggle('hidden', !q || any);
+  }
+  $('admSearch').addEventListener('input', admSearch);
+  // recent / favourites (stores button ids only)
+  let recent = LS.get('recent', []), favs = LS.get('favs', []);
+  const btnLabel = b => (b.textContent || b.title || b.id).trim().slice(0, 28);
+  function renderFav() {
+    const box = $('admFav'); box.textContent = ''; const ids = favs.concat(recent.filter(x => !favs.includes(x))).slice(0, 8);
+    for (const id of ids) { const b = $(id) || document.querySelector(`#admin [data-w="${id.slice(2)}"]`); if (!b) continue;
+      const chip = document.createElement('span'); chip.className = 'adm-chip' + (favs.includes(id) ? ' fav' : '');
+      const go = document.createElement('button'); go.type = 'button'; go.className = 'adm-chip-go'; go.textContent = btnLabel(b); go.title = 'Выполнить'; go.addEventListener('click', () => b.click());
+      const st = document.createElement('button'); st.type = 'button'; st.className = 'adm-chip-star'; st.textContent = favs.includes(id) ? '★' : '☆'; st.title = 'В избранное';
+      st.addEventListener('click', () => { favs = favs.includes(id) ? favs.filter(x => x !== id) : favs.concat(id).slice(-8); LS.set('favs', favs); renderFav(); });
+      chip.append(st, go); box.appendChild(chip); }
+    box.classList.toggle('hidden', !box.childNodes.length);
+  }
+  document.querySelector('#admin').addEventListener('click', e => {
+    const b = e.target.closest('.adm-sec button'); if (!b) return; const id = b.id || (b.dataset.w ? 'w:' + b.dataset.w : ''); if (!id || /Refresh$/.test(id)) return;
+    recent = [id].concat(recent.filter(x => x !== id)).slice(0, 6); LS.set('recent', recent); renderFav();
+  });
+  // player picker (search / autocomplete), shared by every player action
+  function admSelect(name) {
+    admSel = name || ''; $('admPick').value = admSel; $('admPickList').classList.add('hidden');
+    for (const id of ['admPl2', 'admGivePl']) { const s = $(id); if (admSel && !Array.from(s.options).some(o => o.value === admSel)) { const o = document.createElement('option'); o.value = o.textContent = admSel; s.appendChild(o); } if (admSel) s.value = admSel; }
+    if (admSel) $('admBanName').value = admSel;
+    for (const r of document.querySelectorAll('#admPlayers .adm-pl')) r.classList.toggle('sel', r.dataset.name === admSel);
+    renderPickActs();
+  }
+  function renderPickActs() {
+    const box = $('admPickActs'); box.textContent = ''; box.classList.toggle('hidden', !admSel); if (!admSel) return;
+    const p = admOnline.find(x => x.name === admSel) || {}; const n = admSel;
+    const lab = document.createElement('b'); lab.textContent = '👤 ' + n + (p.name ? '' : ' (не в сети)'); box.appendChild(lab);
+    box.append(mkBtn('ℹ️ Инфо', () => $('admInfoGo').click()), mkBtn('📍 К игроку', () => adm({ a: 'cmd', text: '/tp ' + n })), mkBtn('🧲 Ко мне', () => adm({ a: 'cmd', text: '/tphere ' + n })),
+      mkBtn(p.frozen ? '🔥 Разморозить' : '❄️ Заморозить', () => adm({ a: 'cmd', text: (p.frozen ? '/unfreeze ' : '/freeze ') + n }, () => adm({ a: 'players' }))),
+      mkBtn(p.muted ? '🔊 Размутить' : '🔇 Мут 10 мин', () => adm({ a: 'cmd', text: p.muted ? '/unmute ' + n : '/mute ' + n + ' 10' }, () => adm({ a: 'players' }))),
+      mkBtn('⚠️ Предупредить', () => { showTab('pl'); $('admWarnReason').focus(); }), mkBtn('🎁 Выдать', () => { showTab('pl'); $('admGiveQty').focus(); }),
+      mkBtn('Кик', () => adm({ a: 'kick', name: n })), mkBtn('Бан', () => admConfirm('Забанить ' + n + '?', () => adm({ a: 'ban', name: n })), 'danger'), mkBtn('✕', () => admSelect(''), 'adm-x'));
+  }
+  function pickAc() {
+    const q = $('admPick').value.trim().toLowerCase(), box = $('admPickList'); box.textContent = '';
+    const list = admOnline.filter(p => !q || p.name.toLowerCase().includes(q)).slice(0, 8);
+    for (const p of list) { const o = document.createElement('div'); o.className = 'adm-ac-i'; o.textContent = p.name + (p.admin ? ' 🛡️' : ''); o.addEventListener('mousedown', e => { e.preventDefault(); admSelect(p.name); }); box.appendChild(o); }
+    if (q && !list.some(p => p.name.toLowerCase() === q)) { const o = document.createElement('div'); o.className = 'adm-ac-i muted'; o.textContent = `Офлайн: «${$('admPick').value.trim()}»`; o.addEventListener('mousedown', e => { e.preventDefault(); admSelect($('admPick').value.trim()); }); box.appendChild(o); }
+    box.classList.toggle('hidden', !box.childNodes.length);
+  }
+  $('admPick').addEventListener('focus', () => { if (!admOnline.length) adm({ a: 'players' }); pickAc(); });
+  $('admPick').addEventListener('input', pickAc);
+  $('admPick').addEventListener('blur', () => setTimeout(() => $('admPickList').classList.add('hidden'), 120));
+  $('admPick').addEventListener('keydown', e => { if (e.key === 'Enter') { const f = $('admPickList').querySelector('.adm-ac-i'); if (f) f.dispatchEvent(new MouseEvent('mousedown')); } if (e.key === 'Escape') admSelect(''); });
+  $('admPlayers').addEventListener('click', e => { const r = e.target.closest('.adm-pl'); if (r && !e.target.closest('button')) admSelect(r.dataset.name); });
+  // command autocomplete + usage hints
+  const CMDS = [['/announce', '<текст>', 'объявление всем'], ['/tp', '<ник>', 'телепорт к игроку'], ['/tphere', '<ник>', 'игрока к себе'], ['/x2', '<мин|0>', 'сферы ×2 (0 — выкл)'], ['/mute', '<ник> <мин>', 'мут'], ['/unmute', '<ник>', 'снять мут'],
+    ['/clearchat', '', 'очистить чат'], ['/freeze', '<ник>', 'заморозить'], ['/unfreeze', '<ник>', 'разморозить'], ['/god', '', 'неуязвимость'], ['/speed', '<0.1–5>', 'своя скорость'], ['/disco', '[мин]', 'диско вкл/выкл'],
+    ['/rain', '<тип> [кол-во] [сек]', 'дождь из сфер'], ['/invis', '', 'невидимость'], ['/size', '<ник> <0.3–3> [сек]', 'размер игрока'], ['/skin', '<ник> <#rrggbb> [сек]', 'цвет игрока'], ['/info', '<ник>', 'инфо об игроке'],
+    ['/warn', '<ник> <причина>', 'предупреждение'], ['/gift', '<orbs|shards> <кол-во>', 'подарок всем онлайн'], ['/weather', '<rain|snow|off>', 'погода'], ['/night', '', 'ночь вкл/выкл'], ['/event', '<имя> <сферы> <удача> <скор> <мин> | off', 'своё событие'],
+    ['/bosstimer', '', 'сброс таймера босса'], ['/restart', '<сек|off>', 'отсчёт перезапуска'], ['/code', '<КОД> <сферы> [осколки] [активаций] [дней] | off <КОД> | list', 'промокоды'], ['/hunt', '[сферы] [осколки] [мин]', 'охота на админа'],
+    ['/giant', '[награда] [сек]', 'гигантская сфера'], ['/chaos', '[сек]', 'хаос'], ['/lava', '[сек]', 'пол — лава'], ['/ghost', '[сек]', 'призрак'], ['/freezeall', '', 'заморозить карту'], ['/chest', '[сферы] [осколки] [мин]', 'сундук'],
+    ['/poll', 'Вопрос | вариант | вариант', 'опрос'], ['/endpoll', '', 'завершить опрос']];
+  window.OCSAdmCmds = CMDS.map(c => c[0]);
+  let acIdx = 0;
+  function cmdAc() {
+    const v = $('admCmd').value, box = $('admCmdAc'); box.textContent = ''; const sp = v.indexOf(' ');
+    let items = [];
+    if (sp < 0) items = CMDS.filter(c => c[0].startsWith(v.toLowerCase() || '/')).map(c => ({ fill: c[0] + (c[1] ? ' ' : ''), t: c[0], h: `${c[1]} — ${c[2]}` }));
+    else { const c = CMDS.find(x => x[0] === v.slice(0, sp).toLowerCase()); if (c) { const rest = v.slice(sp + 1); if (/^<ник>/.test(c[1]) && !rest.includes(' ')) items = admOnline.filter(p => p.name.toLowerCase().startsWith(rest.toLowerCase())).slice(0, 6).map(p => ({ fill: c[0] + ' ' + p.name + ' ', t: p.name, h: c[1] })); items.unshift({ hint: true, t: c[0] + ' ' + c[1], h: c[2] }); } }
+    acIdx = Math.min(acIdx, Math.max(0, items.filter(i => !i.hint).length - 1)); let k = 0;
+    for (const it of items.slice(0, 9)) { const o = document.createElement('div'); o.className = 'adm-ac-i' + (it.hint ? ' hint' : (k++ === acIdx ? ' on' : '')); const b = document.createElement('b'); b.textContent = it.t; const s = document.createElement('small'); s.textContent = ' ' + it.h; o.append(b, s);
+      if (!it.hint) { o.dataset.fill = it.fill; o.addEventListener('mousedown', e => { e.preventDefault(); $('admCmd').value = it.fill; cmdAc(); $('admCmd').focus(); }); } box.appendChild(o); }
+    box.classList.toggle('hidden', !items.length || document.activeElement !== $('admCmd'));
+  }
+  $('admCmd').addEventListener('input', () => { acIdx = 0; cmdAc(); });
+  $('admCmd').addEventListener('focus', cmdAc);
+  $('admCmd').addEventListener('blur', () => setTimeout(() => $('admCmdAc').classList.add('hidden'), 120));
+  $('admCmd').addEventListener('keydown', e => {
+    const opts = Array.from($('admCmdAc').querySelectorAll('.adm-ac-i[data-fill]')); if (!opts.length || $('admCmdAc').classList.contains('hidden')) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); acIdx = (acIdx + (e.key === 'ArrowDown' ? 1 : opts.length - 1)) % opts.length; cmdAc(); }
+    if (e.key === 'Tab') { e.preventDefault(); $('admCmd').value = opts[acIdx].dataset.fill; acIdx = 0; cmdAc(); }
+  });
+  // 'Активно' strip with stop buttons
+  function renderActive() {
+    if ($('admin').classList.contains('hidden')) return;
+    const now = performance.now(), items = [];
+    const add = (t, stop) => items.push([t, stop]);
+    if (evState && G.EVENTS[evState.kind]) add(`${G.EVENTS[evState.kind].icon || ''} ${G.EVENTS[evState.kind].name}`, () => adm({ a: 'stop', kind: 'event' }));
+    if (miniState && C.MINI[miniState.kind]) add(`${C.MINI[miniState.kind].icon} ${C.MINI[miniState.kind].name}`, () => adm({ a: 'stop', kind: 'mini' }));
+    if (bossState) add('👹 Босс', () => adm({ a: 'stop', kind: 'boss' }));
+    if (discoEnd > now) add('🪩 Диско ' + fmtLeft(discoEnd - now), () => adm({ a: 'disco' }));
+    if (x2End > now) add('✖️2 Сферы ×2 ' + fmtLeft(x2End - now), () => adm({ a: 'cmd', text: '/x2 0' }));
+    if (cev && cev.end > now) add('⭐ ' + cev.name + ' ' + fmtLeft(cev.end - now), () => adm({ a: 'custom', off: true }));
+    if (weatherNow) add(weatherNow === 'rain' ? '🌧️ Дождь' : '❄️ Снег', () => adm({ a: 'weather', w: 'off' }));
+    if (nightNow) add('🌙 Ночь', () => adm({ a: 'night' }));
+    if (restartEnd > now) add('⚠️ Перезапуск ' + fmtLeft(restartEnd - now), () => adm({ a: 'restart', sec: 0 }));
+    const fk = (k, t) => add(t, () => adm({ a: 'fun', kind: k }));
+    if (funS.hunt && funLeft(funS.hunt.left) > 0) fk('hunt', '🏃 Охота'); if (funS.giant) fk('giant', '🟣 Гигантская сфера'); if (funS.chaos && funLeft(funS.chaos) > 0) fk('chaos', '🌀 Хаос');
+    if (funS.lava && funLeft(funS.lava.left) > 0) fk('lava', '🌋 Лава'); if (funS.ghost) fk('ghost', '👻 Призрак'); if (funS.freeze) fk('freeze', '🧊 Заморозка карты'); if (funS.chest) fk('chest', '🎁 Сундук');
+    if (pollS && !pollS.done) fk('endpoll', '📊 Опрос');
+    if (selfFx.god) add('🛡️ Неуязвимость', () => adm({ a: 'cmd', text: '/god' })); if (selfFx.invis) add('👻 Невидимость', () => adm({ a: 'invis' }));
+    if (selfFx.spd && selfFx.spd !== 1) add(`💨 Скорость ×${selfFx.spd}`, () => adm({ a: 'cmd', text: '/speed 1' }));
+    const box = $('admActiveList'), sig = items.map(i => i[0]).join('|'); if (box._sig === sig) return; box._sig = sig; box.textContent = '';
+    for (const [t, stop] of items) { const c = document.createElement('span'); c.className = 'adm-act'; c.textContent = t; const x = document.createElement('button'); x.type = 'button'; x.className = 'adm-stop'; x.textContent = '⏹'; x.title = 'Остановить'; x.addEventListener('click', () => { stop(); box._sig = null; }); c.appendChild(x); box.appendChild(c); }
+    $('admActive').classList.toggle('hidden', !items.length);
+  }
+  setInterval(renderActive, 500);
+  // draggable + resizable on desktop, remembered; fullscreen sheet on mobile (CSS)
+  const desk = () => !window.matchMedia('(max-width: 640px)').matches;
+  function applyGeom() { const g = LS.get('geom', null); if (!desk() || !g) { admCard.style.left = admCard.style.top = admCard.style.width = admCard.style.height = ''; admCard.classList.remove('placed'); return; }
+    const w = Math.min(Math.max(360, g.w), innerWidth - 8), h = Math.min(Math.max(260, g.h), innerHeight - 8);
+    admCard.classList.add('placed'); admCard.style.width = w + 'px'; admCard.style.height = h + 'px'; admCard.style.left = Math.min(Math.max(0, g.x), innerWidth - w) + 'px'; admCard.style.top = Math.min(Math.max(0, g.y), innerHeight - 40) + 'px'; }
+  const saveGeom = () => { if (!desk() || $('admin').classList.contains('hidden')) return; const r = admCard.getBoundingClientRect(); LS.set('geom', { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) }); };
+  $('admHead').addEventListener('pointerdown', e => {
+    if (!desk() || e.target.closest('button')) return; e.preventDefault(); const r = admCard.getBoundingClientRect(), ox = e.clientX - r.left, oy = e.clientY - r.top;
+    if (!admCard.classList.contains('placed')) { LS.set('geom', { x: r.left, y: r.top, w: r.width, h: r.height }); applyGeom(); }
+    const mv = ev => { admCard.style.left = Math.min(Math.max(0, ev.clientX - ox), innerWidth - 80) + 'px'; admCard.style.top = Math.min(Math.max(0, ev.clientY - oy), innerHeight - 40) + 'px'; };
+    const up = () => { removeEventListener('pointermove', mv); removeEventListener('pointerup', up); saveGeom(); };
+    addEventListener('pointermove', mv); addEventListener('pointerup', up);
+  });
+  if (window.ResizeObserver) { let rt = null; new ResizeObserver(() => { if (!admCard.classList.contains('placed')) return; clearTimeout(rt); rt = setTimeout(saveGeom, 250); }).observe(admCard); }
+  admCard.addEventListener('pointerup', () => { if (desk() && !admCard.classList.contains('placed')) { const r = admCard.getBoundingClientRect(); if (Math.abs(r.width - admCard._w) > 2 || Math.abs(r.height - admCard._h) > 2) { LS.set('geom', { x: r.left, y: r.top, w: r.width, h: r.height }); applyGeom(); } } });
+  $('admReset').addEventListener('click', () => { LS.set('geom', null); applyGeom(); });
+  addEventListener('resize', applyGeom);
+  // open hook: last tab, geometry, picker data
+  window.OCSAdmOpened = () => { applyGeom(); const r = admCard.getBoundingClientRect(); admCard._w = r.width; admCard._h = r.height; const t = LS.get('tab', 'ev'); if (!$('admSearch').value) showTab(t); renderFav(); renderActive(); if (admSel) renderPickActs(); };
+  // keyboard shortcut (admin only): backquote / ё toggles the panel
+  window.addEventListener('keydown', e => {
+    if (e.code !== 'Backquote' || !isAdminMe || !joined || e.ctrlKey || e.metaKey || e.altKey || typing()) return;
+    e.preventDefault(); if ($('admin').classList.contains('hidden')) openAdmin(); else closeModals();
+  });
+  window.OCSAdmUI = () => ({ open: !$('admin').classList.contains('hidden'), sel: admSel, tab: (document.querySelector('.adm-tab.active') || {}).dataset?.sec, active: Array.from(document.querySelectorAll('#admActiveList .adm-act')).map(x => x.firstChild.textContent), fav: Array.from(document.querySelectorAll('#admFav .adm-chip-go')).map(x => x.textContent), placed: admCard.classList.contains('placed') });
   window.OCSEmit = (ev, d) => new Promise(r => socket.emit(ev, d, r)); // test/automation helper (same socket the UI uses; the server validates everything)
   window.OCSAdm = d => new Promise(r => socket.emit('adm', d, r)); // test/automation helper; the server authorizes every call
   window.OCSDebugSnap = () => (lastSnapIds ? Array.from(lastSnapIds) : null);

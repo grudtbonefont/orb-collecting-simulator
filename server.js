@@ -1612,6 +1612,12 @@ io.on('connection', socket => {
           if (ev) endEvent(now, 'admin'); announceEvent(d.kind, { announceMs: 5000 }); return ack({ ok: true, msg: `Ивент «${G.EVENTS[d.kind].name}» через 5 с` });
         }
         case 'mini': if (!C.MINI_KEYS.includes(d.kind)) return ack({ ok: false, error: 'Нет такого мини-ивента' }); if (FX.miniNow()) FX.endMini('forced'); FX.startMini(d.kind, {}); return ack({ ok: true, msg: `Мини-ивент «${C.MINI[d.kind].name}»` });
+        case 'stop': { // stop a running main event / mini-event / boss (Активно strip)
+          if (d.kind === 'event') { if (!ev) return ack({ ok: false, error: 'Нет ивента' }); endEvent(now, 'admin'); return ack({ ok: true, msg: 'Ивент остановлен' }); }
+          if (d.kind === 'mini') { if (!FX.miniNow()) return ack({ ok: false, error: 'Нет мини-ивента' }); FX.endMini('forced'); return ack({ ok: true, msg: 'Мини-ивент остановлен' }); }
+          if (d.kind === 'boss') { if (!FX.bossNow()) return ack({ ok: false, error: 'Нет босса' }); FX.endBoss(false); return ack({ ok: true, msg: 'Босс убран' }); }
+          return ack({ ok: false, error: '?' });
+        }
         case 'boss': if (FX.bossNow()) FX.endBoss(false); FX.announceBoss({}); return ack({ ok: true, msg: 'Босс вызван' });
         case 'orbs': {
           if (!has(G.ORB_TYPES, d.t) || d.t === 't') return ack({ ok: false, error: 'Редкость?' });

@@ -73,7 +73,7 @@ const SHOTS = process.env.SHOTS === '1';
   // music toggle off during disco = silent
   await say('/disco 1'); await P.evaluate(() => { const e = document.getElementById('setMusic'); e.checked = false; e.dispatchEvent(new Event('change')); }); await sleep(300); ok((await P.evaluate(() => OCSMusic().playing)) === 0, 'music toggle off silences disco'); await say('/disco');
   // ban: kicks, blocks login and session; unban restores
-  await A.click('#admBtn'); await A.click('.adm-tab[data-sec=pl]'); await sleep(400); await A.fill('#admBanName', 'Victim1'); A.once('dialog', d => d.accept()); await A.click('#admBanGo'); await sleep(800);
+  await A.click('#admBtn'); await A.click('.adm-tab[data-sec=pl]'); await sleep(400); await A.fill('#admBanName', 'Victim1'); await A.click('#admBanGo'); await A.click('#admConfirmYes'); await sleep(800);
   ok(await V.evaluate(() => /заблокирован/.test(document.body.textContent)), 'banned player kicked'); ok(/Victim1/.test(await A.textContent('#admBans')), 'ban list shows Victim1');
   const ctx2 = await b.newContext(); const L = await ctx2.newPage(); await L.goto(URL); await sleep(300); await L.fill('#nick', 'Victim1'); await L.fill('#pass', 'demo-pass-123'); await L.click('#authSubmit'); await sleep(1200);
   ok(await L.evaluate(() => /заблокирован/.test(document.body.textContent)) && await L.evaluate(() => document.getElementById('hud').classList.contains('hidden')), 'banned cannot log in');

@@ -349,8 +349,15 @@
 <!-- admin panel (shown only when the server says this account is the admin; every action is checked server-side) -->
 <div id="admin" class="modal hidden">
   <div class="modal-card adm-card">
-    <div class="modal-head"><h2>🛡️ Админ-панель</h2><button class="close" aria-label="Закрыть">✕</button></div>
-    <div class="adm-tabs" role="tablist"><button type="button" class="adm-tab active" data-sec="ev">Ивенты</button><button type="button" class="adm-tab" data-sec="sp">Спавн</button><button type="button" class="adm-tab" data-sec="pl">Игроки</button><button type="button" class="adm-tab" data-sec="cmd">Команды</button><button type="button" class="adm-tab" data-sec="disco">🪩 Диско</button><button type="button" class="adm-tab" data-sec="fun">🎉 Веселье</button><button type="button" class="adm-tab" data-sec="srv">Сервер</button><button type="button" class="adm-tab" data-sec="codes">Коды</button><button type="button" class="adm-tab" data-sec="log">Лог</button></div>
+    <div class="modal-head adm-head" id="admHead"><h2>🛡️ Админ-панель <small class="muted adm-kbd" title="Горячая клавиша">`</small></h2><button type="button" class="link-btn" id="admReset" title="Сбросить положение и размер">⤢</button><button class="close" aria-label="Закрыть">✕</button></div>
+    <div class="adm-top">
+      <div id="admActive" class="adm-active hidden"><b>Активно:</b><span id="admActiveList"></span></div>
+      <div id="admFav" class="adm-fav hidden"></div>
+      <div class="adm-row adm-tools"><input id="admSearch" type="search" maxlength="40" placeholder="🔍 Поиск действий и команд…" autocomplete="off" aria-label="Поиск действий">
+        <div class="adm-pick"><input id="admPick" maxlength="20" placeholder="👤 Игрок…" autocomplete="off" aria-label="Выбранный игрок"><div id="admPickList" class="adm-ac hidden"></div></div></div>
+      <div id="admPickActs" class="adm-pick-acts hidden"></div>
+    </div>
+    <div class="adm-tabs" role="tablist"><button type="button" class="adm-tab active" data-sec="ev">⚡ Ивенты</button><button type="button" class="adm-tab" data-sec="sp">✨ Спавн</button><button type="button" class="adm-tab" data-sec="pl">👥 Игроки</button><button type="button" class="adm-tab" data-sec="cmd">⌨️ Команды</button><button type="button" class="adm-tab" data-sec="disco">🪩 Диско</button><button type="button" class="adm-tab" data-sec="fun">🎉 Веселье</button><button type="button" class="adm-tab" data-sec="srv">🖥️ Сервер</button><button type="button" class="adm-tab" data-sec="codes">🎟️ Коды</button><button type="button" class="adm-tab" data-sec="log">📜 Лог</button></div>
     <div class="adm-sec" data-sec="ev"><h4>Ивенты</h4><div id="admEvents" class="adm-grid"></div><h4>Мини-ивенты</h4><div id="admMinis" class="adm-grid"></div><h4>Босс</h4><div class="adm-grid"><button type="button" class="btn" id="admBoss">👹 Вызвать босса</button><button type="button" class="btn" id="admBossTimer">⏱ Сбросить таймер босса</button></div><h4>Своё событие</h4><div class="adm-row"><input id="admCevName" maxlength="30" placeholder="Название"><label class="adm-l">сферы ×<input id="admCevOrb" type="number" step="0.1" min="0.1" max="5" value="2"></label><label class="adm-l">удача ×<input id="admCevLuck" type="number" step="0.1" min="0.1" max="5" value="1.5"></label><label class="adm-l">скорость ×<input id="admCevSpd" type="number" step="0.1" min="0.3" max="3" value="1.2"></label><label class="adm-l">мин <input id="admCevMin" type="number" min="0.5" max="120" value="5"></label><button type="button" class="btn primary" id="admCevGo">⭐ Запустить</button></div></div>
     <div class="adm-sec hidden" data-sec="sp"><h4>Сферы</h4>
       <div class="adm-row"><select id="admRarity"></select><input id="admOrbN" type="number" min="1" max="100" value="10" aria-label="Количество"><select id="admOrbWhere"><option value="me">рядом со мной</option><option value="here">прямо подо мной</option><option value="random">случайно</option></select><button type="button" class="btn primary" id="admOrbGo">Создать</button></div>
@@ -364,7 +371,7 @@
       <h4>Бан по нику</h4><div class="adm-row"><input id="admBanName" maxlength="20" placeholder="ник"><button type="button" class="btn danger" id="admBanGo">Забанить</button></div>
       <h4>Забаненные</h4><div id="admBans" class="adm-list"></div></div>
     <div class="adm-sec hidden" data-sec="cmd"><h4>Команды <small class="muted">(можно писать и в чат — не видны другим)</small></h4>
-      <div class="adm-row"><input id="admCmd" maxlength="200" placeholder="/announce Привет!" autocomplete="off"><button type="button" class="btn primary" id="admCmdGo">▶</button></div>
+      <div class="adm-row"><span class="adm-cmdwrap"><input id="admCmd" maxlength="200" placeholder="/announce Привет!" autocomplete="off"><span id="admCmdAc" class="adm-ac hidden"></span></span><button type="button" class="btn primary" id="admCmdGo">▶</button></div>
       <div class="adm-help muted">/announce &lt;текст&gt; · /tp &lt;ник&gt; · /tphere &lt;ник&gt; · /x2 &lt;мин&gt; · /mute &lt;ник&gt; &lt;мин&gt; · /unmute &lt;ник&gt; · /clearchat · /freeze &lt;ник&gt; · /unfreeze &lt;ник&gt; · /god · /speed &lt;множитель&gt; · /disco [мин]</div></div>
     <div class="adm-sec hidden" data-sec="disco"><h4>🪩 Диско-ивент</h4><p class="muted">Цветные огни, музыка диско для всех, сферы ×1,5 и удача ×1,5. Повторное нажатие — выключить.</p>
       <div class="adm-row"><input id="admDiscoMin" type="number" min="1" max="30" value="3" aria-label="Минуты"><button type="button" class="btn primary" id="admDiscoGo">🪩 Включить диско</button></div></div>
@@ -381,6 +388,8 @@
     <div class="adm-sec hidden" data-sec="codes"><h4>Новый промокод</h4><div class="adm-row"><input id="admCode" maxlength="32" placeholder="КОД"><label class="adm-l">сферы <input id="admCodeOrbs" type="number" min="0" value="100"></label><label class="adm-l">осколки <input id="admCodeShards" type="number" min="0" value="0"></label><select id="admCodeItem"><option value="">без предмета</option></select><label class="adm-l">активаций <input id="admCodeMax" type="number" min="0" value="0" title="0 = без лимита"></label><label class="adm-l">дней <input id="admCodeDays" type="number" min="0" value="0" title="0 = бессрочно"></label><button type="button" class="btn primary" id="admCodeGo">Создать</button></div>
       <h4>Коды из панели</h4><div id="admCodes" class="adm-list"></div></div>
     <div class="adm-sec hidden" data-sec="log"><h4>Действия админа <button type="button" class="link-btn" id="admLogRefresh">↻</button></h4><div id="admLog" class="adm-list adm-log"></div></div>
+    <div id="admNoRes" class="muted hidden">Ничего не найдено</div>
+    <div id="admConfirm" class="adm-confirm hidden" role="alertdialog"><p id="admConfirmText"></p><div class="adm-row"><button type="button" class="btn danger" id="admConfirmYes">Да</button><button type="button" class="btn" id="admConfirmNo">Отмена</button></div></div>
     <div id="admMsg" class="adm-msg" role="status"></div>
   </div>
 </div>
