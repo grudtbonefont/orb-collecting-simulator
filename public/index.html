@@ -161,7 +161,13 @@
   <button id="emoteBtn" class="emote-btn" type="button" title="Эмоции" aria-label="Эмоции">😀</button><div id="emotePicker" class="emote-picker hidden"></div>
   <div id="radar" class="radar"><canvas id="minimap" width="150" height="150" aria-label="Радар"></canvas><button id="radarToggle" class="radar-toggle" type="button" title="Свернуть / развернуть радар">–</button></div>
   <div class="zoom-btns"><button type="button" id="zoomIn" title="Приблизить (колесо мыши / два пальца)" aria-label="Приблизить">+</button><button type="button" id="zoomOut" title="Отдалить" aria-label="Отдалить">−</button></div>
-  <button type="button" id="doorBtn" class="door-btn btn primary hidden"></button>
+  <div id="doorPrompt" class="door-prompt hidden" role="dialog" aria-label="Купить новую локацию">
+    <button type="button" id="doorClose" class="door-x" aria-label="Закрыть">✕</button>
+    <div class="dp-title">🚪 Купить новую локацию</div>
+    <div class="dp-sub">Зона 2: редкие сферы попадаются чаще</div>
+    <div id="doorMiss" class="dp-miss hidden"></div>
+    <button type="button" id="doorBtn" class="door-btn btn primary hidden"></button>
+  </div>
   <button type="button" id="admBtn" class="help-btn adm-btn hidden" title="Админ-панель" aria-label="Админ-панель">🛡️</button>
   <button type="button" id="setBtn" class="help-btn set-btn" title="Настройки" aria-label="Настройки">⚙️</button>
   <button type="button" id="helpBtn" class="help-btn" title="Виды сфер (H)" aria-label="Виды сфер">?</button>

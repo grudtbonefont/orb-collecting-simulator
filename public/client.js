@@ -501,12 +501,22 @@
   // ---- zones + door (zone 1 violet | wall with a door | zone 2 blue, rarer orbs). Unlock is a server action.
   const doorOpen = () => !!(profile && profile.stats && profile.stats.unlockedDoor2);
   window.OCSZone = () => ({ zone: G.zoneOf(me.x), open: doorOpen(), x: me.x, y: me.y });
+  // door prompt: shown once per approach when a locked player touches / comes within ~60px of the wall (zone-1 side);
+  // ✕ hides it until the player walks away (>220px) and for 15 s. Works with touch + mouse (plain buttons, fixed above the bottom bar).
+  let doorDismissed = false, doorCoolUntil = 0, doorWasNear = false;
   function updateDoorBtn() {
-    const b = $('doorBtn'); if (!b) return;
-    const near = joined && !doorOpen() && G.doorDist(me.x) < 360; // anywhere along the wall-door
-    b.classList.toggle('hidden', !near);
-    if (near) { b.disabled = profile.balance < G.DOOR_COST; b.innerHTML = `🚪 Открыть дверь во 2-ю зону · ${orbsH(G.DOOR_COST)}`; }
+    const b = $('doorBtn'), box = $('doorPrompt'); if (!b || !box) return;
+    const d = G.doorDist(me.x), locked = joined && profile && !doorOpen();
+    if (d > 220) doorDismissed = false;
+    const near = locked && me.x <= G.ZONE_W + 1 && d < G.PLAYER_R + 60 && !doorDismissed && performance.now() >= doorCoolUntil;
+    box.classList.toggle('hidden', !near); b.classList.toggle('hidden', !near);
+    if (!near) { doorWasNear = false; return; }
+    const miss = Math.max(0, G.DOOR_COST - (profile.balance || 0));
+    b.disabled = miss > 0; b.innerHTML = `Купить · ${orbsH(G.DOOR_COST)}`;
+    const m = $('doorMiss'); m.classList.toggle('hidden', !miss); if (miss) m.textContent = `Не хватает ${fmt(miss)} сфер (у вас ${fmt(profile.balance || 0)})`;
+    doorWasNear = true;
   }
+  $('doorClose').addEventListener('click', e => { e.stopPropagation(); doorDismissed = true; doorCoolUntil = performance.now() + 15000; updateDoorBtn(); });
   $('doorBtn').addEventListener('click', () => {
     socket.emit('door:unlock', null, res => {
       if (!res || !res.ok) { toast((res && res.error) || 'Ошибка', 'err'); return; }

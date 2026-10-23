@@ -29,8 +29,8 @@ const CHROME = process.env.CHROME || ['/usr/bin/google-chrome', '/usr/bin/chromi
   await new Promise(r => s.on('connect', r));
   await call('auth', { mode: 'register', name: 'Helper' + Date.now() % 10000, password: PW, confirm: PW });
   // wall-door: far from the middle of the border (y=1200), locked → the unlock button shows here too
-  await call('test:tp', { name: 'Viewer', x: G.ZONE_W - 260, y: 1200 }); await sleep(5000);
-  const btn = await vp.evaluate(() => !document.getElementById('doorBtn').classList.contains('hidden'));
+  await call('test:tp', { name: 'Viewer', x: G.ZONE_W - G.PLAYER_R - 30, y: 1200 }); await sleep(5000);
+  const btn = await vp.evaluate(() => !document.getElementById('doorPrompt').classList.contains('hidden'));
   ok(btn, 'locked: unlock prompt shown next to the wall far from the old door spot (y=1200)');
   await vp.screenshot({ path: path.join(ROOT, 'screenshot-door-wall.png') });
   await call('test:stats', { name: 'Viewer', unlockedDoor2: true }); await sleep(800);

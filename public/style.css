@@ -433,8 +433,6 @@ canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: blo
 .show-pw input { width: 16px; height: 16px; margin: 0; }
 
 /* zone-2 door unlock button (appears near the door) */
-.door-btn { position: absolute; left: 50%; bottom: 74px; transform: translateX(-50%); pointer-events: auto; z-index: 6; white-space: nowrap; box-shadow: 0 0 22px rgba(255,204,51,.45); }
-@media (max-width: 640px) { .door-btn { bottom: calc(176px + env(safe-area-inset-bottom)); font-size: 13px; max-width: 92vw; } }
 
 /* events: compact square chip instead of the big banner / HUD (those stay in the DOM, hidden) */
 #evBanner, #evHud { display: none !important; }
@@ -1025,3 +1023,17 @@ input[type=checkbox] { accent-color: var(--ui-cyan); }
 .chat-emote-picker .emo { width: 36px; height: 36px; font-size: 20px; }
 .chat-msg.emo-msg .emo-big, .chat-msg .emo-only { font-size: 28px; line-height: 1.15; vertical-align: middle; display: inline-block; filter: drop-shadow(0 2px 3px rgba(0,0,0,.4)); }
 @media (max-width: 640px) { .chat-emo { font-size: 20px; padding: 8px 10px; min-width: 44px; } .chat-emote-picker { bottom: calc(64px + env(safe-area-inset-bottom)); grid-template-columns: repeat(6, 40px); } .chat-emote-picker .emo { width: 40px; height: 40px; } }
+
+/* zone-2 door prompt (fixed, so no parent/.btn rule can push it off-screen) */
+.door-prompt { position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%); z-index: 12; pointer-events: auto; width: min(340px, calc(100vw - 24px)); box-sizing: border-box; padding: 14px 16px 14px; border-radius: 18px; text-align: center; color: #fff;
+  background: linear-gradient(160deg, rgba(28,30,74,.95), rgba(10,14,30,.94)); border: 1px solid rgba(255,204,51,.55); box-shadow: 0 8px 28px rgba(0,0,0,.5), 0 0 24px rgba(255,204,51,.25); touch-action: manipulation; }
+.door-prompt.hidden { display: none !important; }
+.door-prompt .dp-title { font-weight: 800; font-size: 18px; margin: 0 22px 4px; }
+.door-prompt .dp-sub { font-size: 12.5px; opacity: .8; margin-bottom: 10px; }
+.door-prompt .dp-miss { font-size: 13px; font-weight: 700; color: #ff8a8a; margin-bottom: 8px; }
+.door-prompt .dp-miss.hidden { display: none; }
+.door-prompt .door-btn.btn.primary { position: relative; display: block; width: 100%; min-height: 48px; font-size: 17px; font-weight: 800; border-radius: 14px; }
+.door-prompt .door-btn.hidden { display: block !important; }
+.door-prompt .door-btn:disabled { filter: grayscale(.6); opacity: .65; }
+.door-prompt .door-x { position: absolute; top: 6px; right: 6px; width: 36px; height: 36px; border-radius: 50%; border: 1px solid rgba(120,150,255,.45); background: rgba(20,28,60,.85); color: #fff; font-size: 16px; cursor: pointer; }
+@media (max-width: 640px) { .door-prompt { bottom: auto; top: 30%; z-index: 30; } }
