@@ -47,7 +47,7 @@ async function shardSuite(url) {
   const A = client(url); await A.register('Shd' + rnd());
   ok(A.profile.shards === 0 && !A.profile.inventory.some(s => s.id === G.SHARD_ID), 'new account: shard balance 0, no shard items');
   let r = await A.emit('test:grant', { id: G.SHARD_ID, qty: 7, source: 'event' });
-  ok(r.ok && A.profile.shards === 7 && !A.profile.inventory.some(s => s.id === G.SHARD_ID) && A.profile.used === 0, `granting shards adds to the balance (${A.profile.shards}), inventory stays empty`);
+  ok(r.ok && A.profile.shards === 7 && !A.profile.inventory.some(s => s.id === G.SHARD_ID) && A.profile.used === (G.BETA_CAP_GRANT ? 1 : 0), `granting shards adds to the balance (${A.profile.shards}), inventory stays empty`);
   r = await A.emit('shard:exchange', 3);
   ok(r.ok && A.profile.shards === 4 && r.orbs === 3 * G.SHARD_EXCHANGE.orbs, `exchange spends from the balance: 7 → ${A.profile.shards}, +${r.orbs} orbs`);
   const ex = G.ITEMS.find(i => i.exclusive && i.shardPrice > 0);

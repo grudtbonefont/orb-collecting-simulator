@@ -995,7 +995,15 @@
   function drawHat(g, hat, r, top, t) {
     const y = -top * r;
     g.save();
-    if (hat === 'cap') {
+    if (hat === 'betacap') { // green glossy baseball cap with a «β» badge
+      const gr = g.createLinearGradient(0, y - r * 0.6, 0, y + 6); gr.addColorStop(0, '#9dff7a'); gr.addColorStop(0.55, '#3fcf4a'); gr.addColorStop(1, '#1f8f34');
+      g.fillStyle = gr; g.shadowColor = '#4dff6a'; g.shadowBlur = 8;
+      g.beginPath(); g.arc(0, y + 4, r * 0.62, Math.PI, 0); g.closePath(); g.fill(); g.shadowBlur = 0;
+      g.fillStyle = '#1b7a2c'; g.beginPath(); g.ellipse(r * 0.45, y + 4, r * 0.52, r * 0.15, 0, 0, Math.PI * 2); g.fill();
+      g.fillStyle = 'rgba(255,255,255,.45)'; g.beginPath(); g.ellipse(-r * 0.2, y - r * 0.28, r * 0.2, r * 0.09, -0.5, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#fff'; g.font = `800 ${Math.round(r * 0.36)}px Segoe UI, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('β', r * 0.08, y - r * 0.12);
+      g.fillStyle = '#c8ffb5'; g.beginPath(); g.arc(0, y - r * 0.6 + 4, 2.5, 0, Math.PI * 2); g.fill();
+    } else if (hat === 'cap') {
       g.fillStyle = '#ff4d5e'; g.shadowColor = '#ff4d5e'; g.shadowBlur = 8;
       g.beginPath(); g.arc(0, y + 4, r * 0.62, Math.PI, 0); g.closePath(); g.fill();
       g.fillStyle = '#d93245'; g.beginPath(); g.ellipse(r * 0.45, y + 4, r * 0.5, r * 0.14, 0, 0, Math.PI * 2); g.fill();
@@ -1242,7 +1250,7 @@
   const TRAIL_THEME = { sparks: ['player', '#ffffff'], neon: ['player', '#ffffff'], fire: ['#ff8a2e', '#ffe08a'], smoke: ['#c4cce0', '#8a93b8'],
     bubbles: ['#9fe9ff', '#ffffff'], pixel: ['#3ee0ff', '#ff4d6d'], leaves: ['#7ed957', '#ffb347'], snow: ['#e8f6ff', '#9fd8ff'], hearts: ['#ff5fa2', '#ffd1e6'],
     stars: ['#ffe066', '#fff6c2'], lightning: ['#7cc8ff', '#eaffff'], rainbow: ['rainbow', '#ffffff'], galaxy: ['#b46bff', '#7cc8ff'], comet: ['#ffcf5a', '#7cd8ff'], crystal: ['#9de8ff', '#ffb8f0'] };
-  const TIER_OF = { common: 0, rare: 1, epic: 2, legendary: 3 };
+  const TIER_OF = { common: 0, rare: 1, epic: 2, legendary: 3, exclusive: 3 };
   const TRAIL_LIFE = [650, 700, 800, 1000, 1150], TRAIL_PTS = [26, 28, 32, 40, 46]; // higher tiers keep a longer luminous tail
   const trailTier = id => { const d = G.ITEM_BY_ID[id]; return !d ? 0 : d.exclusive ? 4 : (TIER_OF[d.rarity] || 0); };
   const FX_CAP = [0, 6, 20, 36, 50]; // max particles per player per frame (halved at reduced quality)
@@ -2512,7 +2520,6 @@
     const img = document.createElement('img');
     img.src = iconUrl(id); img.alt = def ? def.name : 'Предмет'; img.draggable = false; img.dataset.icon = String(id);
     box.appendChild(img);
-    if (def && def.exclusive && cls !== 'sm') { const b = document.createElement('span'); b.className = 'ex-badge'; b.textContent = 'Эксклюзив'; box.appendChild(b); }
     return box;
   }
   window.OCSIcons = Object.freeze({ url: iconUrl }); // read-only hook for the UI tests / debugging
@@ -2534,7 +2541,7 @@
         drawAvatar(g, hx, hy, G.PLAYER_R, f.eq, t, { dir: { x: 1, y: 0 }, phase: idx });
         const r = rarityOf(d);
         g.globalAlpha = 1; g.textAlign = 'left'; g.font = '700 15px Segoe UI, sans-serif'; g.fillStyle = '#fff'; g.fillText(d.name, x0 + 14, y0 + 22);
-        g.font = '600 12px Segoe UI, sans-serif'; g.fillStyle = r.color; g.fillText(d.exclusive ? 'Эксклюзив · ' + r.name : r.name, x0 + 14, y0 + 38);
+        g.font = '600 12px Segoe UI, sans-serif'; g.fillStyle = r.color; g.fillText(r.name, x0 + 14, y0 + 38);
       });
     };
     tick();
@@ -2563,12 +2570,12 @@
   }
   const owns = id => !!(profile && profile.inventory.some(s => s.id === id));
   const rarityOf = def => G.RARITIES[def.rarity] || G.RARITIES.common;
-  const SOURCE_NAMES = { shop: 'Магазин', minigame: 'Мини-игры', arena: 'Арена', event: 'Событие', admin: 'Подарок', legacy: 'Куплено раньше', shard_shop: 'Лавка осколков' };
-  function rarityTag(def) { const r = rarityOf(def); const el = document.createElement('div'); el.className = 'rar'; el.style.color = r.color; el.textContent = r.name; return el; }
+  const SOURCE_NAMES = { shop: 'Магазин', minigame: 'Мини-игры', arena: 'Арена', event: 'Событие', admin: 'Подарок', legacy: 'Куплено раньше', shard_shop: 'Лавка осколков', beta: 'Бета-тест' };
+  function rarityTag(def) { const r = rarityOf(def); const el = document.createElement('div'); el.className = 'rar' + (def.rarity === 'exclusive' ? ' rar-ex' : ''); if (def.rarity !== 'exclusive') el.style.color = r.color; el.textContent = r.name; return el; }
 
   // ------------------------------------------------------------ shop (only sells; purchases go to the inventory)
   let shopTab = 'color', shopRarity = 'all', shopSort = 'price-asc', shopHideOwned = false;
-  const RAR_RANK = { common: 0, rare: 1, epic: 2, legendary: 3 };
+  const RAR_RANK = { common: 0, rare: 1, epic: 2, legendary: 3, exclusive: 4 };
   const SHOP_SORTS = {
     'price-asc': (a, b) => a.price - b.price || RAR_RANK[a.rarity] - RAR_RANK[b.rarity],
     'price-desc': (a, b) => b.price - a.price || RAR_RANK[b.rarity] - RAR_RANK[a.rarity],
@@ -2616,7 +2623,7 @@
     if (shopTab === 'codes') { renderCodes(grid); return; }
     const inCat = G.ITEMS.filter(i => i.cat === shopTab && i.price > 0 && i.sources.includes('shop'));
     if (shopRarity !== 'all' && !inCat.some(i => i.rarity === shopRarity)) shopRarity = 'all';
-    const chips = [{ key: 'all', name: 'Все', color: '#aab3d9' }].concat(Object.entries(G.RARITIES).map(([k, r]) => ({ key: k, name: r.name, color: r.color })));
+    const chips = [{ key: 'all', name: 'Все', color: '#aab3d9' }].concat(Object.entries(G.RARITIES).filter(([k]) => k !== 'exclusive').map(([k, r]) => ({ key: k, name: r.name, color: r.color })));
     const rc = $('shopRarity'); rc.innerHTML = '';
     for (const c of chips) {
       const n = c.key === 'all' ? inCat.length : inCat.filter(i => i.rarity === c.key).length;
@@ -2647,7 +2654,7 @@
     const ico = iconEl(G.SHARD_ID, 'sm');
     const txt = document.createElement('div'); txt.className = 'shard-txt';
     const b = document.createElement('div'); b.className = 'shard-have'; b.innerHTML = 'У вас осколков: <b id="shardCount"></b>'; b.querySelector('b').innerHTML = shardsH(have);
-    const how = document.createElement('div'); how.className = 'muted'; how.textContent = 'Осколки дают легендарные (+1) и мифические (+3) сферы и награды арена-событий. Эксклюзивы нельзя купить за сферы.';
+    const how = document.createElement('div'); how.className = 'muted'; how.textContent = 'Осколки дают легендарные (+1) и мифические (+3) сферы и награды арена-событий. Товары лавки продаются только за осколки.';
     txt.append(b, how);
     const ex = document.createElement('div'); ex.className = 'shard-ex';
     const lab = document.createElement('label'); lab.htmlFor = 'shardExQty'; lab.innerHTML = `Обмен: 1&nbsp;${SHARD_I} = ${orbsH(X.orbs)}`;
@@ -2663,7 +2670,7 @@
     const list = G.ITEMS.filter(i => i.exclusive).sort((a, b2) => a.shardPrice - b2.shardPrice);
     for (const it of list) {
       const owned = owns(it.id);
-      const el = document.createElement('div'); el.className = 'item ex-item rar-' + it.rarity; el.dataset.item = it.id;
+      const el = document.createElement('div'); el.className = 'item rar-' + it.rarity; el.dataset.item = it.id;
       el.appendChild(iconEl(it.id));
       const nm = document.createElement('div'); nm.className = 'name'; nm.textContent = it.name;
       const cat = document.createElement('div'); cat.className = 'desc'; cat.textContent = (G.CATEGORIES.find(c => c.key === it.cat) || {}).name || '';

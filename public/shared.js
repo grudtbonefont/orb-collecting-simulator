@@ -60,6 +60,7 @@
     rare: { name: 'Редкий', color: '#3ee0ff' },
     epic: { name: 'Эпический', color: '#b46bff' },
     legendary: { name: 'Легендарный', color: '#ffcc33' },
+    exclusive: { name: 'Эксклюзив', color: '#ff9de2' }, // special tier above legendary (gold→pink→cyan look); only the beta cap for now
   };
   // Multi-colour paints used by colour / nickname-colour values (anything that is not '#hex' or 'rainbow').
   // stops: gradient colours (cycled slowly in the arena), base: single colour for the minimap / leaderboard dot,
@@ -169,9 +170,9 @@
       sources: ['arena', 'event', 'admin'] },
     // exclusives: only for legendary shards in «Лавка осколков» (never for orbs)
     X('c_void', 'color', 'Пустота', 75, 'epic', 'void'),
-    X('n_shard', 'nameColor', 'Осколочный ник', 50, 'epic', 'shard'),
+    X('n_shard', 'nameColor', 'Осколочный ник', 50, 'rare', 'shard'),
     X('t_comet', 'trail', 'Хвост кометы', 100, 'epic', 'comet'),
-    X('s_crystal', 'shape', 'Кристалл', 25, 'epic', 'crystal'),
+    X('s_crystal', 'shape', 'Кристалл', 25, 'common', 'crystal'),
     X('h_satellites', 'hat', 'Спутники', 175, 'legendary', 'satellites'),
     X('t_crystal', 'trail', 'Кристальный след', 250, 'legendary', 'crystal'),
     X('c_prism', 'color', 'Призма', 450, 'legendary', 'prism'),
@@ -212,6 +213,9 @@
     // final achievement reward: only granted by the server when ALL achievement tiers are done (never sold)
     { id: 'h_trophy', type: 'cosmetic', cat: 'hat', name: 'Кубок', price: null, rarity: 'legendary', value: 'trophy', stackable: false, maxStack: 1, base: false, award: true,
       desc: 'Награда за все достижения. Не продаётся.', sources: ['achievement', 'admin'] },
+    // beta-test reward: auto-granted (never sold, not in any shop)
+    { id: 'h_beta', type: 'cosmetic', cat: 'hat', name: 'Бета-тест кепка', price: null, rarity: 'exclusive', value: 'betacap', stackable: false, maxStack: 1, base: false, award: true,
+      desc: 'За участие в бета-тесте. Не продаётся.', sources: ['beta', 'admin'] },
   ];
   const POTIONS = { speed: { mult: 1.2, sec: 60 }, orbs: { mult: 1.25, sec: 90 }, luck: { mult: 1.25, sec: 90 }, magnet: { mult: 1.3, sec: 60 }, shard: { chance: 0.03, sec: 120 } };
   const POTION_MAP = { everyMinMs: 35000, everyMaxMs: 70000, maxAlive: 4, lifeMs: 90000, r: 16, weights: { p_speed: 26, p_orbs: 24, p_luck: 22, p_magnet: 22, p_shard: 6 } };
@@ -228,6 +232,8 @@
   const BUY_MAX_QTY = 99;
   const INV_CATEGORIES = CATEGORIES.concat([{ key: 'misc', name: 'Прочее' }]);
 
+  // Beta-test cap: granted once to every account on load/creation (lib/inventory.js migrateAccount). Set false to stop granting.
+  const BETA_CAP_GRANT = true, BETA_CAP_ID = 'h_beta';
   const DEFAULT_EQUIPPED = { color: 'c_cyan', shape: 's_circle', trail: 't_none', nameColor: 'n_white', hat: 'h_none' };
   const DEFAULT_OWNED = ITEMS.filter(i => i.base).map(i => i.id);
 
@@ -485,7 +491,7 @@
   }
 
   const api = {
-    WORLD, ZONE_W, ZONE_H, DOOR, doorDist, DOOR_COST, ZONE2_WEIGHTS, zoneOf, zoneGate, PLAYER_R, BASE_SPEED, TICK_MS, STEP_DT, ORB_TYPES, ORB_RANK, ORB_LEGEND, POOL_WEIGHTS, RAIN_WEIGHTS, rollOrbType, expectedOrbValue, CATEGORIES, INV_CATEGORIES, RARITIES, ITEMS, ITEM_BY_ID, INV_SLOTS, INV_CAP, BUY_MAX_QTY, PAINTS,
+    BETA_CAP_GRANT, BETA_CAP_ID, WORLD, ZONE_W, ZONE_H, DOOR, doorDist, DOOR_COST, ZONE2_WEIGHTS, zoneOf, zoneGate, PLAYER_R, BASE_SPEED, TICK_MS, STEP_DT, ORB_TYPES, ORB_RANK, ORB_LEGEND, POOL_WEIGHTS, RAIN_WEIGHTS, rollOrbType, expectedOrbValue, CATEGORIES, INV_CATEGORIES, RARITIES, ITEMS, ITEM_BY_ID, INV_SLOTS, INV_CAP, BUY_MAX_QTY, PAINTS,
     DEFAULT_EQUIPPED, DEFAULT_OWNED, UPGRADES, UPGRADE_KEYS, UPGRADE_REFUND_PRICES, upLevel, upValue, jackpotChance, upgradeText, orbReward, skillPrize, compassTargets, SENSE_EPIC_RANGE, RADAR, radarBlips, PUSH, separatePlayers,
     EVENTS, EVENT_KEYS, AUTO_EVENT_KEYS, EVENT_SCHEDULE, luckyWeights, OBSTACLES, laserAngle, resolveObstacles, laserHits, laserPenalty, robotPenalty, WEEKEND, weekendInfo, SHARD_ID, SHARD_EXCHANGE, POTIONS, POTION_CAP_MS, POTION_MAP, potionOn, potionMult, EMOTE_MS, EMOTE_GAP_MS, MG_PRIZE_MULT,
     MINIGAMES, REACTION_PRIZES, rushPrize, memoryPrize, memoryShowMs, shellFinal, shellShuffleMs, throwPos, throwPoints, throwPrize, chainPrize, minigameMinMs, speedFor, pickupFor, applyInput, BONUS_ROOM, inBonusRoom,
