@@ -1255,30 +1255,31 @@
     bubbles: ['#9fe9ff', '#ffb8f0'], pixel: ['#3ee0ff', '#ff4d6d'], leaves: ['#7ed957', '#ffb347'], snow: ['#9fd8ff', '#c9b8ff'], hearts: ['#ff5fa2', '#ffd1e6'],
     stars: ['#ffe066', '#fff6c2'], lightning: ['#7cc8ff', '#eaffff'], rainbow: ['rainbow', 'rainbow'], galaxy: ['#b46bff', '#7cc8ff'], comet: ['#ffcf5a', '#7cd8ff'], crystal: ['#9de8ff', '#ffb8f0'], pages: ['#ff5a5a', '#ffd166'] };
   const TIER_OF = { common: 0, rare: 1, epic: 2, legendary: 3, exclusive: 3 };
-  const TRAIL_LIFE = [650, 700, 800, 1000, 1150], TRAIL_PTS = [34, 38, 44, 54, 60]; // higher tiers keep a longer luminous tail
+  const TRAIL_LEN = 1.5, TRAIL_SZ = 2; // global length / particle-size multipliers
+  const TRAIL_LIFE = [650, 700, 800, 1000, 1150].map(v => v * TRAIL_LEN), TRAIL_PTS = [34, 38, 44, 54, 60].map(v => Math.round(v * TRAIL_LEN)); // higher tiers keep a longer luminous tail
   const TRAIL_STEP = 6; // world px between emitted points (interpolated: fast movement leaves no gaps)
   const trailTier = id => { const d = G.ITEM_BY_ID[id]; return !d ? 0 : d.exclusive ? 4 : (TIER_OF[d.rarity] || 0); };
   const FX_CAP = [0, 6, 18, 30, 40]; // tier-layer particles per player per frame (halved at reduced quality)
-  const BASE_CAP = [14, 24, 32]; // base-renderer particles per player per frame by fxLod
-  const GLOBAL_CAP = [260, 650, 1300]; // all trail particles on screen per frame by fxLod
+  const BASE_CAP = [20, 36, 48]; // base-renderer particles per player per frame by fxLod
+  const GLOBAL_CAP = [380, 950, 1900]; // all trail particles on screen per frame by fxLod
   let fxLod = 2, fpsEma = 60, lastFrameAt = 0; // 2 full · 1 reduced · 0 glow only — set every frame from FPS, trails on screen, mobile
-  let trailBudget = 1e9, trailLive = null; // live: drawing the main canvas (budgets apply); previews are never throttled
+  let trailBudget = 1e9, trailLive = null, trailSz = 1; // live: drawing the main canvas (budgets apply); previews are never throttled
   function trailFrame(lod) { trailBudget = GLOBAL_CAP[lod]; }
   // pooled trail points
-  const TP_POOL = []; let trailSeq = 0; // id: stable per point for its whole life (particle selection / phase never depends on the array index)
-  function trailPoint(x, y, time) { const p = TP_POOL.pop() || { x: 0, y: 0, time: 0, seed: 0, id: 0 }; p.x = x; p.y = y; p.time = time; p.seed = Math.random(); p.id = ++trailSeq; return p; }
-  function trailClear(pl) { for (const p of pl.trail) if (TP_POOL.length < 4000) TP_POOL.push(p); pl.trail.length = 0; }
+  const TP_POOL = []; // id: stable per point for its whole life (particle selection / phase never depends on the array index)
+  function trailPoint(x, y, time, pl) { const p = TP_POOL.pop() || { x: 0, y: 0, time: 0, seed: 0, id: 0 }; p.x = x; p.y = y; p.time = time; p.seed = Math.random(); p.id = pl.tseq = (pl.tseq || 0) + 1; return p; } // per-player sequence: id % stride never correlates across players
+  function trailClear(pl) { for (const p of pl.trail) if (TP_POOL.length < 6000) TP_POOL.push(p); pl.trail.length = 0; }
   function trailStep(pl, p, now) { // emit points every TRAIL_STEP px along the movement since the last point; trim by age / count
     const L = pl.last, dx = p.x - L.x, dy = p.y - L.y, d = Math.hypot(dx, dy);
     if (d > 260) { trailClear(pl); L.x = p.x; L.y = p.y; pl.lastT = now; } // teleport / respawn: no streak across the map
     else if (d >= TRAIL_STEP) {
       const steps = Math.min(10, Math.floor(d / TRAIL_STEP)), t0 = pl.lastT && now - pl.lastT < 250 ? pl.lastT : now - 16;
-      for (let i = 1; i <= steps; i++) { const f = i / steps; pl.trail.push(trailPoint(L.x + dx * f, L.y + dy * f, t0 + (now - t0) * f)); }
+      for (let i = 1; i <= steps; i++) { const f = i / steps; pl.trail.push(trailPoint(L.x + dx * f, L.y + dy * f, t0 + (now - t0) * f, pl)); }
       L.x = p.x; L.y = p.y; pl.lastT = now;
     }
     const tr = trailTier(pl.eq.trail), life = TRAIL_LIFE[tr], max = TRAIL_PTS[tr], tl = pl.trail;
     let cut = 0; while (cut < tl.length && (now - tl[cut].time > life || tl.length - cut > max)) cut++;
-    if (cut) { for (let i = 0; i < cut; i++) if (TP_POOL.length < 4000) TP_POOL.push(tl[i]); tl.splice(0, cut); }
+    if (cut) { for (let i = 0; i < cut; i++) if (TP_POOL.length < 6000) TP_POOL.push(tl[i]); tl.splice(0, cut); }
   }
   // cached sprites (built once per key; soft glows baked in)
   const SPR = new Map();
@@ -1299,10 +1300,10 @@
       g.strokeStyle = 'rgba(255,170,240,0.5)'; g.lineWidth = 1.6; g.beginPath(); g.arc(0, 0, 15, 0.6, 1.9); g.stroke();
       g.fillStyle = '#fff'; g.beginPath(); g.ellipse(-7, -7, 4.5, 3, -0.7, 0, 6.283); g.fill(); g.beginPath(); g.arc(-1, -11, 1.6, 0, 6.283); g.fill(); }),
     star: c => shapeSpr('star' + c, c, g => { g.fillStyle = c; g.beginPath(); starPath(g, 0, 0, 18, 0); g.fill(); g.shadowBlur = 0; g.fillStyle = 'rgba(255,255,255,0.75)'; g.beginPath(); starPath(g, -2, -3, 7, 0); g.fill(); }),
-    spark4: c => shapeSpr('sp4' + c, c, g => { g.fillStyle = c; sparkle(g, 0, 0, 19); g.shadowBlur = 0; g.globalAlpha = 0.35; g.fillStyle = '#fff'; sparkle(g, 0, 0, 6); g.globalAlpha = 1; }),
+    spark4: c => shapeSpr('sp4' + c, c, g => { g.fillStyle = c; sparkle(g, 0, 0, 19); g.shadowBlur = 0; g.globalAlpha = 0.8; g.fillStyle = 'rgba(255,252,230,1)'; sparkle(g, 0, 0, 8); g.globalAlpha = 1; }),
     heart: c => shapeSpr('heart' + c, c, g => { g.fillStyle = c; g.beginPath(); heartPath(g, 0, 1, 15); g.fill(); g.shadowBlur = 0; g.lineWidth = 1.6; g.strokeStyle = 'rgba(120,0,50,0.35)'; g.stroke();
       g.fillStyle = 'rgba(255,255,255,0.8)'; g.beginPath(); g.ellipse(-6, -5, 3.6, 2.2, -0.6, 0, 6.283); g.fill(); }),
-    flake: () => shapeSpr('flake', '#9fd8ff', g => { g.strokeStyle = '#d6efff'; g.lineCap = 'round'; g.lineWidth = 2.6; g.beginPath();
+    flake: () => shapeSpr('flake', '#9fd8ff', g => { g.strokeStyle = '#f0f9ff'; g.lineCap = 'round'; g.lineWidth = 2.6; g.beginPath();
       for (let a = 0; a < 6; a++) { const c = Math.cos(a * 1.0472), s = Math.sin(a * 1.0472); g.moveTo(0, 0); g.lineTo(c * 17, s * 17); g.moveTo(c * 10, s * 10); g.lineTo(c * 10 + Math.cos(a * 1.0472 + 0.7) * 5, s * 10 + Math.sin(a * 1.0472 + 0.7) * 5); g.moveTo(c * 10, s * 10); g.lineTo(c * 10 + Math.cos(a * 1.0472 - 0.7) * 5, s * 10 + Math.sin(a * 1.0472 - 0.7) * 5); }
       g.stroke(); g.fillStyle = '#e8f6ff'; g.beginPath(); g.arc(0, 0, 3, 0, 6.283); g.fill(); }),
     leaf: c => shapeSpr('leaf' + c, null, g => { g.fillStyle = c; g.beginPath(); g.moveTo(-17, 0); g.quadraticCurveTo(-4, -12, 17, 0); g.quadraticCurveTo(-4, 12, -17, 0); g.fill();
@@ -1318,7 +1319,7 @@
   };
   // blit a sprite centred at (x, y) with world size s; optional rotation / non-uniform y-scale (flip)
   function blit(g, img, x, y, s, a, rot, sy) {
-    if (a <= 0.01 || s <= 0.2) return; g.globalAlpha = a > 1 ? 1 : a; if (img.k) s *= img.k;
+    if (a <= 0.01 || s <= 0.2) return; g.globalAlpha = a > 1 ? 1 : a; s *= trailSz; if (img.k) s *= img.k;
     if (!rot && sy == null) { g.drawImage(img, x - s / 2, y - s / 2, s, s); return; }
     let k = sy == null ? 1 : sy; if (k > -0.08 && k < 0.08) k = k < 0 ? -0.08 : 0.08; // edge-on sheet: keep a sliver
     const c = Math.cos(rot || 0), sn = Math.sin(rot || 0), A = c, B = sn, Cc = -sn * k, D = c * k, det = A * D - B * Cc;
@@ -1326,7 +1327,7 @@
     g.transform(D / det, -B / det, -Cc / det, A / det, (Cc * y - D * x) / det, (B * x - A * y) / det);
   }
   function glowPath(g, pts, n, color, width, alpha, step) { // tapered soft stroke in 4 alpha bands (4 draw calls)
-    g.strokeStyle = color; step = step || 1;
+    g.strokeStyle = color; step = step || 1; width *= trailSz > 1 ? 1.6 : 1;
     for (let c = 0; c < 4; c++) {
       const a = Math.floor(c * (n - 1) / 4), b = Math.floor((c + 1) * (n - 1) / 4); if (b <= a) continue;
       g.globalAlpha = alpha * (c + 1) / 4; g.lineWidth = width * (0.45 + 0.55 * (c + 1) / 4);
@@ -1395,7 +1396,7 @@
       } else { const s4 = S.spark4(c2); for (let j = 0; j < 6; j++) { const a = t * 3 + j * 1.047; blit(g, s4, h.x + Math.cos(a) * 20, h.y + Math.sin(a) * 20, 9, 0.6); } }
     }
   }
-  function drawTrail(g, pl, t, now) {
+  function drawTrail(g, pl, t, now) { trailSz = 1.4;
     const kind = itemVal(pl.eq.trail) || 'none';
     if (kind === 'none' || pl.trail.length < 2) return;
     const pts = pl.trail, n = pts.length, tier = trailTier(pl.eq.trail), lod = g === ctx ? fxLod : 2;
@@ -1405,14 +1406,14 @@
     trailFx(g, pl, pts, n, t, now, kind, tier, lod, true);
     g.restore(); g.save();
     g.lineCap = 'round'; g.lineJoin = 'round';
-    if (TRAILS[kind]) TRAILS[kind](g, pts, n, t, now, pl, cap, Math.max(1, Math.ceil(TRAIL_PTS[tier] / cap)), lod);
-    g.restore(); g.save();
+    trailSz = TRAIL_SZ; if (TRAILS[kind]) TRAILS[kind](g, pts, n, t, now, pl, cap, Math.max(1, Math.ceil(TRAIL_PTS[tier] / cap)), lod);
+    trailSz = 1.4; g.restore(); g.save();
     trailFx(g, pl, pts, n, t, now, kind, tier, lod, false);
-    g.restore();
+    g.restore(); trailSz = 1;
   }
   // Base renderers: (g, pts, n, t, now, pl, cap, stride, lod). Particles = every `stride`-th point newest→oldest, max `cap`.
   // Everything is deterministic from the point's own seed/age (no Math.random while drawing).
-  const ageK = (p, now, life = 650) => 1 - (now - p.time) / life;
+  const ageK = (p, now, life = 650) => 1 - (now - p.time) / (life * TRAIL_LEN);
   const hash = (a, b) => { const v = Math.sin(a * 12.9898 + b * 78.233) * 43758.5453; return v - Math.floor(v); };
   const ease = k => k * k * (3 - 2 * k);
   function heartPath(g, x, y, s) {
@@ -1429,7 +1430,7 @@
       for (let j = 0; j < n; j += st) {
         const i = pass ? n - 1 - j : j, p = pts[i], q = pts[Math.max(0, i - 1)], r = pts[Math.min(n - 1, i + 1)];
         let dx = r.x - q.x, dy = r.y - q.y; const l = Math.hypot(dx, dy) || 1; dx /= l; dy /= l;
-        const f = i / (n - 1), w = (w0 + (w1 - w0) * f * f) * (1 + (wob ? Math.sin(t * 11 + p.id * 0.7) * wob * (1 - f) : 0)), s = pass ? -1 : 1;
+        const f = i / (n - 1), w = (w0 + (w1 - w0) * f * f) * 1.6 * (1 + (wob ? Math.sin(t * 11 + p.id * 0.7) * wob * (1 - f) : 0)), s = pass ? -1 : 1;
         const x = p.x - dy * w * s, y = p.y + dx * w * s; (j || pass) ? g.lineTo(x, y) : g.moveTo(x, y);
       }
       if (!pass) { const p = pts[n - 1]; g.lineTo(p.x, p.y); }
@@ -1449,14 +1450,14 @@
         blit(g, img, p.x + Math.sin(p.seed * 6.28 + f * 6) * 7, p.y - f * 22, (6 + p.seed * 10) * (0.6 + 0.4 * Math.min(1, f * 4)) * pop, k < 0.12 ? k * 8 : 0.95); });
     },
     sparks(g, pts, n, t, now, pl, cap, st) { // player-coloured sparks shoot out as short streaks with a hot core
-      g.globalCompositeOperation = 'lighter'; const col = colorOf(pl.eq, t), gw = glowSpr(col);
+      g.globalCompositeOperation = 'lighter'; const col = colorOf(pl.eq, t), gw = glowSpr(col), hot = glowSpr('#fff4c8');
       g.strokeStyle = col; g.lineWidth = 2;
       g.beginPath();
       each(pts, n, cap >> 1, st, (p, i) => { const k = ageK(p, now, 700); if (k <= 0) return; for (let j = 0; j < 2; j++) { const a = p.seed * 6.28 + j * 3.1, d = (1 - k) * 26 + 4, x = p.x + Math.cos(a) * d, y = p.y + Math.sin(a) * d + (1 - k) * (1 - k) * 10, L = 3 + k * 5;
         g.moveTo(x, y); g.lineTo(x - Math.cos(a) * L, y - Math.sin(a) * L); } });
       g.globalAlpha = 0.9; g.stroke();
       each(pts, n, cap >> 1, st, (p, i) => { const k = ageK(p, now, 700); if (k <= 0) return; const a = p.seed * 6.28, d = (1 - k) * 26 + 4;
-        blit(g, gw, p.x + Math.cos(a) * d, p.y + Math.sin(a) * d + (1 - k) * (1 - k) * 10, 5 + k * 7, k); });
+        const sx = p.x + Math.cos(a) * d, sy2 = p.y + Math.sin(a) * d + (1 - k) * (1 - k) * 10; blit(g, gw, sx, sy2, 5 + k * 7, k); blit(g, hot, sx, sy2, 2 + k * 3, k); }); // hot spark cores
     },
     pixel(g, pts, n, t, now, pl, cap, st) { // retro blocks snap to a grid, drop in steps and blink out
       const pal = ['#ff4d6d', '#ffd34d', '#3ee0ff', '#9dff4f'];
@@ -1476,7 +1477,7 @@
     },
     neon(g, pts, n, t, now, pl, cap, st) { // glowing tube in the player colour with a white-hot core (no shadowBlur)
       const color = colorOf(pl.eq, t), s2 = 1; g.globalCompositeOperation = 'lighter';
-      glowPath(g, pts, n, color, 26, 0.16, s2); glowPath(g, pts, n, color, 13, 0.5, s2); glowPath(g, pts, n, color, 4, 0.55, s2);
+      glowPath(g, pts, n, color, 26, 0.16, s2); glowPath(g, pts, n, color, 13, 0.5, s2); glowPath(g, pts, n, color, 5, 1, s2); glowPath(g, pts, n, '#e8fdff', 2, 0.75, s2); // bright tinted core = neon tube
       const h = pts[n - 1]; blit(g, glowSpr(color), h.x, h.y, 26 + 4 * Math.sin(t * 8), 0.7);
     },
     hearts(g, pts, n, t, now, pl, cap, st) { // beating hearts float up and sway, two shades
@@ -1492,9 +1493,9 @@
     lightning(g, pts, n, t, now, pl, cap, st) { // jagged bolt that re-forks ~14×/s, with branches and bright nodes
       const q = Math.floor(now / 70), s2 = n > 30 ? 2 : 1; g.globalCompositeOperation = 'lighter';
       const path = () => { g.beginPath(); for (let i = 0; i < n; i += s2) { const p = pts[i], prev = pts[Math.max(0, i - s2)], dx = p.x - prev.x, dy = p.y - prev.y, l = Math.hypot(dx, dy) || 1, off = (hash(i, q) - 0.5) * 16 * (i / n); const x = p.x - dy / l * off, y = p.y + dx / l * off; i ? g.lineTo(x, y) : g.moveTo(x, y); } };
-      g.globalAlpha = 0.22; g.strokeStyle = '#7cc8ff'; g.lineWidth = 12; path(); g.stroke();
-      g.globalAlpha = 0.55; g.lineWidth = 5; path(); g.stroke();
-      g.globalAlpha = 1; g.strokeStyle = '#eaffff'; g.lineWidth = 2; path(); g.stroke();
+      g.globalAlpha = 0.22; g.strokeStyle = '#7cc8ff'; g.lineWidth = 18; path(); g.stroke();
+      g.globalAlpha = 0.55; g.lineWidth = 8; path(); g.stroke();
+      g.globalAlpha = 1; g.strokeStyle = '#eaffff'; g.lineWidth = 3; path(); g.stroke();
       g.beginPath(); g.lineWidth = 1.4; g.strokeStyle = '#bfe6ff'; g.globalAlpha = 0.85;
       for (let b = 0; b < 3; b++) { const i = Math.floor(hash(b, q) * (n - 2)) + 1, p = pts[i], a = hash(b + 5, q) * 6.283, L = 8 + hash(b + 9, q) * 14 * (i / n);
         g.moveTo(p.x, p.y); g.lineTo(p.x + Math.cos(a) * L * 0.6 + 3, p.y + Math.sin(a) * L * 0.6 - 3); g.lineTo(p.x + Math.cos(a) * L, p.y + Math.sin(a) * L); }
@@ -1510,9 +1511,9 @@
     rainbow(g, pts, n, t, now, pl, cap, st) { // six-band ribbon that waves and flows, sparkly edges
       const s2 = 1, h0 = t * 120;
       for (let b = 0; b < 6; b++) {
-        g.strokeStyle = `hsl(${(h0 + b * 50) % 360},100%,${62 + (b === 0 ? 8 : 0)}%)`; g.lineWidth = 3.2; g.beginPath();
+        g.strokeStyle = `hsl(${(h0 + b * 50) % 360},100%,${62 + (b === 0 ? 8 : 0)}%)`; g.lineWidth = 5; g.beginPath();
         for (let i = 0; i < n; i += s2) { const p = pts[i], q = pts[Math.max(0, i - 1)], r = pts[Math.min(n - 1, i + 1)]; let dx = r.x - q.x, dy = r.y - q.y; const l = Math.hypot(dx, dy) || 1, f = i / (n - 1);
-          const off = (b - 2.5) * 2.6 * (0.35 + 0.65 * f) + Math.sin(t * 6 - p.id * 0.25) * 3 * (1 - f); const x = p.x - dy / l * off, y = p.y + dx / l * off; i ? g.lineTo(x, y) : g.moveTo(x, y); }
+          const off = (b - 2.5) * 4.2 * (0.35 + 0.65 * f) + Math.sin(t * 6 - p.id * 0.25) * 3 * (1 - f); const x = p.x - dy / l * off, y = p.y + dx / l * off; i ? g.lineTo(x, y) : g.moveTo(x, y); }
         g.globalAlpha = 0.85; g.stroke();
       }
     },
@@ -1521,23 +1522,23 @@
       each(pts, n, cap >> 2, st * 4, p => { const k = ageK(p, now, 1000); if (k <= 0) return; blit(g, S.nebula(p.seed < 0.5 ? 'rgba(138,60,255,0.5)' : 'rgba(255,79,216,0.4)'), p.x, p.y, 30 + (1 - k) * 20, k * 0.45); });
       each(pts, n, cap, st, (p, i) => { const k = ageK(p, now, 1000); if (k <= 0) return; const sd = p.seed, d = (1 - k) * 22 + 3, a = sd * 20 + (1 - k) * 3;
         blit(g, glowSpr(pal[Math.floor(sd * 4) % 4]), p.x + Math.cos(a) * d, p.y + Math.sin(a) * d, 4 + k * 6, k * (0.6 + 0.4 * Math.sin(t * 6 + sd * 9)));
-        if (p.id % 6 === 0) blit(g, S.spark4('#e0b8ff'), p.x, p.y, (4 + k * 7) * (0.6 + 0.4 * Math.sin(t * 8 + sd * 20)), k); });
+        if (p.id % 6 === 0) blit(g, S.spark4('#f6ecff'), p.x, p.y, (4 + k * 7) * (0.6 + 0.4 * Math.sin(t * 8 + sd * 20)), k); });
     },
     comet(g, pts, n, t, now, pl, cap, st) { // exclusive: tapered fiery tail (red → orange → golden core), blue ion streak, debris
       const s2 = 1;
       g.globalAlpha = 0.45; g.fillStyle = '#ff5a3a'; taper(g, pts, n, 1, 14, 0.25, t, s2);
       g.globalAlpha = 0.7; g.fillStyle = '#ffb347'; taper(g, pts, n, 0.5, 9, 0.2, t, s2);
-      g.globalAlpha = 0.95; g.fillStyle = '#ffd27a'; taper(g, pts, n, 0, 3, 0, t, s2);
-      g.globalCompositeOperation = 'lighter'; g.strokeStyle = '#7cd8ff'; g.lineWidth = 1.6; g.globalAlpha = 0.5; g.beginPath();
+      g.globalAlpha = 0.95; g.fillStyle = '#fff0b0'; taper(g, pts, n, 0, 4, 0, t, s2);
+      g.globalCompositeOperation = 'lighter'; g.strokeStyle = '#7cd8ff'; g.lineWidth = 2.6; g.globalAlpha = 0.5; g.beginPath();
       for (let i = 0; i < n; i += s2) { const p = pts[i], f = 1 - i / n, w = 10 * f + Math.sin(t * 5 + p.id * 0.4) * 3 * f; i ? g.lineTo(p.x + w * 0.7, p.y - w) : g.moveTo(p.x + w * 0.7, p.y - w); }
-      g.stroke(); const em = S.ember();
+      g.stroke(); const em = S.ember(); { const h = pts[n - 1]; blit(g, S.flameO(), h.x, h.y, 30, 0.7); blit(g, S.ember(), h.x, h.y, 16, 1); } // comet head
       each(pts, n, cap >> 1, st * 2, p => { const k = ageK(p, now, 900); if (k <= 0) return; blit(g, em, p.x + (p.seed - 0.5) * 22, p.y + (hash(p.seed, 2) - 0.5) * 22, 3 + k * 4, k); });
     },
     crystal(g, pts, n, t, now, pl, cap, st) { // exclusive: spinning prismatic shards with glints
       const pal = ['#9de8ff', '#b8f0ff', '#c7a6ff', '#ffb8f0'];
       each(pts, n, cap, Math.max(2, st), (p, i) => { const k = ageK(p, now, 900); if (k <= 0) return;
         blit(g, S.shard(pal[Math.floor(p.seed * 4) % 4]), p.x + (p.seed - 0.5) * 14, p.y + (hash(p.seed, 3) - 0.5) * 14 + (1 - k) * 8, (7 + k * 9) * (0.7 + p.seed * 0.5), Math.min(1, k * 1.5), p.seed * 6.28 + t * 3 * (p.seed > 0.5 ? 1 : -1));
-        if (p.id % 3 === 0) { g.globalCompositeOperation = 'lighter'; blit(g, S.spark4('#9de8ff'), p.x + (hash(p.seed, 4) - 0.5) * 24, p.y + (hash(p.seed, 6) - 0.5) * 24, 8 * Math.max(0, Math.sin(t * 7 + p.seed * 25)), k); g.globalCompositeOperation = 'source-over'; } });
+        if (p.id % 3 === 0) { g.globalCompositeOperation = 'lighter'; blit(g, S.spark4('#e6f9ff'), p.x + (hash(p.seed, 4) - 0.5) * 24, p.y + (hash(p.seed, 6) - 0.5) * 24, 8 * Math.max(0, Math.sin(t * 7 + p.seed * 25)), k); g.globalCompositeOperation = 'source-over'; } });
     },
     pages(g, pts, n, t, now, pl, cap, st) { // daily calendar: sheets with a red header flutter, flip and spin as they fall
       const img = S.page();
