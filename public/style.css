@@ -1037,3 +1037,16 @@ input[type=checkbox] { accent-color: var(--ui-cyan); }
 .door-prompt .door-btn:disabled { filter: grayscale(.6); opacity: .65; }
 .door-prompt .door-x { position: absolute; top: 6px; right: 6px; width: 36px; height: 36px; border-radius: 50%; border: 1px solid rgba(120,150,255,.45); background: rgba(20,28,60,.85); color: #fff; font-size: 16px; cursor: pointer; }
 @media (max-width: 640px) { .door-prompt { bottom: auto; top: 30%; z-index: 30; } }
+
+/* ---- paid quest reroll */
+.q-v2 .modal-card, .modal-card.q-v2 { position: relative; }
+.q-reroll { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.q-rr-btn { min-height: 44px; padding: 0 16px; font-weight: 800; border-radius: 12px; background: linear-gradient(180deg, #7b5cff, #5a3fd6); color: #fff; border: 1px solid rgba(255,255,255,.25); }
+.q-rr-btn.poor { opacity: .6; }
+.q-reroll small { flex: 1 1 160px; font-size: 12px; }
+.q-rr-dlg { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: rgba(8, 10, 24, .62); border-radius: inherit; padding: 12px; }
+.q-rr-dlg.hidden { display: none; }
+.q-rr-card { width: min(340px, 100%); padding: 16px; border-radius: 16px; background: linear-gradient(180deg, #24284a, #171a33); border: 1px solid rgba(255, 210, 90, .55); box-shadow: 0 10px 30px rgba(0,0,0,.5); text-align: center; }
+.q-rr-card p { margin: 0 0 14px; font-size: 15px; line-height: 1.35; }
+.q-rr-row { display: flex; gap: 10px; }
+.q-rr-row .btn { flex: 1; min-height: 44px; font-weight: 800; }

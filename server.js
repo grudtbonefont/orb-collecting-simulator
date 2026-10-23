@@ -1339,6 +1339,22 @@ io.on('connection', socket => {
     a.stats.buys = (a.stats.buys || 0) + 1;
     ack({ ok: true, spent: cost, qty: q, profile: ownProfile(a) });
   });
+  // ---- paid quest reroll: shards removed atomically, then a fresh set (FX.rerollQuests)
+  socket.on('quest:reroll', async (which, ack) => {
+    ack = safeAck(ack);
+    if (!acct) return ack({ ok: false, error: 'Сначала войдите в аккаунт' });
+    if (which !== 'daily' && which !== 'weekly') return ack({ ok: false, error: 'Неизвестный тип заданий' });
+    if (!shardRateOk(Date.now())) return ack({ ok: false, error: 'Не так быстро! Подождите пару секунд.', code: 'rate' });
+    const a = acct.acc, cost = C.REROLL_COST[which], have = INV.countItem(a, G.SHARD_ID);
+    if (have < cost) return ack({ ok: false, error: `Не хватает осколков: нужно ${cost}, у вас ${have}`, code: 'shards' });
+    const r = INV.removeItem(a, G.SHARD_ID, cost, 'quest_reroll');
+    if (!r.ok) return ack({ ok: false, error: r.error || 'Не удалось списать осколки', code: 'shards' });
+    FX.rerollQuests(a, which);
+    accountChanged(a);
+    try { await flush(); } catch (_) { /* retried by the periodic flush */ }
+    if (pl) pl.questDirty = true;
+    ack({ ok: true, spent: cost, profile: ownProfile(a) });
+  });
   // ---- promo codes (lib/codes.js): once per account, global maxUses, atomic, 5 attempts / minute / account
   socket.on('code:redeem', async (input, ack) => {
     ack = safeAck(ack);

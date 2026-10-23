@@ -89,7 +89,28 @@
     { id: 'w_event', kind: 'event', goal: 5, text: 'Поучаствуйте в 5 событиях арены', rw: { orbs: 1200, shards: 3 } },
     { id: 'w_play', kind: 'play', goal: 180, text: 'Проведите на арене 3 часа', rw: { orbs: 1500, shards: 4 } },
   ];
-  const WEEKLY_BY_ID = Object.fromEntries(WEEKLY.map(q => [q.id, q]));
+  // extra weekly variants: only reachable through a paid reroll (the default weekly set stays WEEKLY)
+  const WEEKLY_ALT = [
+    { id: 'w_orbs2', kind: 'orbs', goal: 20000, text: 'Соберите 20 000 сфер', rw: { orbs: 1800, shards: 4 } },
+    { id: 'w_rare2', kind: 'rare', goal: 200, text: 'Соберите 200 редких (или ценнее) сфер', rw: { orbs: 1300, shards: 3 } },
+    { id: 'w_mg2', kind: 'mg', goal: 35, text: 'Сыграйте 35 мини-игр', rw: { orbs: 1300, shards: 3 } },
+    { id: 'w_event2', kind: 'event', goal: 8, text: 'Поучаствуйте в 8 событиях арены', rw: { orbs: 1500, shards: 4 } },
+    { id: 'w_play2', kind: 'play', goal: 240, text: 'Проведите на арене 4 часа', rw: { orbs: 1800, shards: 5 } },
+    { id: 'w_boss', kind: 'boss', goal: 5, text: 'Ударьте босса в 5 битвах', rw: { orbs: 1200, shards: 3 } },
+    { id: 'w_chest', kind: 'chest', goal: 6, text: 'Откройте 6 сундуков с замком', rw: { orbs: 1200, shards: 3 } },
+    { id: 'w_gold', kind: 'gold', goal: 60, text: 'Соберите 60 сфер «Золотого дождя»', rw: { orbs: 1000, shards: 2 } },
+  ];
+  const WEEKLY_POOL = WEEKLY.concat(WEEKLY_ALT);
+  const WEEKLY_BY_ID = Object.fromEntries(WEEKLY_POOL.map(q => [q.id, q]));
+  const REROLL_COST = { daily: 15, weekly: 105 }; // shards
+  // paid reroll of the weekly set: 5 quests, one per kind, preferring ids that are not in the current set
+  function rollWeekly(rnd = Math.random, exclude = new Set()) {
+    const sh = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+    const fresh = sh(WEEKLY_POOL.filter(q => !exclude.has(q.id))), old = sh(WEEKLY_POOL.filter(q => exclude.has(q.id)));
+    const out = [], kinds = new Set();
+    for (const q of fresh.concat(old)) { if (out.length >= WEEKLY.length) break; if (kinds.has(q.kind)) continue; kinds.add(q.kind); out.push({ id: q.id, p: 0, done: false }); }
+    return out;
+  }
   // kind = counter that grows (server: questProgress(acc, kind, n)); diff 1–3 scales the reward
   const QUESTS = [
     { id: 'orbs300', kind: 'orbs', goal: 300, diff: 1, text: 'Соберите 300 сфер' },
@@ -166,7 +187,7 @@
   }
 
   const api = { MINI, MINI_KEYS, ROOM, inRoom, ACH, ACH_BY_ID, ACH_CATS, CHAINS, CHAIN_BY_ID, achValue, itemsOwned, OLD_ACH, oldTier, tierReward, dayKey, resetIn, QUESTS, QUEST_BY_ID, BOOSTS, QUEST_REWARDS, ALL_DONE, allDoneBonus,
-    WEEKLY, WEEKLY_BY_ID, weekKey, weekResetIn, rollQuests, questItems, rewardText, boostMult, BOSS, bossHp, bossPenalty, bossReward };
+    WEEKLY, WEEKLY_ALT, WEEKLY_POOL, WEEKLY_BY_ID, REROLL_COST, rollWeekly, weekKey, weekResetIn, rollQuests, questItems, rewardText, boostMult, BOSS, bossHp, bossPenalty, bossReward };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.C = api;
 })(typeof window !== 'undefined' ? window : this);

@@ -2233,7 +2233,7 @@
     }
   }
   let questTab = 'daily';
-  document.querySelectorAll('#qTabs .tab').forEach(b => b.addEventListener('click', () => { questTab = b.dataset.qtab; renderQuests(); }));
+  document.querySelectorAll('#qTabs .tab').forEach(b => b.addEventListener('click', () => { questTab = b.dataset.qtab; $('qRrDlg').classList.add('hidden'); renderQuests(); }));
   const hms = ms => { const s = Math.max(0, Math.floor(ms / 1000)), d = Math.floor(s / 86400), p = x => String(x).padStart(2, '0'); return (d ? d + ' д ' : '') + `${p(Math.floor(s / 3600) % 24)}:${p(Math.floor(s / 60) % 60)}:${p(s % 60)}`; };
   function qTimer() { const t = document.querySelector('#qReset .qr-t'); if (!t) return; t.textContent = hms(questTab === 'weekly' ? C.weekResetIn(Date.now() + srvSkew) : C.resetIn(Date.now())); }
   setInterval(() => { if (!$('quests').classList.contains('hidden')) qTimer(); }, 1000);
@@ -2257,14 +2257,36 @@
   function renderWeekly() {
     const list = $('qList'), st = profile.stats || {}, wk = C.weekKey(Date.now() + srvSkew);
     const w = st.weekly && st.weekly.wk === wk ? st.weekly : { q: C.WEEKLY.map(q => ({ id: q.id, p: 0, done: false })) };
-    $('qStreak').textContent = `👑 ${w.q.filter(q => q.done).length}/${C.WEEKLY.length}`; $('qStreak').className = 'pill q-pill wk';
+    $('qStreak').textContent = `👑 ${w.q.filter(q => q.done).length}/${w.q.length}`; $('qStreak').className = 'pill q-pill wk';
     $('qReset').innerHTML = `<span class="qr-l">⏳ Сброс в понедельник 00:00 МСК</span><span class="qr-t"></span><small>5 больших заданий на неделю. Прогресс сохраняется.</small>`;
     $('qBonus').innerHTML = '';
     for (const q of w.q) { const def = C.WEEKLY_BY_ID[q.id]; if (def) list.appendChild(qCard(def, q, true, Object.assign({ potion: 1 }, def.rw))); }
     qTimer();
   }
+  function renderReroll() {
+    const cost = C.REROLL_COST[questTab], have = (profile && profile.shards) || 0;
+    $('qRerollBtn').textContent = `🎲 Сбросить за ${fmt(cost)} 💎`; $('qRerollBtn').classList.toggle('poor', have < cost);
+    $('qRerollHint').textContent = questTab === 'weekly' ? 'Новые 5 заданий недели, прогресс обнулится' : 'Новые 3 задания, прогресс обнулится; бонус дня не повторяется';
+  }
+  $('qRerollBtn').addEventListener('click', () => {
+    const cost = C.REROLL_COST[questTab], have = (profile && profile.shards) || 0;
+    if (have < cost) return toast(`Не хватает осколков: нужно ${fmt(cost)} 💎, у вас ${fmt(have)}`, 'err');
+    $('qRrText').textContent = `Сбросить ${questTab === 'weekly' ? 'еженедельные' : 'ежедневные'} задания за ${fmt(cost)} 💎? Текущий прогресс по ним пропадёт.`;
+    $('qRrDlg').dataset.which = questTab; $('qRrDlg').classList.remove('hidden');
+  });
+  $('qRrNo').addEventListener('click', () => $('qRrDlg').classList.add('hidden'));
+  $('qRrYes').addEventListener('click', () => {
+    const which = $('qRrDlg').dataset.which; $('qRrDlg').classList.add('hidden'); $('qRrYes').disabled = true;
+    socket.emit('quest:reroll', which, r => {
+      $('qRrYes').disabled = false;
+      if (!r || !r.ok) return toast((r && r.error) || 'Не удалось сбросить задания', 'err');
+      if (r.profile) setProfile(r.profile);
+      toast(`🎲 Задания обновлены (−${fmt(r.spent)} 💎)`, 'ok'); renderQuests();
+    });
+  });
   function renderQuests() {
     if (!profile) return;
+    renderReroll();
     document.querySelectorAll('#qTabs .tab').forEach(b => b.classList.toggle('active', b.dataset.qtab === questTab));
     $('quests').querySelector('.modal-card').classList.toggle('q-wk', questTab === 'weekly'); $('quests').querySelector('.modal-card').classList.add('q-v2');
     $('questsTitle').textContent = questTab === 'weekly' ? '🗓 Еженедельные задания' : '📜 Задания дня';
