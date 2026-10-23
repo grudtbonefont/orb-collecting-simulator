@@ -186,7 +186,15 @@
     return r;
   }
 
-  const api = { MINI, MINI_KEYS, ROOM, inRoom, ACH, ACH_BY_ID, ACH_CATS, CHAINS, CHAIN_BY_ID, achValue, itemsOwned, OLD_ACH, oldTier, tierReward, dayKey, resetIn, QUESTS, QUEST_BY_ID, BOOSTS, QUEST_REWARDS, ALL_DONE, allDoneBonus,
+  // daily rewards calendar: one claim per Moscow day (dayKey), 14-day cycle. Missed days do not reset progress:
+  // the next claim simply takes the next day of the cycle. Cosmetics already owned → `dup` shards instead.
+  const CALENDAR = [
+    { orbs: 50 }, { potions: ['p_speed'] }, { orbs: 100, shards: 1 }, { item: 'e_calendar', dup: 3 },
+    { orbs: 150, potions: ['p_orbs'] }, { shards: 3 }, { item: 'c_calendar', dup: 5, orbs: 200 },
+    { orbs: 250, potions: ['p_magnet'] }, { item: 'e_check', dup: 4 }, { shards: 4, potions: ['p_shard'] },
+    { orbs: 350 }, { potions: ['p_luck', 'p_orbs'] }, { orbs: 500, shards: 5 }, { item: 't_pages', dup: 10, shards: 5 },
+  ];
+  const api = { CALENDAR, MINI, MINI_KEYS, ROOM, inRoom, ACH, ACH_BY_ID, ACH_CATS, CHAINS, CHAIN_BY_ID, achValue, itemsOwned, OLD_ACH, oldTier, tierReward, dayKey, resetIn, QUESTS, QUEST_BY_ID, BOOSTS, QUEST_REWARDS, ALL_DONE, allDoneBonus,
     WEEKLY, WEEKLY_ALT, WEEKLY_POOL, WEEKLY_BY_ID, REROLL_COST, rollWeekly, weekKey, weekResetIn, rollQuests, questItems, rewardText, boostMult, BOSS, bossHp, bossPenalty, bossReward };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.C = api;

@@ -9,6 +9,7 @@ const G = require('./public/shared.js');
 const R = require('./public/rules.js');
 const { createStore } = require('./lib/storage');
 const INV = require('./lib/inventory');
+const DAILY = require('./lib/daily');
 const CODES = require('./lib/codes');
 const C = require('./public/content.js');
 const createFeatures = require('./lib/features');
@@ -1354,6 +1355,27 @@ io.on('connection', socket => {
     try { await flush(); } catch (_) { /* retried by the periodic flush */ }
     if (pl) pl.questDirty = true;
     ack({ ok: true, spent: cost, profile: ownProfile(a) });
+  });
+  // ---- daily rewards calendar (lib/daily.js): one claim per Moscow day, 14-day cycle; ≥ 1.5 s between attempts per socket
+  let calLast = 0;
+  socket.on('daily:get', ack => { ack = safeAck(ack); if (!acct) return ack({ ok: false, error: 'Сначала войдите в аккаунт' }); ack({ ok: true, state: DAILY.calState(acct.acc) }); });
+  socket.on('daily:claim', async ack => {
+    ack = safeAck(ack);
+    if (!acct) return ack({ ok: false, error: 'Сначала войдите в аккаунт' });
+    const now = Date.now();
+    if (now - calLast < 1500) return ack({ ok: false, error: 'Не так быстро! Подождите пару секунд.', code: 'rate' });
+    calLast = now;
+    const a = acct.acc;
+    if (a._calBusy) return ack({ ok: false, error: 'Подождите…', code: 'busy' });
+    a._calBusy = true;
+    try {
+      const r = DAILY.claimDaily(a, now);
+      if (!r.ok) return ack(r);
+      accountChanged(a);
+      try { await flush(); } catch (_) { /* retried by the periodic flush */ }
+      if (pl) pl.socket.emit('bal', { b: a.balance, t: a.total, s: pl.session });
+      ack({ ok: true, reward: r.reward, state: r.state, profile: ownProfile(a) });
+    } finally { a._calBusy = false; }
   });
   // ---- promo codes (lib/codes.js): once per account, global maxUses, atomic, 5 attempts / minute / account
   socket.on('code:redeem', async (input, ack) => {

@@ -75,6 +75,7 @@
     ocean: { stops: ['#7af0ff', '#2f8cff', '#4a5cff'], base: '#2f8cff' },
     neon: { stops: ['#39ff88', '#b6ffd6'], base: '#39ff88', fx: 'pulse' },
     glitch: { stops: ['#ff2fd6', '#ffffff', '#2ff3ff'], base: '#e8e8ff', fx: 'glitch' },
+    calendar: { stops: ['#ffffff', '#ff5a5a', '#ffd166'], base: '#ff7a6b' }, // daily rewards calendar (paper + red header + gold)
     // exclusives (shard shop)
     void: { stops: ['#05030c', '#1c0b3d', '#3a1478'], base: '#9b5cff', glow: '#9b5cff', fx: 'void' },
     prism: { stops: ['#ff9de2', '#9de8ff', '#c9ff9d', '#fff59d', '#c7a6ff'], base: '#c9e8ff', fx: 'prism' },
@@ -213,6 +214,11 @@
     // final achievement reward: only granted by the server when ALL achievement tiers are done (never sold)
     { id: 'h_trophy', type: 'cosmetic', cat: 'hat', name: 'Кубок', price: null, rarity: 'legendary', value: 'trophy', stackable: false, maxStack: 1, base: false, award: true,
       desc: 'Награда за все достижения. Не продаётся.', sources: ['achievement', 'admin'] },
+    // daily rewards calendar (never sold; source «Ежедневные награды»)
+    { id: 'c_calendar', type: 'cosmetic', cat: 'color', name: 'Календарный', price: null, rarity: 'rare', value: 'calendar', stackable: false, maxStack: 1, base: false, award: true, desc: 'Награда календаря ежедневных наград. Не продаётся.', sources: ['daily', 'admin'] },
+    { id: 't_pages', type: 'cosmetic', cat: 'trail', name: 'Листки календаря', price: null, rarity: 'legendary', value: 'pages', stackable: false, maxStack: 1, base: false, award: true, desc: 'Падающие листки календаря. Награда за 14-й день. Не продаётся.', sources: ['daily', 'admin'] },
+    { id: 'e_calendar', type: 'emote', cat: 'emote', name: 'Календарь', rarity: 'rare', icon: '📅', value: '📅', price: null, stackable: false, maxStack: 1, base: false, award: true, desc: 'Награда календаря ежедневных наград.', sources: ['daily', 'admin'] },
+    { id: 'e_check', type: 'emote', cat: 'emote', name: 'Отметка', rarity: 'epic', icon: '✅', value: '✅', price: null, stackable: false, maxStack: 1, base: false, award: true, desc: 'Награда календаря ежедневных наград.', sources: ['daily', 'admin'] },
     // beta-test reward: auto-granted (never sold, not in any shop)
     { id: 'h_beta', type: 'cosmetic', cat: 'hat', name: 'Бета-тест кепка', price: null, rarity: 'exclusive', value: 'betacap', stackable: false, maxStack: 1, base: false, award: true,
       desc: 'За участие в бета-тесте. Не продаётся.', sources: ['beta', 'admin'] },

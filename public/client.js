@@ -479,6 +479,7 @@
   function setProfile(p) {
     if (!p) return;
     profile = p;
+    updateCalDot();
     if (summary) { Object.assign(summary, p); summary.items = p.inventory.reduce((n, s) => n + s.q, 0); summary.slotsUsed = p.inventory.length; summary.used = p.used; }
     updateHud();
     if (!$('shop').classList.contains('hidden')) renderShop();
@@ -581,6 +582,7 @@
     if (e.code === 'KeyM') toggleModal('games');
     if (e.code === 'KeyL') toggleModal('lb');
     if (e.code === 'KeyQ') toggleModal('quests');
+    if (e.code === 'KeyK') toggleModal('cal');
     if (e.code === 'KeyJ') toggleModal('ach');
     if (e.code === 'KeyH') toggleOrbHelp();
     if (e.code === 'Space' && reactionState === 'go' || e.code === 'Space' && reactionState === 'wait') { e.preventDefault(); reactionClick(); }
@@ -1249,7 +1251,7 @@
   // tier: 0 common · 1 rare · 2 epic · 3 legendary · 4 shard-shop exclusive
   const TRAIL_THEME = { sparks: ['player', '#ffffff'], neon: ['player', '#ffffff'], fire: ['#ff8a2e', '#ffe08a'], smoke: ['#c4cce0', '#8a93b8'],
     bubbles: ['#9fe9ff', '#ffffff'], pixel: ['#3ee0ff', '#ff4d6d'], leaves: ['#7ed957', '#ffb347'], snow: ['#e8f6ff', '#9fd8ff'], hearts: ['#ff5fa2', '#ffd1e6'],
-    stars: ['#ffe066', '#fff6c2'], lightning: ['#7cc8ff', '#eaffff'], rainbow: ['rainbow', '#ffffff'], galaxy: ['#b46bff', '#7cc8ff'], comet: ['#ffcf5a', '#7cd8ff'], crystal: ['#9de8ff', '#ffb8f0'] };
+    stars: ['#ffe066', '#fff6c2'], lightning: ['#7cc8ff', '#eaffff'], rainbow: ['rainbow', '#ffffff'], galaxy: ['#b46bff', '#7cc8ff'], comet: ['#ffcf5a', '#7cd8ff'], crystal: ['#9de8ff', '#ffb8f0'], pages: ['#ffffff', '#ff5a5a'] };
   const TIER_OF = { common: 0, rare: 1, epic: 2, legendary: 3, exclusive: 3 };
   const TRAIL_LIFE = [650, 700, 800, 1000, 1150], TRAIL_PTS = [26, 28, 32, 40, 46]; // higher tiers keep a longer luminous tail
   const trailTier = id => { const d = G.ITEM_BY_ID[id]; return !d ? 0 : d.exclusive ? 4 : (TIER_OF[d.rarity] || 0); };
@@ -1449,6 +1451,20 @@
           const x = Math.round((p.x + (sd - 0.5) * 14) / 4) * 4, y = Math.round((p.y + (hash(sd, j) - 0.5) * 14) / 4) * 4;
           g.globalAlpha = k; g.fillStyle = pal[Math.floor(sd * 4) % 4]; g.fillRect(x - sz / 2, y - sz / 2, sz, sz);
         }
+      }
+    },
+    pages(g, pts, n, t, now) { // daily calendar: little paper sheets with a red header flutter down and sway
+      for (let i = 0; i < n; i += 3) {
+        const p = pts[i], k = ageK(p, now, 900); if (k <= 0) continue;
+        const f = 1 - k, sw = Math.sin(p.seed * 11 + f * 5);
+        g.save(); g.translate(p.x + sw * 9 + (p.seed - 0.5) * 10, p.y + f * 22); g.rotate((p.seed - 0.5) * 1.2 + sw * 0.6);
+        g.scale(1, 0.55 + 0.45 * Math.abs(Math.cos(p.seed * 7 + f * 6))); // flipping sheet
+        g.globalAlpha = Math.min(1, k * 1.4);
+        g.fillStyle = '#fdfcf7'; g.fillRect(-5, -6, 10, 12);
+        g.fillStyle = '#ff5a5a'; g.fillRect(-5, -6, 10, 3.5);
+        g.fillStyle = 'rgba(40,50,80,.55)'; g.fillRect(-3, -0.5, 6, 1.2); g.fillRect(-3, 2.5, 4, 1.2);
+        g.strokeStyle = 'rgba(0,0,0,.25)'; g.lineWidth = 0.7; g.strokeRect(-5, -6, 10, 12);
+        g.restore();
       }
     },
     leaves(g, pts, n, t, now) {
@@ -2310,6 +2326,46 @@
     $('qBonus').className = 'q-bonus' + (d.bonus ? ' got' : '');
     $('qBonus').innerHTML = d.bonus ? `🎉 Бонус за все задания получен! Серия: <b>${fmt(st.streak || 0)}</b> 🔥` : `🎁 Бонус за все 3: <b>${esc(C.rewardText(C.allDoneBonus(next)))}</b> <small>(растёт с серией)</small>`;
   }
+  // ------------------------------------------------------------ daily rewards calendar (server: lib/daily.js, C.CALENDAR)
+  const calInfo = () => { const c = (profile && profile.stats && profile.stats.cal) || {}, n = Math.max(0, c.n | 0), L = C.CALENDAR.length; return { n, idx: n % L, cycle: Math.floor(n / L), can: c.day !== C.dayKey(Date.now()) }; };
+  function updateCalDot() { const d = $('calDot'); if (d) d.classList.toggle('hidden', !(profile && calInfo().can)); }
+  function calRewardHtml(rw) {
+    const out = [];
+    if (rw.item) { const it = G.ITEM_BY_ID[rw.item]; const ow = profile && (profile.inventory || []).some(s => s.id === rw.item);
+      out.push(`<span class="cal-it rar-${it.rarity}" title="${esc(it.name)}"></span><b class="cal-nm" style="color:${G.RARITIES[it.rarity].color}">${esc(it.name)}</b>${ow ? `<small class="cal-dup">уже есть → ${shardsH(rw.dup)}</small>` : ''}`); }
+    if (rw.orbs) out.push(`<span class="cal-v">${orbsH(rw.orbs)}</span>`);
+    if (rw.shards) out.push(`<span class="cal-v">${shardsH(rw.shards)}</span>`);
+    for (const p of rw.potions || []) { const d = G.ITEM_BY_ID[p]; out.push(`<span class="cal-v" title="${esc(d.name)}">${d.icon} ${esc(d.name.replace('Зелье ', ''))}</span>`); }
+    return out.join('');
+  }
+  function renderCal() {
+    if (!profile) return;
+    const s = calInfo(), grid = $('calGrid'); grid.textContent = '';
+    $('calCycle').textContent = `Круг ${s.cycle + 1} · день ${s.idx + 1}/${C.CALENDAR.length}`;
+    C.CALENDAR.forEach((rw, i) => {
+      const st = i < s.idx ? 'got' : i === s.idx ? (s.can ? 'today' : 'next') : 'locked';
+      const el = document.createElement('div'); el.className = 'cal-day ' + st + (rw.item ? ' big' : ''); el.dataset.day = i + 1; if (st === 'next') el.title = 'Завтра';
+      el.innerHTML = `<div class="cal-n">День ${i + 1}</div><div class="cal-rw">${calRewardHtml(rw)}</div>${st === 'got' ? '<div class="cal-ok">✓</div>' : ''}`;
+      const sp = el.querySelector('.cal-it'); if (sp) sp.appendChild(iconEl(rw.item, 'sm'));
+      grid.appendChild(el);
+    });
+    const btn = $('calClaim'); btn.disabled = !s.can; btn.textContent = s.can ? `Забрать награду дня ${s.idx + 1}` : '✓ Сегодня получено';
+    calTick();
+  }
+  function calTick() { const el = $('calTimer'); if (!el || $('cal').classList.contains('hidden')) return; el.textContent = calInfo().can ? '' : `Следующая через ${fmtDur(C.resetIn(Date.now()))}`; }
+  setInterval(() => { calTick(); updateCalDot(); }, 1000);
+  $('calClaim').onclick = () => {
+    const btn = $('calClaim'); btn.disabled = true;
+    socket.emit('daily:claim', res => {
+      if (!res || !res.ok) { toast((res && res.error) || 'Ошибка', 'err'); renderCal(); return; }
+      setProfile(res.profile); renderCal();
+      const r = res.reward, parts = [];
+      if (r.item) parts.push('«' + G.ITEM_BY_ID[r.item].name + '»');
+      if (r.orbs) parts.push(orbsH(r.orbs)); if (r.shards) parts.push(shardsH(r.shards));
+      for (const p of (r.potions || []).concat(r.pending || [])) parts.push(G.ITEM_BY_ID[p].icon + ' ' + esc(G.ITEM_BY_ID[p].name));
+      toast('', 'ok', `📅 Награда дня ${r.day}: ${parts.join(', ')}${r.dup ? ' <small>(предмет уже был — выданы осколки)</small>' : ''}${r.pending ? ' <small>(зелья придут, когда освободится место)</small>' : ''}`);
+    });
+  };
   function updateBoostsHud() {
     const el = $('hudBoosts'), b = profile && profile.stats && profile.stats.boosts, now = Date.now();
     const on = b ? Object.keys(C.BOOSTS).filter(k => b[k] > now) : [];
@@ -2362,6 +2418,7 @@
     if (id === 'lb') loadLb();
     if (id === 'ach') renderAch();
     if (id === 'quests') renderQuests();
+    if (id === 'cal') renderCal();
     if (id === 'games') { if (!mgRunning) showGamesList(); updateGameButtons(); }
     updateHud();
   }
@@ -2570,7 +2627,7 @@
   }
   const owns = id => !!(profile && profile.inventory.some(s => s.id === id));
   const rarityOf = def => G.RARITIES[def.rarity] || G.RARITIES.common;
-  const SOURCE_NAMES = { shop: 'Магазин', minigame: 'Мини-игры', arena: 'Арена', event: 'Событие', admin: 'Подарок', legacy: 'Куплено раньше', shard_shop: 'Лавка осколков', beta: 'Бета-тест' };
+  const SOURCE_NAMES = { shop: 'Магазин', minigame: 'Мини-игры', arena: 'Арена', event: 'Событие', admin: 'Подарок', legacy: 'Куплено раньше', shard_shop: 'Лавка осколков', beta: 'Бета-тест', daily: 'Ежедневные награды' };
   function rarityTag(def) { const r = rarityOf(def); const el = document.createElement('div'); el.className = 'rar' + (def.rarity === 'exclusive' ? ' rar-ex' : ''); if (def.rarity !== 'exclusive') el.style.color = r.color; el.textContent = r.name; return el; }
 
   // ------------------------------------------------------------ shop (only sells; purchases go to the inventory)

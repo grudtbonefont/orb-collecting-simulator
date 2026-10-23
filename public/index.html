@@ -169,6 +169,7 @@
     <button type="button" id="doorBtn" class="door-btn btn primary hidden"></button>
   </div>
   <button type="button" id="admBtn" class="help-btn adm-btn hidden" title="Админ-панель" aria-label="Админ-панель">🛡️</button>
+  <button type="button" id="calBtn" class="help-btn cal-btn" data-open="cal" title="Ежедневные награды (K)" aria-label="Ежедневные награды"><svg viewBox="0 0 64 64" aria-hidden="true" focusable="false"><defs><linearGradient id="mbCp" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#e3e8f5"/></linearGradient><linearGradient id="mbCh" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff7a7a"/><stop offset="1" stop-color="#d42a3a"/></linearGradient></defs><rect x="8" y="12" width="48" height="44" rx="8" fill="url(#mbCp)"/><path d="M8 20a8 8 0 0 1 8-8h32a8 8 0 0 1 8 8v8H8z" fill="url(#mbCh)"/><rect x="18" y="6" width="6" height="13" rx="3" fill="#7a8199"/><rect x="40" y="6" width="6" height="13" rx="3" fill="#7a8199"/><path d="M14 17h36" stroke="#fff" stroke-opacity=".55" stroke-width="2" stroke-linecap="round"/><path d="M22 41l7 7 13-14" fill="none" stroke="#2fbf5a" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/></svg><i class="cal-dot hidden" id="calDot"></i></button>
   <button type="button" id="setBtn" class="help-btn set-btn" title="Настройки" aria-label="Настройки">⚙️</button>
   <button type="button" id="helpBtn" class="help-btn" title="Виды сфер (H)" aria-label="Виды сфер">?</button>
   <div id="orbHelp" class="orb-help hidden" role="dialog" aria-label="Виды сфер">
@@ -463,6 +464,14 @@
 </div>
 
 <!-- Daily quests -->
+<div id="cal" class="modal hidden">
+  <div class="modal-card cal-card">
+    <div class="modal-head"><h2>📅 Ежедневные награды</h2><div class="pill" id="calCycle"></div><button class="close" aria-label="Закрыть">✕</button></div>
+    <p class="muted note" id="calNote">Заходите каждый день и забирайте награду. Пропуск дня не сбрасывает прогресс — следующая награда просто ждёт вас.</p>
+    <div id="calGrid" class="cal-grid"></div>
+    <div class="cal-foot"><button type="button" class="btn primary" id="calClaim">Забрать награду</button><span class="muted" id="calTimer"></span></div>
+  </div>
+</div>
 <div id="quests" class="modal hidden">
   <div class="modal-card">
     <div class="modal-head"><h2 id="questsTitle">📜 Задания дня</h2><div class="pill" id="qStreak">🔥 0</div><button class="close" aria-label="Закрыть">✕</button></div>
