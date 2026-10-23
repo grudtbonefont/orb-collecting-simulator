@@ -1335,12 +1335,14 @@
     }
   }
   function sparkle(g, x, y, s) { g.beginPath(); g.moveTo(x, y - s); g.lineTo(x + s * 0.25, y - s * 0.25); g.lineTo(x + s, y); g.lineTo(x + s * 0.25, y + s * 0.25); g.lineTo(x, y + s); g.lineTo(x - s * 0.25, y + s * 0.25); g.lineTo(x - s, y); g.lineTo(x - s * 0.25, y - s * 0.25); g.closePath(); g.fill(); }
+  const NO_BASE = new Set(['leaves', 'pixel', 'snow', 'sparks', 'hearts']);
   function trailFx(g, pl, pts, n, t, now, kind, tier, lod, under) {
     const th = TRAIL_THEME[kind] || ['#9fe9ff', '#9fe9ff'];
     const c1 = th[0] === 'player' ? colorOf(pl.eq, t) : th[0] === 'rainbow' ? `hsl(${Math.floor(t * 140) % 360},100%,62%)` : th[0], c2 = th[1] === 'player' || th[1] === 'rainbow' ? c1 : th[1];
     const life = TRAIL_LIFE[tier], st = TRAIL_PTS[tier] > 40 ? 2 : 1;
     g.lineCap = 'round'; g.lineJoin = 'round';
     if (under) { // glow below the base trail
+      if (NO_BASE.has(kind)) return; // particle-only trails: no glow band under the path
       if (tier === 0) { glowPath(g, pts, n, c1, 6, 0.12, st); return; }
       g.globalCompositeOperation = 'lighter';
       const pulse = tier >= 3 ? 0.78 + 0.22 * Math.sin(t * 6 + (pl.id ? pl.id.length : 0)) : 1;
