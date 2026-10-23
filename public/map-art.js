@@ -156,7 +156,7 @@
       tree: { o: '#123a1c', rim: '#1f5f2c', base: '#2f7f3a', hi: '#4fa24e', dot: '#256b32' },
       rock: { o: '#57544c', rim: '#8f8c80', base: '#bdbaad', hi: '#e2e0d6' },
       stump: { o: '#3f2a1a', bark: '#7a5232', top: '#d2a56b', in: '#bf8f58' } };
-    const OW = 3;
+    let OW = 3; const OBW = 6; // obstacles get a 2x outline
     function hedgeMass(g, L, P) { P = P || PZ.hedge; const FP = P.fp == null ? 0.4 : P.fp; // merged cloud: all outlines, then rims, bases, highlights, flowers
       g.fillStyle = P.o; for (const p of L) { g.beginPath(); g.arc(p.x, p.y, p.r + OW, 0, 6.2832); g.fill(); }
       g.fillStyle = P.rim; for (const p of L) { g.beginPath(); g.arc(p.x, p.y, p.r, 0, 6.2832); g.fill(); }
@@ -181,7 +181,7 @@
     function boulder(g, cx, cy, rx, ry, seed) { // faceted low-poly cartoon rock: base rim, side facets shaded by facing, light top facet
       const R = rng(seed + 11), P = rockPts(cx, cy, rx, ry, seed), tx = cx - rx * 0.12 + (R() - 0.5) * rx * 0.1, ty = cy - ry * 0.18, k = 0.5 + R() * 0.12;
       const I = P.map(p => ({ x: tx + (p.x - cx) * k + (R() - 0.5) * rx * 0.08, y: ty + (p.y - cy) * k + (R() - 0.5) * ry * 0.08 }));
-      g.lineJoin = 'round'; poly(g, P.map(p => ({ x: p.x, y: p.y + 3 }))); g.fillStyle = '#5f5f63'; g.fill(); g.lineWidth = OW; g.strokeStyle = '#3c3c40'; g.stroke();
+      g.lineJoin = 'round'; poly(g, P.map(p => ({ x: p.x, y: p.y + 3 }))); g.fillStyle = '#5f5f63'; g.fill(); g.lineWidth = OW; g.strokeStyle = '#3a3d42'; g.stroke();
       poly(g, P); g.fillStyle = '#7d7d83'; g.fill();
       const sh = ['#5d5d63', '#6b6b71', '#7b7b81', '#8d8d93', '#a2a2a8', '#b5b5ba'];
       for (let i = 0; i < P.length; i++) { const A = P[i], B = P[(i + 1) % P.length], C = I[(i + 1) % P.length], D = I[i];
@@ -194,11 +194,11 @@
       poly(g, [I[(n / 2) | 0], I[((n / 2) | 0) + 1] || I[0], ci]); g.fillStyle = '#b0b0b6'; g.fill();
       g.strokeStyle = '#e4e4e8'; g.lineWidth = 2; g.lineCap = 'round'; g.beginPath();
       for (let i = 0; i < n; i++) { const A = I[i], B = I[(i + 1) % n], my = (A.y + B.y) / 2 - ty, mx = (A.x + B.x) / 2 - tx; if (my + mx * 0.6 < 0) { g.moveTo(A.x, A.y); g.lineTo(B.x, B.y); } } g.stroke();
-      poly(g, P); g.lineWidth = OW; g.strokeStyle = '#3c3c40'; g.stroke(); }
+      poly(g, P); g.lineWidth = OW; g.strokeStyle = '#3a3d42'; g.stroke(); }
     function tufts(g, x0, x1, y, seed) { return; const R = rng(seed), L = []; for (let x = x0 + 6; x < x1 - 4; x += 14 + R() * 18) L.push({ x, y: y - 2 + R() * 3, r: 6 + R() * 3, v: 1 }); hedgeMass(g, L); }
     function stump(g, x, y, r, seed) { // top-down oak log: dark bark rim with streaks, warm concentric rounded-square rings
       const R = rng((seed || 0) * 31 + r), sq = (k, c) => { rr(g, x - r * k, y - r * k, r * k * 2, r * k * 2, r * k * 0.6); g.fillStyle = c; g.fill(); };
-      rr(g, x - r - OW, y - r - OW, (r + OW) * 2, (r + OW) * 2, r * 0.5); g.fillStyle = '#2b1806'; g.fill();
+      rr(g, x - r - OW, y - r - OW, (r + OW) * 2, (r + OW) * 2, r * 0.5); g.fillStyle = '#3b2614'; g.fill();
       sq(1, '#4e2e10');
       g.save(); rr(g, x - r, y - r, r * 2, r * 2, r * 0.45); g.clip(); g.lineCap = 'round';
       for (let i = 0; i < 40; i++) { const a = R() * 6.2832, c = Math.cos(a), s = Math.sin(a), e = 1 / Math.max(Math.abs(c), Math.abs(s)), d0 = r * (0.8 + R() * 0.08) * Math.min(e, 1.3), d1 = r * 1.3;
@@ -215,7 +215,8 @@
       for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { const r = r0 * (0.9 + R() * 0.2), x = nx === 1 ? w / 2 : r0 * inset + (w - 2 * r0 * inset) * i / (nx - 1), y = ny === 1 ? h / 2 : r0 * inset + (h - 2 * r0 * inset) * j / (ny - 1);
         L.push({ x: x + (R() - 0.5) * r0 * 0.15, y: y + (R() - 0.5) * r0 * 0.15, r, v: R() }); }
       return L; }
-    function art(g, k, w, h) {
+    function art(g, k, w, h) { const o0 = OW; OW = OBW; try { art0(g, k, w, h); } finally { OW = o0; } }
+    function art0(g, k, w, h) {
       if (k === 'hedge') { g.fillStyle = PZ.hedge.rim; rr(g, 4, 4, w - 8, h - 8, 6); g.fill(); hedgeMass(g, fillRect2(w, h, 12, 24, w * 7 + h, 0.7)); }
       else if (k === 'trees') { g.fillStyle = PZ.hedge2.rim; rr(g, 4, 4, w - 8, h - 8, 6); g.fill(); hedgeMass(g, fillRect2(w, h, 12, 24, w * 7 + h, 0.7), PZ.hedge2); }
       else if (k === 'boulder') { boulder(g, w / 2, h / 2, w / 2, h / 2, w * 3 + h); tufts(g, w * 0.12, w * 0.88, h - 3, w + h * 5); } }
@@ -275,7 +276,7 @@
     const rockSpr = new Map();
     function rockObs(g, o, zone) { const r = Math.round(o.r), key = zone + ':' + r + ':' + (o.id % 5); let c = rockSpr.get(key);
       if (!c) { if (rockSpr.size > 200) rockSpr.clear(); const S = r * 2 + PAD * 2; c = document.createElement('canvas'); c.width = S * SS; c.height = S * SS; const q = c.getContext('2d'); q.scale(SS, SS); q.translate(S / 2, S / 2);
-        if (zone === 1) { boulder(q, 0, 0, r, r * 0.95, r * 7 + (o.id % 5)); tufts(q, -r * 0.7, r * 0.7, r * 0.9, r + (o.id % 5)); } else stump(q, 0, 0, r * 0.9, o.id % 5);
+        const o0 = OW; OW = OBW; if (zone === 1) { boulder(q, 0, 0, r, r * 0.95, r * 7 + (o.id % 5)); tufts(q, -r * 0.7, r * 0.7, r * 0.9, r + (o.id % 5)); } else stump(q, 0, 0, r * 0.9, o.id % 5); OW = o0;
         rockSpr.set(key, c); }
       const S = r * 2 + PAD * 2; g.drawImage(c, o.x - S / 2, o.y - S / 2, S, S); }
     function pylon(g, o, zone, armed, now) {
