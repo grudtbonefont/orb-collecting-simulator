@@ -1247,86 +1247,144 @@
   }
 
   // ---- trail rarity FX: every trail keeps its own renderer (identity); a tier layer on top adds glow / sparkles /
-  // particles / bursts by rarity. Plain strokes + arcs only (no shadows, no per-frame gradients or arrays).
+  // bursts by rarity. Performance: particles are the trail points themselves (pooled, interpolated along movement so
+  // there are no gaps at high speed), every soft/glowing shape is a pre-rendered cached sprite (shadowBlur only once,
+  // when a sprite is built), per-player and per-frame global particle budgets, off-screen trails are skipped by the caller.
   // tier: 0 common · 1 rare · 2 epic · 3 legendary · 4 shard-shop exclusive
   const TRAIL_THEME = { sparks: ['player', '#ffffff'], neon: ['player', '#ffffff'], fire: ['#ff8a2e', '#ffe08a'], smoke: ['#c4cce0', '#8a93b8'],
     bubbles: ['#9fe9ff', '#ffffff'], pixel: ['#3ee0ff', '#ff4d6d'], leaves: ['#7ed957', '#ffb347'], snow: ['#e8f6ff', '#9fd8ff'], hearts: ['#ff5fa2', '#ffd1e6'],
     stars: ['#ffe066', '#fff6c2'], lightning: ['#7cc8ff', '#eaffff'], rainbow: ['rainbow', '#ffffff'], galaxy: ['#b46bff', '#7cc8ff'], comet: ['#ffcf5a', '#7cd8ff'], crystal: ['#9de8ff', '#ffb8f0'], pages: ['#ffffff', '#ff5a5a'] };
   const TIER_OF = { common: 0, rare: 1, epic: 2, legendary: 3, exclusive: 3 };
-  const TRAIL_LIFE = [650, 700, 800, 1000, 1150], TRAIL_PTS = [26, 28, 32, 40, 46]; // higher tiers keep a longer luminous tail
+  const TRAIL_LIFE = [650, 700, 800, 1000, 1150], TRAIL_PTS = [34, 38, 44, 54, 60]; // higher tiers keep a longer luminous tail
+  const TRAIL_STEP = 6; // world px between emitted points (interpolated: fast movement leaves no gaps)
   const trailTier = id => { const d = G.ITEM_BY_ID[id]; return !d ? 0 : d.exclusive ? 4 : (TIER_OF[d.rarity] || 0); };
-  const FX_CAP = [0, 6, 20, 36, 50]; // max particles per player per frame (halved at reduced quality)
+  const FX_CAP = [0, 6, 18, 30, 40]; // tier-layer particles per player per frame (halved at reduced quality)
+  const BASE_CAP = [14, 24, 32]; // base-renderer particles per player per frame by fxLod
+  const GLOBAL_CAP = [260, 650, 1300]; // all trail particles on screen per frame by fxLod
   let fxLod = 2, fpsEma = 60, lastFrameAt = 0; // 2 full · 1 reduced · 0 glow only — set every frame from FPS, trails on screen, mobile
-  function glowPath(g, pts, n, color, width, alpha) { // tapered soft stroke in 4 alpha bands (4 draw calls)
-    g.strokeStyle = color;
+  let trailBudget = 1e9, trailLive = null; // live: drawing the main canvas (budgets apply); previews are never throttled
+  function trailFrame(lod) { trailBudget = GLOBAL_CAP[lod]; }
+  // pooled trail points
+  const TP_POOL = [];
+  function trailPoint(x, y, time) { const p = TP_POOL.pop() || { x: 0, y: 0, time: 0, seed: 0 }; p.x = x; p.y = y; p.time = time; p.seed = Math.random(); return p; }
+  function trailClear(pl) { for (const p of pl.trail) if (TP_POOL.length < 4000) TP_POOL.push(p); pl.trail.length = 0; }
+  function trailStep(pl, p, now) { // emit points every TRAIL_STEP px along the movement since the last point; trim by age / count
+    const L = pl.last, dx = p.x - L.x, dy = p.y - L.y, d = Math.hypot(dx, dy);
+    if (d > 260) { trailClear(pl); L.x = p.x; L.y = p.y; pl.lastT = now; } // teleport / respawn: no streak across the map
+    else if (d >= TRAIL_STEP) {
+      const steps = Math.min(10, Math.floor(d / TRAIL_STEP)), t0 = pl.lastT && now - pl.lastT < 250 ? pl.lastT : now - 16;
+      for (let i = 1; i <= steps; i++) { const f = i / steps; pl.trail.push(trailPoint(L.x + dx * f, L.y + dy * f, t0 + (now - t0) * f)); }
+      L.x = p.x; L.y = p.y; pl.lastT = now;
+    }
+    const tr = trailTier(pl.eq.trail), life = TRAIL_LIFE[tr], max = TRAIL_PTS[tr], tl = pl.trail;
+    let cut = 0; while (cut < tl.length && (now - tl[cut].time > life || tl.length - cut > max)) cut++;
+    if (cut) { for (let i = 0; i < cut; i++) if (TP_POOL.length < 4000) TP_POOL.push(tl[i]); tl.splice(0, cut); }
+  }
+  // cached sprites (built once per key; soft glows baked in)
+  const SPR = new Map();
+  function spr(key, size, draw) {
+    let c = SPR.get(key); if (c) return c;
+    c = document.createElement('canvas'); c.width = c.height = size; const g = c.getContext('2d'); g.translate(size / 2, size / 2); draw(g, size / 2);
+    if (SPR.size > 160) SPR.delete(SPR.keys().next().value); SPR.set(key, c); return c;
+  }
+  const glowSpr = col => spr('glow' + col, 32, (g, r) => { const gr = g.createRadialGradient(0, 0, 0, 0, 0, r); gr.addColorStop(0, col); gr.addColorStop(0.25, col); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(-r, -r, r * 2, r * 2); });
+  const softSpr = (key, stops) => spr(key, 48, (g, r) => { const gr = g.createRadialGradient(0, 0, 0, 0, 0, r); for (const [o, c] of stops) gr.addColorStop(o, c); g.fillStyle = gr; g.fillRect(-r, -r, r * 2, r * 2); });
+  const shapeSpr = (key, glow, fn) => { const c = spr(key, 64, g => { g.shadowColor = glow || 'transparent'; g.shadowBlur = glow ? 9 : 0; fn(g); }); c.k = 1.6; return c; }; // shape drawn in a ±20 box (+ glow margin)
+  const S = {
+    flameO: () => softSpr('flameO', [[0, 'rgba(255,190,60,0.95)'], [0.45, 'rgba(255,100,20,0.6)'], [1, 'rgba(200,20,0,0)']]),
+    flameY: () => softSpr('flameY', [[0, 'rgba(255,255,235,1)'], [0.35, 'rgba(255,225,110,0.85)'], [1, 'rgba(255,140,30,0)']]),
+    smoke: () => softSpr('smoke', [[0, 'rgba(206,214,232,0.75)'], [0.55, 'rgba(176,186,210,0.4)'], [1, 'rgba(150,160,190,0)']]),
+    nebula: c => softSpr('neb' + c, [[0, c], [1, 'rgba(0,0,0,0)']]),
+    bubble: () => shapeSpr('bubble', null, g => { g.fillStyle = 'rgba(159,233,255,0.16)'; g.beginPath(); g.arc(0, 0, 18, 0, 6.283); g.fill(); g.lineWidth = 2.6; g.strokeStyle = 'rgba(190,245,255,0.95)'; g.stroke();
+      g.strokeStyle = 'rgba(255,170,240,0.5)'; g.lineWidth = 1.6; g.beginPath(); g.arc(0, 0, 15, 0.6, 1.9); g.stroke();
+      g.fillStyle = '#fff'; g.beginPath(); g.ellipse(-7, -7, 4.5, 3, -0.7, 0, 6.283); g.fill(); g.beginPath(); g.arc(-1, -11, 1.6, 0, 6.283); g.fill(); }),
+    star: c => shapeSpr('star' + c, c, g => { g.fillStyle = c; g.beginPath(); starPath(g, 0, 0, 18, 0); g.fill(); g.shadowBlur = 0; g.fillStyle = 'rgba(255,255,255,0.75)'; g.beginPath(); starPath(g, -2, -3, 7, 0); g.fill(); }),
+    spark4: c => shapeSpr('sp4' + c, c, g => { g.fillStyle = c; sparkle(g, 0, 0, 19); g.fillStyle = '#fff'; sparkle(g, 0, 0, 8); }),
+    heart: c => shapeSpr('heart' + c, c, g => { g.fillStyle = c; g.beginPath(); heartPath(g, 0, 1, 15); g.fill(); g.shadowBlur = 0; g.lineWidth = 1.6; g.strokeStyle = 'rgba(120,0,50,0.35)'; g.stroke();
+      g.fillStyle = 'rgba(255,255,255,0.8)'; g.beginPath(); g.ellipse(-6, -5, 3.6, 2.2, -0.6, 0, 6.283); g.fill(); }),
+    flake: () => shapeSpr('flake', '#9fd8ff', g => { g.strokeStyle = '#fff'; g.lineCap = 'round'; g.lineWidth = 2.6; g.beginPath();
+      for (let a = 0; a < 6; a++) { const c = Math.cos(a * 1.0472), s = Math.sin(a * 1.0472); g.moveTo(0, 0); g.lineTo(c * 17, s * 17); g.moveTo(c * 10, s * 10); g.lineTo(c * 10 + Math.cos(a * 1.0472 + 0.7) * 5, s * 10 + Math.sin(a * 1.0472 + 0.7) * 5); g.moveTo(c * 10, s * 10); g.lineTo(c * 10 + Math.cos(a * 1.0472 - 0.7) * 5, s * 10 + Math.sin(a * 1.0472 - 0.7) * 5); }
+      g.stroke(); g.fillStyle = '#e8f6ff'; g.beginPath(); g.arc(0, 0, 3, 0, 6.283); g.fill(); }),
+    leaf: c => shapeSpr('leaf' + c, null, g => { g.fillStyle = c; g.beginPath(); g.moveTo(-17, 0); g.quadraticCurveTo(-4, -12, 17, 0); g.quadraticCurveTo(-4, 12, -17, 0); g.fill();
+      g.lineWidth = 1.6; g.strokeStyle = 'rgba(0,0,0,0.28)'; g.stroke(); g.beginPath(); g.moveTo(-15, 0); g.lineTo(14, 0); g.moveTo(-3, 0); g.lineTo(3, -5); g.moveTo(3, 0); g.lineTo(8, -4); g.moveTo(-3, 0); g.lineTo(3, 5); g.stroke();
+      g.fillStyle = 'rgba(255,255,255,0.3)'; g.beginPath(); g.ellipse(-3, -4, 6, 2, -0.2, 0, 6.283); g.fill(); }),
+    pix: c => shapeSpr('pix' + c, null, g => { g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(-14, -12, 30, 30); g.fillStyle = c; g.fillRect(-16, -16, 30, 30); g.fillStyle = 'rgba(255,255,255,0.45)'; g.fillRect(-16, -16, 30, 7); g.fillRect(-16, -16, 7, 30); }),
+    shard: c => shapeSpr('shard' + c, c, g => { g.fillStyle = c; g.beginPath(); g.moveTo(0, -20); g.lineTo(8, -3); g.lineTo(0, 20); g.lineTo(-8, -3); g.closePath(); g.fill(); g.shadowBlur = 0;
+      g.fillStyle = 'rgba(255,255,255,0.65)'; g.beginPath(); g.moveTo(0, -20); g.lineTo(8, -3); g.lineTo(0, 0); g.closePath(); g.fill(); g.strokeStyle = 'rgba(255,255,255,0.9)'; g.lineWidth = 1.4; g.beginPath(); g.moveTo(0, -20); g.lineTo(8, -3); g.lineTo(0, 20); g.lineTo(-8, -3); g.closePath(); g.stroke(); }),
+    page: () => shapeSpr('page', null, g => { g.fillStyle = 'rgba(0,0,0,0.25)'; g.fillRect(-12, -14, 26, 32); g.fillStyle = '#fdfcf7'; g.fillRect(-14, -16, 26, 32); g.fillStyle = '#ff5a5a'; g.fillRect(-14, -16, 26, 9);
+      g.fillStyle = '#fff'; g.fillRect(-9, -18, 3, 6); g.fillRect(3, -18, 3, 6); g.fillStyle = 'rgba(40,50,80,0.6)'; g.fillRect(-9, 0, 16, 2.5); g.fillRect(-9, 6, 11, 2.5);
+      g.strokeStyle = 'rgba(0,0,0,0.3)'; g.lineWidth = 1.2; g.strokeRect(-14, -16, 26, 32); }),
+    ember: () => softSpr('ember', [[0, 'rgba(255,255,220,1)'], [0.3, 'rgba(255,190,80,0.9)'], [1, 'rgba(255,90,0,0)']]),
+  };
+  // blit a sprite centred at (x, y) with world size s; optional rotation / non-uniform y-scale (flip)
+  function blit(g, img, x, y, s, a, rot, sy) {
+    if (a <= 0.01 || s <= 0.2) return; g.globalAlpha = a > 1 ? 1 : a; if (img.k) s *= img.k;
+    if (!rot && sy == null) { g.drawImage(img, x - s / 2, y - s / 2, s, s); return; }
+    let k = sy == null ? 1 : sy; if (k > -0.08 && k < 0.08) k = k < 0 ? -0.08 : 0.08; // edge-on sheet: keep a sliver
+    const c = Math.cos(rot || 0), sn = Math.sin(rot || 0), A = c, B = sn, Cc = -sn * k, D = c * k, det = A * D - B * Cc;
+    g.transform(A, B, Cc, D, x, y); g.drawImage(img, -s / 2, -s / 2, s, s);
+    g.transform(D / det, -B / det, -Cc / det, A / det, (Cc * y - D * x) / det, (B * x - A * y) / det);
+  }
+  function glowPath(g, pts, n, color, width, alpha, step) { // tapered soft stroke in 4 alpha bands (4 draw calls)
+    g.strokeStyle = color; step = step || 1;
     for (let c = 0; c < 4; c++) {
       const a = Math.floor(c * (n - 1) / 4), b = Math.floor((c + 1) * (n - 1) / 4); if (b <= a) continue;
       g.globalAlpha = alpha * (c + 1) / 4; g.lineWidth = width * (0.45 + 0.55 * (c + 1) / 4);
-      g.beginPath(); g.moveTo(pts[a].x, pts[a].y); for (let i = a + 1; i <= b; i++) g.lineTo(pts[i].x, pts[i].y); g.stroke();
+      g.beginPath(); g.moveTo(pts[a].x, pts[a].y); for (let i = a + step; i < b; i += step) g.lineTo(pts[i].x, pts[i].y); g.lineTo(pts[b].x, pts[b].y); g.stroke();
     }
   }
   function sparkle(g, x, y, s) { g.beginPath(); g.moveTo(x, y - s); g.lineTo(x + s * 0.25, y - s * 0.25); g.lineTo(x + s, y); g.lineTo(x + s * 0.25, y + s * 0.25); g.lineTo(x, y + s); g.lineTo(x - s * 0.25, y + s * 0.25); g.lineTo(x - s, y); g.lineTo(x - s * 0.25, y - s * 0.25); g.closePath(); g.fill(); }
   function trailFx(g, pl, pts, n, t, now, kind, tier, lod, under) {
     const th = TRAIL_THEME[kind] || ['#ffffff', '#ffffff'];
     const c1 = th[0] === 'player' ? colorOf(pl.eq, t) : th[0] === 'rainbow' ? `hsl(${Math.floor(t * 140) % 360},100%,62%)` : th[0], c2 = th[1];
-    const life = TRAIL_LIFE[tier];
+    const life = TRAIL_LIFE[tier], st = n > 30 ? 2 : 1;
     g.lineCap = 'round'; g.lineJoin = 'round';
     if (under) { // glow below the base trail
-      if (tier === 0) { glowPath(g, pts, n, c1, 6, 0.12); return; }
+      if (tier === 0) { glowPath(g, pts, n, c1, 6, 0.12, st); return; }
       g.globalCompositeOperation = 'lighter';
       const pulse = tier >= 3 ? 0.78 + 0.22 * Math.sin(t * 6 + (pl.id ? pl.id.length : 0)) : 1;
-      if (tier === 1) glowPath(g, pts, n, c1, 12, 0.22);
-      else if (tier === 2) { glowPath(g, pts, n, c1, 22, 0.13); glowPath(g, pts, n, c2, 9, 0.12 + 0.14 * (0.5 + 0.5 * Math.sin(t * 3))); } // shimmer: colour shifts c1 ↔ c2
-      else { glowPath(g, pts, n, c1, 34 * pulse, 0.12); glowPath(g, pts, n, c2, 15 * pulse, 0.2); glowPath(g, pts, n, '#ffffff', 4, 0.32); }
+      if (tier === 1) glowPath(g, pts, n, c1, 12, 0.2, st);
+      else if (tier === 2) { glowPath(g, pts, n, c1, 22, 0.12, st); glowPath(g, pts, n, c2, 9, 0.12 + 0.14 * (0.5 + 0.5 * Math.sin(t * 3)), st); } // shimmer: colour shifts c1 ↔ c2
+      else { glowPath(g, pts, n, c1, 34 * pulse, 0.11, st); glowPath(g, pts, n, c2, 15 * pulse, 0.18, st); if (lod) glowPath(g, pts, n, '#ffffff', 4, 0.3, st); }
       return;
     }
     if (tier === 0 || lod === 0) return;
     g.globalCompositeOperation = 'lighter';
     let budget = lod === 2 ? FX_CAP[tier] : FX_CAP[tier] >> 1;
-    // sparkles (rare+): twinkling 4-point stars near the path
-    const sStep = tier === 1 ? 4 : 3;
-    g.fillStyle = tier === 1 ? c2 : '#ffffff';
-    for (let i = n - 1; i >= 0 && budget > 0; i -= sStep) {
+    if (trailLive) { budget = Math.min(budget, trailBudget); trailBudget -= budget; }
+    const sp = S.spark4(tier === 1 ? c2 : '#ffffff'), sStep = (tier === 1 ? 5 : 4) * st;
+    for (let i = n - 1; i >= 0 && budget > 0; i -= sStep) { // twinkling 4-point sparkles near the path
       const p = pts[i], k = 1 - (now - p.time) / life; if (k <= 0) break;
       const tw = 0.5 + 0.5 * Math.sin(t * 9 + p.seed * 20);
-      g.globalAlpha = k * tw; sparkle(g, p.x + (p.seed - 0.5) * 22, p.y + (hash(p.seed, 5) - 0.5) * 22, 1.5 + tw * (tier >= 3 ? 4 : 2.6)); budget--;
+      blit(g, sp, p.x + (p.seed - 0.5) * 24, p.y + (hash(p.seed, 5) - 0.5) * 24, (4 + tw * (tier >= 3 ? 9 : 6)) * (0.6 + 0.4 * k), k * (0.35 + 0.65 * tw)); budget--;
     }
-    if (tier >= 2) { // drifting particles that fly off the path
-      for (let i = n - 1; i >= 0 && budget > 0; i -= 2) {
+    if (tier >= 2) { // drifting glow motes that fly off the path
+      const ga = glowSpr(c2 === '#ffffff' ? '#ffffff' : c2), gb = th[0] === 'player' || th[0] === 'rainbow' ? ga : glowSpr(c1);
+      for (let i = n - 1; i >= 0 && budget > 0; i -= 3 * st) {
         const p = pts[i], k = 1 - (now - p.time) / life; if (k <= 0) break;
         const a = p.seed * 6.283 + t * 1.5, d = (1 - k) * (tier >= 3 ? 30 : 20) + 3;
-        g.globalAlpha = k * 0.85; g.fillStyle = i & 2 ? c1 : c2;
-        g.beginPath(); g.arc(p.x + Math.cos(a) * d, p.y + Math.sin(a) * d, 1 + k * 2, 0, 6.283); g.fill(); budget--;
+        blit(g, i & 2 ? gb : ga, p.x + Math.cos(a) * d, p.y + Math.sin(a) * d, 5 + k * 6, k * 0.85); budget--;
       }
     }
-    if (tier >= 3) {
-      // swirl: two strands spiralling around the tail
-      for (let i = 1; i < n && budget > 1; i += 2) {
+    if (tier >= 3 && lod === 2) { // swirl: two strands spiralling around the tail
+      g.fillStyle = c2;
+      for (let i = st; i < n && budget > 1; i += 2 * st) {
         const p = pts[i], q = pts[i - 1], dx = p.x - q.x, dy = p.y - q.y, l = Math.hypot(dx, dy) || 1, f = i / n;
-        const off = Math.sin(i * 0.6 - t * 9) * (6 + 8 * f);
-        g.globalAlpha = 0.25 + 0.7 * f; g.fillStyle = c2;
-        g.beginPath(); g.arc(p.x - dy / l * off, p.y + dx / l * off, 1.2 + 1.6 * f, 0, 6.283); g.fill();
-        g.fillStyle = c1; g.beginPath(); g.arc(p.x + dy / l * off, p.y - dx / l * off, 1.2 + 1.6 * f, 0, 6.283); g.fill();
+        const off = Math.sin(i * 0.6 / st - t * 9) * (6 + 8 * f), r = 1.2 + 1.6 * f;
+        g.globalAlpha = 0.25 + 0.7 * f; g.fillStyle = c2; g.fillRect(p.x - dy / l * off - r, p.y + dx / l * off - r, r * 2, r * 2);
+        g.fillStyle = c1; g.fillRect(p.x + dy / l * off - r, p.y - dx / l * off - r, r * 2, r * 2);
         budget -= 2;
       }
-      // bursts from the head every 0.9 s
-      const h = pts[n - 1], u = (now % 900) / 900, rot = Math.floor(now / 900) * 0.7, m = lod === 2 ? 8 : 4;
-      g.fillStyle = c1;
-      for (let j = 0; j < m; j++) { const a = rot + j * 6.283 / m, r = 8 + u * 34; g.globalAlpha = (1 - u) * 0.9; g.beginPath(); g.arc(h.x + Math.cos(a) * r, h.y + Math.sin(a) * r, 0.8 + 2.4 * (1 - u), 0, 6.283); g.fill(); }
+    }
+    if (tier >= 3) { // bursts from the head every 0.9 s
+      const h = pts[n - 1], u = (now % 900) / 900, rot = Math.floor(now / 900) * 0.7, m = lod === 2 ? 8 : 4, gs = glowSpr(th[0] === 'player' || th[0] === 'rainbow' ? '#ffffff' : c1);
+      for (let j = 0; j < m; j++) { const a = rot + j * 6.283 / m, r = 8 + u * 34; blit(g, gs, h.x + Math.cos(a) * r, h.y + Math.sin(a) * r, 4 + 8 * (1 - u), (1 - u) * 0.9); }
     }
     if (tier === 4) { // shard-shop exclusives: unique signature effects
       const h = pts[n - 1], pu = 0.8 + 0.2 * Math.sin(t * 8);
-      if (kind === 'comet') { // blazing coma at the head + blue ion tail
-        g.fillStyle = '#ffcf5a'; g.globalAlpha = 0.14; g.beginPath(); g.arc(h.x, h.y, 30 * pu, 0, 6.283); g.fill();
-        g.fillStyle = '#fff1b8'; g.globalAlpha = 0.24; g.beginPath(); g.arc(h.x, h.y, 18 * pu, 0, 6.283); g.fill();
-        g.fillStyle = '#ffffff'; g.globalAlpha = 0.55; g.beginPath(); g.arc(h.x, h.y, 8 * pu, 0, 6.283); g.fill();
-        g.strokeStyle = '#7cd8ff'; g.lineWidth = 2.5;
-        for (let s2 = -1; s2 <= 1; s2 += 2) {
-          g.globalAlpha = 0.5; g.beginPath();
-          for (let i = 0; i < n; i++) { const p = pts[i], f = 1 - i / n, w = s2 * (4 + f * 16) + Math.sin(t * 5 + i * 0.4) * 3 * f; i ? g.lineTo(p.x + w * 0.7, p.y + w) : g.moveTo(p.x + w * 0.7, p.y + w); }
-          g.stroke();
-        }
-      } else if (kind === 'crystal') { // spinning prism halo + refracted rainbow glints along the tail
+      if (kind === 'comet') { // blazing coma at the head
+        blit(g, S.flameO(), h.x, h.y, 64 * pu, 0.5); blit(g, S.flameY(), h.x, h.y, 34 * pu, 0.85);
+      } else if (kind === 'crystal') { // spinning prism halo
         g.lineWidth = 2;
         for (let r = 0; r < 2; r++) {
           const rad = (r ? 24 : 15) * pu, rotH = t * (r ? -1.6 : 2.4);
@@ -1334,63 +1392,29 @@
           for (let j = 0; j <= 6; j++) { const a = rotH + j * 1.0472; j ? g.lineTo(h.x + Math.cos(a) * rad, h.y + Math.sin(a) * rad) : g.moveTo(h.x + Math.cos(a) * rad, h.y + Math.sin(a) * rad); }
           g.stroke();
         }
-        for (let i = n - 2; i >= 0 && budget > 0; i -= 3) {
-          const p = pts[i], k = 1 - (now - p.time) / life; if (k <= 0) break;
-          const a = p.seed * 6.283 + t * 2;
-          g.strokeStyle = `hsl(${(i * 37 + Math.floor(t * 160)) % 360},100%,72%)`; g.globalAlpha = k; g.lineWidth = 1.6;
-          g.beginPath(); g.moveTo(p.x - Math.cos(a) * 7 * k, p.y - Math.sin(a) * 7 * k); g.lineTo(p.x + Math.cos(a) * 7 * k, p.y + Math.sin(a) * 7 * k); g.stroke(); budget--;
-        }
-      } else { g.fillStyle = '#ffffff'; for (let j = 0; j < 6; j++) { const a = t * 3 + j * 1.047; g.globalAlpha = 0.6; sparkle(g, h.x + Math.cos(a) * 20, h.y + Math.sin(a) * 20, 3); } }
+      } else { const s4 = S.spark4('#ffffff'); for (let j = 0; j < 6; j++) { const a = t * 3 + j * 1.047; blit(g, s4, h.x + Math.cos(a) * 20, h.y + Math.sin(a) * 20, 9, 0.6); } }
     }
   }
   function drawTrail(g, pl, t, now) {
     const kind = itemVal(pl.eq.trail) || 'none';
     if (kind === 'none' || pl.trail.length < 2) return;
     const pts = pl.trail, n = pts.length, tier = trailTier(pl.eq.trail), lod = g === ctx ? fxLod : 2;
+    trailLive = g === ctx;
+    let cap = BASE_CAP[lod]; if (trailLive) { cap = Math.min(cap, Math.max(4, trailBudget)); trailBudget -= cap; }
     g.save();
     trailFx(g, pl, pts, n, t, now, kind, tier, lod, true);
     g.restore(); g.save();
-    if (kind === 'neon') {
-      const color = colorOf(pl.eq, t);
-      g.lineCap = 'round'; g.shadowColor = color; g.shadowBlur = 14; g.strokeStyle = color;
-      for (let i = 1; i < n; i++) {
-        const k = i / n;
-        g.globalAlpha = k * 0.75; g.lineWidth = 3 + k * 12;
-        g.beginPath(); g.moveTo(pts[i - 1].x, pts[i - 1].y); g.lineTo(pts[i].x, pts[i].y); g.stroke();
-      }
-    } else if (kind === 'sparks') {
-      g.globalCompositeOperation = 'lighter';
-      for (let i = 0; i < n; i++) {
-        const p = pts[i], age = (now - p.time) / 700, k = 1 - age;
-        if (k <= 0) continue;
-        for (let j = 0; j < 2; j++) {
-          const a = p.seed * 6.28 + j * 3.1, dist = (1 - k) * 22 + 4;
-          g.globalAlpha = k;
-          g.fillStyle = j ? '#ffffff' : colorOf(pl.eq, t + i * 0.05);
-          g.beginPath(); g.arc(p.x + Math.cos(a) * dist, p.y + Math.sin(a) * dist, 1.5 + k * 2.2, 0, Math.PI * 2); g.fill();
-        }
-      }
-    } else if (kind === 'fire') {
-      g.globalCompositeOperation = 'lighter';
-      for (let i = 0; i < n; i++) {
-        const p = pts[i], k = 1 - (now - p.time) / 650;
-        if (k <= 0) continue;
-        const rr = 4 + k * 13;
-        const grd = g.createRadialGradient(p.x, p.y - (1 - k) * 10, 0, p.x, p.y - (1 - k) * 10, rr);
-        grd.addColorStop(0, `rgba(255,240,150,${0.7 * k})`); grd.addColorStop(0.4, `rgba(255,140,30,${0.55 * k})`); grd.addColorStop(1, 'rgba(255,40,0,0)');
-        g.fillStyle = grd; g.beginPath(); g.arc(p.x, p.y - (1 - k) * 10, rr, 0, Math.PI * 2); g.fill();
-      }
-    } else if (TRAILS[kind]) {
-      TRAILS[kind](g, pts, n, t, now, pl);
-    }
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    if (TRAILS[kind]) TRAILS[kind](g, pts, n, t, now, pl, cap, Math.max(1, Math.ceil(n / cap)), lod);
     g.restore(); g.save();
     trailFx(g, pl, pts, n, t, now, kind, tier, lod, false);
     g.restore();
   }
-  // New trails: plain fills/strokes only (no per-point gradients or shadows) so dozens of players stay cheap, also on mobile.
-  // Every effect is deterministic from the point's own seed/age (no Math.random while drawing).
+  // Base renderers: (g, pts, n, t, now, pl, cap, stride, lod). Particles = every `stride`-th point newest→oldest, max `cap`.
+  // Everything is deterministic from the point's own seed/age (no Math.random while drawing).
   const ageK = (p, now, life = 650) => 1 - (now - p.time) / life;
   const hash = (a, b) => { const v = Math.sin(a * 12.9898 + b * 78.233) * 43758.5453; return v - Math.floor(v); };
+  const ease = k => k * k * (3 - 2 * k);
   function heartPath(g, x, y, s) {
     g.moveTo(x, y + s * 0.9); g.bezierCurveTo(x - s * 1.4, y, x - s * 0.8, y - s * 1.1, x, y - s * 0.35);
     g.bezierCurveTo(x + s * 0.8, y - s * 1.1, x + s * 1.4, y, x, y + s * 0.9);
@@ -1399,143 +1423,127 @@
     for (let i = 0; i < 10; i++) { const a = rot - Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? ro * 0.45 : ro; const px = x + Math.cos(a) * rr, py = y + Math.sin(a) * rr; i ? g.lineTo(px, py) : g.moveTo(px, py); }
     g.closePath();
   }
+  function taper(g, pts, n, w0, w1, wob, t, st) { // filled tapered ribbon (tail → head), one path
+    g.beginPath(); st = st || 1;
+    for (let pass = 0; pass < 2; pass++) {
+      for (let j = 0; j < n; j += st) {
+        const i = pass ? n - 1 - j : j, p = pts[i], q = pts[Math.max(0, i - 1)], r = pts[Math.min(n - 1, i + 1)];
+        let dx = r.x - q.x, dy = r.y - q.y; const l = Math.hypot(dx, dy) || 1; dx /= l; dy /= l;
+        const f = i / (n - 1), w = (w0 + (w1 - w0) * f * f) * (1 + (wob ? Math.sin(t * 11 + i * 0.7) * wob * (1 - f) : 0)), s = pass ? -1 : 1;
+        const x = p.x - dy * w * s, y = p.y + dx * w * s; (j || pass) ? g.lineTo(x, y) : g.moveTo(x, y);
+      }
+      if (!pass) { const p = pts[n - 1]; g.lineTo(p.x, p.y); }
+    }
+    g.closePath(); g.fill();
+  }
+  const each = (pts, n, cap, stride, fn) => { let c = 0; for (let i = n - 1; i >= 0 && c < cap; i -= stride, c++) fn(pts[i], i); };
   const TRAILS = {
-    comet(g, pts, n, t, now) { // exclusive: a thick tapered tail, white-hot at the head
-      g.lineCap = 'round';
-      for (let i = 1; i < n; i++) {
-        const k = i / n;
-        g.globalAlpha = 0.25 + k * 0.7; g.lineWidth = 2 + k * 14;
-        g.strokeStyle = k > 0.8 ? '#fff7d6' : k > 0.5 ? '#ffcf5a' : k > 0.25 ? '#ff8a2e' : '#ff4d3a';
-        g.beginPath(); g.moveTo(pts[i - 1].x, pts[i - 1].y); g.lineTo(pts[i].x, pts[i].y); g.stroke();
-      }
-      g.globalCompositeOperation = 'lighter'; g.fillStyle = '#ffe9a0';
-      for (let i = 0; i < n; i += 3) {
-        const p = pts[i], k = ageK(p, now); if (k <= 0) continue;
-        g.globalAlpha = k * 0.8; g.beginPath(); g.arc(p.x + (p.seed - 0.5) * 18, p.y + (hash(p.seed, 2) - 0.5) * 18, 1 + k * 1.6, 0, Math.PI * 2); g.fill();
-      }
+    smoke(g, pts, n, t, now, pl, cap, st) { // soft puffs that swell, rise and dissolve
+      const img = S.smoke();
+      each(pts, n, cap, st, p => { const k = ageK(p, now); if (k <= 0) return; const f = 1 - k;
+        blit(g, img, p.x + (p.seed - 0.5) * 8 + Math.sin(p.seed * 9 + f * 3) * 4, p.y - f * 14, 12 + f * 30 * (0.7 + p.seed * 0.6), 0.55 * ease(k)); });
     },
-    crystal(g, pts, n, t, now) { // exclusive: spinning crystal shards
-      const pal = ['#9de8ff', '#ffffff', '#c7a6ff', '#7cc8ff'];
-      for (let i = 0; i < n; i += 2) {
-        const p = pts[i], k = ageK(p, now, 750); if (k <= 0) continue;
-        const s = 2.5 + k * 4.5;
-        g.save(); g.translate(p.x + (p.seed - 0.5) * 12, p.y + (hash(p.seed, 3) - 0.5) * 12 + (1 - k) * 6); g.rotate(p.seed * 6.28 + t * 3);
-        g.globalAlpha = k; g.fillStyle = pal[Math.floor(p.seed * 4) % 4];
-        g.beginPath(); g.moveTo(0, -s * 1.5); g.lineTo(s * 0.6, 0); g.lineTo(0, s * 1.5); g.lineTo(-s * 0.6, 0); g.closePath(); g.fill();
-        g.globalAlpha = k * 0.7; g.strokeStyle = '#fff'; g.lineWidth = 0.8; g.stroke();
-        g.restore();
-      }
+    bubbles(g, pts, n, t, now, pl, cap, st) { // wobbling bubbles float up and pop
+      const img = S.bubble();
+      each(pts, n, cap, Math.max(2, st), p => { const k = ageK(p, now, 700); if (k <= 0) return; const f = 1 - k, pop = k < 0.12 ? 1 + (0.12 - k) * 6 : 1;
+        blit(g, img, p.x + Math.sin(p.seed * 6.28 + f * 6) * 7, p.y - f * 22, (6 + p.seed * 10) * (0.6 + 0.4 * Math.min(1, f * 4)) * pop, k < 0.12 ? k * 8 : 0.95); });
     },
-    smoke(g, pts, n, t, now) {
-      g.fillStyle = 'rgb(176,186,210)';
-      for (let i = 0; i < n; i++) {
-        const p = pts[i], k = ageK(p, now); if (k <= 0) continue;
-        g.globalAlpha = 0.26 * k; g.beginPath(); g.arc(p.x + (p.seed - 0.5) * 8, p.y - (1 - k) * 9, 5 + (1 - k) * 12, 0, Math.PI * 2); g.fill();
-      }
+    sparks(g, pts, n, t, now, pl, cap, st) { // player-coloured sparks shoot out as short streaks with a hot core
+      g.globalCompositeOperation = 'lighter'; const col = colorOf(pl.eq, t), gw = glowSpr('#ffffff');
+      g.strokeStyle = col; g.lineWidth = 2;
+      g.beginPath();
+      each(pts, n, cap >> 1, st, (p, i) => { const k = ageK(p, now, 700); if (k <= 0) return; for (let j = 0; j < 2; j++) { const a = p.seed * 6.28 + j * 3.1 + i * 0.3, d = (1 - k) * 26 + 4, x = p.x + Math.cos(a) * d, y = p.y + Math.sin(a) * d + (1 - k) * (1 - k) * 10, L = 3 + k * 5;
+        g.moveTo(x, y); g.lineTo(x - Math.cos(a) * L, y - Math.sin(a) * L); } });
+      g.globalAlpha = 0.9; g.stroke();
+      each(pts, n, cap >> 1, st, (p, i) => { const k = ageK(p, now, 700); if (k <= 0) return; const a = p.seed * 6.28 + i * 0.3, d = (1 - k) * 26 + 4;
+        blit(g, gw, p.x + Math.cos(a) * d, p.y + Math.sin(a) * d + (1 - k) * (1 - k) * 10, 5 + k * 7, k); });
     },
-    bubbles(g, pts, n, t, now) {
-      g.lineWidth = 1.5;
-      for (let i = 0; i < n; i += 2) {
-        const p = pts[i], k = ageK(p, now); if (k <= 0) continue;
-        const x = p.x + Math.sin(p.seed * 6.28 + (1 - k) * 5) * 6, y = p.y - (1 - k) * 16, rr = 2.5 + p.seed * 4.5;
-        g.globalAlpha = 0.9 * k; g.strokeStyle = '#9fe9ff'; g.beginPath(); g.arc(x, y, rr, 0, Math.PI * 2); g.stroke();
-        g.fillStyle = '#ffffff'; g.beginPath(); g.arc(x - rr * 0.35, y - rr * 0.35, Math.max(0.8, rr * 0.25), 0, Math.PI * 2); g.fill();
-      }
-    },
-    pixel(g, pts, n, t, now) {
+    pixel(g, pts, n, t, now, pl, cap, st) { // retro blocks snap to a grid, drop in steps and blink out
       const pal = ['#ff4d6d', '#ffd34d', '#3ee0ff', '#9dff4f'];
-      for (let i = 0; i < n; i++) {
-        const p = pts[i], k = ageK(p, now); if (k <= 0) continue;
-        for (let j = 0; j < 2; j++) {
-          const sd = (p.seed + j * 0.5) % 1, sz = 3 + Math.round(k * 3);
-          const x = Math.round((p.x + (sd - 0.5) * 14) / 4) * 4, y = Math.round((p.y + (hash(sd, j) - 0.5) * 14) / 4) * 4;
-          g.globalAlpha = k; g.fillStyle = pal[Math.floor(sd * 4) % 4]; g.fillRect(x - sz / 2, y - sz / 2, sz, sz);
-        }
+      each(pts, n, cap, st, p => { const k = ageK(p, now); if (k <= 0) return; const f = 1 - k;
+        const sz = 4 * Math.max(1, Math.round((1 + p.seed * 2) * (0.5 + k))), x = Math.round((p.x + (p.seed - 0.5) * 18) / 4) * 4, y = Math.round((p.y + (hash(p.seed, 1) - 0.5) * 18 + Math.floor(f * 4) * 4) / 4) * 4;
+        if (k < 0.3 && Math.floor(now / 70 + p.seed * 7) % 2) return; // blink out
+        blit(g, S.pix(pal[Math.floor(p.seed * 4) % 4]), x, y, sz * 1.1, 1); });
+    },
+    leaves(g, pts, n, t, now, pl, cap, st) { // tumbling leaves (flip + spin) drift down and sway
+      const pal = ['#7ed957', '#ffb347', '#e8743b', '#c9e25a'];
+      each(pts, n, cap, Math.max(2, st), p => { const k = ageK(p, now, 700); if (k <= 0) return; const f = 1 - k;
+        blit(g, S.leaf(pal[Math.floor(p.seed * 4) % 4]), p.x + Math.sin(p.seed * 9 + f * 5) * 10, p.y + f * 18, 12 + p.seed * 6, Math.min(1, k * 2), p.seed * 6.28 + f * 4 * (p.seed > 0.5 ? 1 : -1), Math.cos(p.seed * 11 + f * 9)); });
+    },
+    snow(g, pts, n, t, now, pl, cap, st) { // glowing flakes of varied size slowly spin and float down
+      const img = S.flake();
+      each(pts, n, cap, Math.max(2, st), p => { const k = ageK(p, now, 800); if (k <= 0) return; const f = 1 - k;
+        blit(g, img, p.x + Math.sin(p.seed * 6.28 + f * 4) * 8, p.y + f * 14, (6 + p.seed * 8) * (0.7 + 0.3 * k), Math.min(1, k * 1.6), p.seed * 3 + f * 1.5 * (p.seed - 0.5)); });
+    },
+    neon(g, pts, n, t, now, pl, cap, st) { // glowing tube in the player colour with a white-hot core (no shadowBlur)
+      const color = colorOf(pl.eq, t), s2 = n > 30 ? 2 : 1; g.globalCompositeOperation = 'lighter';
+      glowPath(g, pts, n, color, 26, 0.16, s2); glowPath(g, pts, n, color, 13, 0.5, s2); glowPath(g, pts, n, '#ffffff', 4, 0.9, s2);
+      const h = pts[n - 1]; blit(g, glowSpr(color), h.x, h.y, 26 + 4 * Math.sin(t * 8), 0.7);
+    },
+    hearts(g, pts, n, t, now, pl, cap, st) { // beating hearts float up and sway, two shades
+      each(pts, n, cap, Math.max(2, st), p => { const k = ageK(p, now, 750); if (k <= 0) return; const f = 1 - k, beat = 1 + 0.15 * Math.max(0, Math.sin(t * 9 + p.seed * 6));
+        blit(g, S.heart(p.seed < 0.5 ? '#ff5fa2' : '#ff8fc2'), p.x + (p.seed - 0.5) * 12 + Math.sin(f * 5 + p.seed * 9) * 5, p.y - f * 22, (8 + p.seed * 7) * beat * (0.5 + 0.5 * Math.min(1, f * 5)), Math.min(1, k * 1.8), (p.seed - 0.5) * 0.6 + Math.sin(f * 6) * 0.25); });
+    },
+    stars(g, pts, n, t, now, pl, cap, st) { // spinning golden stars that twinkle, plus a fine glitter dust
+      g.globalCompositeOperation = 'lighter'; const dust = glowSpr('#fff6c2');
+      each(pts, n, cap, Math.max(2, st), (p, i) => { const k = ageK(p, now, 800); if (k <= 0) return; const tw = 0.6 + 0.4 * Math.sin(t * 10 + p.seed * 30), big = p.seed > 0.85 ? 1.6 : 1;
+        blit(g, S.star(p.seed < 0.6 ? '#ffe066' : '#fff6c2'), p.x + (p.seed - 0.5) * 14, p.y + (hash(p.seed, 1) - 0.5) * 14 + (1 - k) * 6, (9 + k * 7) * tw * big, k, p.seed * 6 + t * 2.5 * (p.seed > 0.5 ? 1 : -1));
+        if (i & 1) blit(g, dust, p.x + (hash(p.seed, 7) - 0.5) * 26, p.y + (hash(p.seed, 8) - 0.5) * 26, 4, k * tw); });
+    },
+    lightning(g, pts, n, t, now, pl, cap, st) { // jagged bolt that re-forks ~14×/s, with branches and bright nodes
+      const q = Math.floor(now / 70), s2 = n > 30 ? 2 : 1; g.globalCompositeOperation = 'lighter';
+      const path = () => { g.beginPath(); for (let i = 0; i < n; i += s2) { const p = pts[i], prev = pts[Math.max(0, i - s2)], dx = p.x - prev.x, dy = p.y - prev.y, l = Math.hypot(dx, dy) || 1, off = (hash(i, q) - 0.5) * 16 * (i / n); const x = p.x - dy / l * off, y = p.y + dx / l * off; i ? g.lineTo(x, y) : g.moveTo(x, y); } };
+      g.globalAlpha = 0.22; g.strokeStyle = '#7cc8ff'; g.lineWidth = 12; path(); g.stroke();
+      g.globalAlpha = 0.55; g.lineWidth = 5; path(); g.stroke();
+      g.globalAlpha = 1; g.strokeStyle = '#eaffff'; g.lineWidth = 2; path(); g.stroke();
+      g.beginPath(); g.lineWidth = 1.4; g.strokeStyle = '#bfe6ff'; g.globalAlpha = 0.85;
+      for (let b = 0; b < 3; b++) { const i = Math.floor(hash(b, q) * (n - 2)) + 1, p = pts[i], a = hash(b + 5, q) * 6.283, L = 8 + hash(b + 9, q) * 14 * (i / n);
+        g.moveTo(p.x, p.y); g.lineTo(p.x + Math.cos(a) * L * 0.6 + 3, p.y + Math.sin(a) * L * 0.6 - 3); g.lineTo(p.x + Math.cos(a) * L, p.y + Math.sin(a) * L); }
+      g.stroke();
+      const gl = glowSpr('#bfe6ff'); blit(g, gl, pts[n - 1].x, pts[n - 1].y, 22 + 8 * hash(q, 3), 0.9);
+    },
+    fire(g, pts, n, t, now, pl, cap, st) { // flickering flame tongues (hot core + orange body) and rising embers
+      g.globalCompositeOperation = 'lighter'; const o = S.flameO(), y = S.flameY(), em = S.ember();
+      each(pts, n, cap, st, (p, i) => { const k = ageK(p, now, 700); if (k <= 0) return; const f = 1 - k, fl = 0.8 + 0.3 * Math.sin(t * 22 + p.seed * 40), x = p.x + Math.sin(p.seed * 9 + t * 7) * 3 * f, yy = p.y - f * 16;
+        blit(g, o, x, yy, (10 + k * 22) * fl, k * 0.9); if (k > 0.35) blit(g, y, x, yy + 2, (6 + k * 12) * fl, k);
+        if (i % 3 === 0) { const ef = (f * 1.4) % 1; blit(g, em, p.x + (hash(p.seed, 3) - 0.5) * 20 + Math.sin(t * 9 + p.seed * 20) * 3, p.y - ef * 34, 3 + 3 * (1 - ef), (1 - ef) * 0.95); } });
+    },
+    rainbow(g, pts, n, t, now, pl, cap, st) { // six-band ribbon that waves and flows, sparkly edges
+      const s2 = n > 30 ? 2 : 1, h0 = t * 120;
+      for (let b = 0; b < 6; b++) {
+        g.strokeStyle = `hsl(${(h0 + b * 50) % 360},100%,${62 + (b === 0 ? 8 : 0)}%)`; g.lineWidth = 3.2; g.beginPath();
+        for (let i = 0; i < n; i += s2) { const p = pts[i], q = pts[Math.max(0, i - 1)], r = pts[Math.min(n - 1, i + 1)]; let dx = r.x - q.x, dy = r.y - q.y; const l = Math.hypot(dx, dy) || 1, f = i / (n - 1);
+          const off = (b - 2.5) * 2.6 * (0.35 + 0.65 * f) + Math.sin(t * 6 - i * 0.25) * 3 * (1 - f); const x = p.x - dy / l * off, y = p.y + dx / l * off; i ? g.lineTo(x, y) : g.moveTo(x, y); }
+        g.globalAlpha = 0.85; g.stroke();
       }
     },
-    pages(g, pts, n, t, now) { // daily calendar: little paper sheets with a red header flutter down and sway
-      for (let i = 0; i < n; i += 3) {
-        const p = pts[i], k = ageK(p, now, 900); if (k <= 0) continue;
-        const f = 1 - k, sw = Math.sin(p.seed * 11 + f * 5);
-        g.save(); g.translate(p.x + sw * 9 + (p.seed - 0.5) * 10, p.y + f * 22); g.rotate((p.seed - 0.5) * 1.2 + sw * 0.6);
-        g.scale(1, 0.55 + 0.45 * Math.abs(Math.cos(p.seed * 7 + f * 6))); // flipping sheet
-        g.globalAlpha = Math.min(1, k * 1.4);
-        g.fillStyle = '#fdfcf7'; g.fillRect(-5, -6, 10, 12);
-        g.fillStyle = '#ff5a5a'; g.fillRect(-5, -6, 10, 3.5);
-        g.fillStyle = 'rgba(40,50,80,.55)'; g.fillRect(-3, -0.5, 6, 1.2); g.fillRect(-3, 2.5, 4, 1.2);
-        g.strokeStyle = 'rgba(0,0,0,.25)'; g.lineWidth = 0.7; g.strokeRect(-5, -6, 10, 12);
-        g.restore();
-      }
+    galaxy(g, pts, n, t, now, pl, cap, st) { // swirling cosmic dust in a faint nebula, with twinkling stars
+      const pal = ['#8a3cff', '#ff4fd8', '#3ee0ff', '#ffffff']; g.globalCompositeOperation = 'lighter';
+      each(pts, n, cap >> 2, st * 4, p => { const k = ageK(p, now, 1000); if (k <= 0) return; blit(g, S.nebula(p.seed < 0.5 ? 'rgba(138,60,255,0.5)' : 'rgba(255,79,216,0.4)'), p.x, p.y, 30 + (1 - k) * 20, k * 0.45); });
+      each(pts, n, cap, st, (p, i) => { const k = ageK(p, now, 1000); if (k <= 0) return; const sd = p.seed, d = (1 - k) * 22 + 3, a = sd * 20 + (1 - k) * 3;
+        blit(g, glowSpr(pal[Math.floor(sd * 4) % 4]), p.x + Math.cos(a) * d, p.y + Math.sin(a) * d, 4 + k * 6, k * (0.6 + 0.4 * Math.sin(t * 6 + sd * 9)));
+        if (i % 6 === 0) blit(g, S.spark4('#ffffff'), p.x, p.y, (4 + k * 7) * (0.6 + 0.4 * Math.sin(t * 8 + sd * 20)), k); });
     },
-    leaves(g, pts, n, t, now) {
-      const pal = ['#7ed957', '#ffb347', '#e8743b'];
-      for (let i = 0; i < n; i += 2) {
-        const p = pts[i], k = ageK(p, now); if (k <= 0) continue;
-        g.save(); g.translate(p.x + Math.sin(p.seed * 9 + (1 - k) * 4) * 7, p.y + (1 - k) * 14); g.rotate(p.seed * 6.28 + (1 - k) * 3);
-        g.globalAlpha = k; g.fillStyle = pal[Math.floor(p.seed * 3) % 3]; g.beginPath(); g.ellipse(0, 0, 5, 2.4, 0, 0, Math.PI * 2); g.fill();
-        g.strokeStyle = 'rgba(0,0,0,0.25)'; g.lineWidth = 0.8; g.beginPath(); g.moveTo(-4, 0); g.lineTo(4, 0); g.stroke();
-        g.restore();
-      }
+    comet(g, pts, n, t, now, pl, cap, st) { // exclusive: tapered fiery tail (red → orange → white-hot core), blue ion streak, debris
+      const s2 = n > 30 ? 2 : 1;
+      g.globalAlpha = 0.45; g.fillStyle = '#ff5a3a'; taper(g, pts, n, 1, 14, 0.25, t, s2);
+      g.globalAlpha = 0.7; g.fillStyle = '#ffb347'; taper(g, pts, n, 0.5, 9, 0.2, t, s2);
+      g.globalAlpha = 0.95; g.fillStyle = '#fff3c4'; taper(g, pts, n, 0, 4, 0, t, s2);
+      g.globalCompositeOperation = 'lighter'; g.strokeStyle = '#7cd8ff'; g.lineWidth = 1.6; g.globalAlpha = 0.5; g.beginPath();
+      for (let i = 0; i < n; i += s2) { const p = pts[i], f = 1 - i / n, w = 10 * f + Math.sin(t * 5 + i * 0.4) * 3 * f; i ? g.lineTo(p.x + w * 0.7, p.y - w) : g.moveTo(p.x + w * 0.7, p.y - w); }
+      g.stroke(); const em = S.ember();
+      each(pts, n, cap >> 1, st * 2, p => { const k = ageK(p, now, 900); if (k <= 0) return; blit(g, em, p.x + (p.seed - 0.5) * 22, p.y + (hash(p.seed, 2) - 0.5) * 22, 3 + k * 4, k); });
     },
-    snow(g, pts, n, t, now) {
-      g.strokeStyle = '#ffffff'; g.lineWidth = 1.3; g.lineCap = 'round';
-      for (let i = 0; i < n; i += 2) {
-        const p = pts[i], k = ageK(p, now, 800); if (k <= 0) continue;
-        const x = p.x + Math.sin(p.seed * 6.28 + (1 - k) * 4) * 6, y = p.y + (1 - k) * 12, rr = 2.5 + p.seed * 2;
-        g.globalAlpha = k; g.beginPath();
-        for (let a = 0; a < 3; a++) { const an = a * Math.PI / 3 + p.seed; g.moveTo(x - Math.cos(an) * rr, y - Math.sin(an) * rr); g.lineTo(x + Math.cos(an) * rr, y + Math.sin(an) * rr); }
-        g.stroke();
-      }
+    crystal(g, pts, n, t, now, pl, cap, st) { // exclusive: spinning prismatic shards with glints
+      const pal = ['#9de8ff', '#ffffff', '#c7a6ff', '#ffb8f0'];
+      each(pts, n, cap, Math.max(2, st), (p, i) => { const k = ageK(p, now, 900); if (k <= 0) return;
+        blit(g, S.shard(pal[Math.floor(p.seed * 4) % 4]), p.x + (p.seed - 0.5) * 14, p.y + (hash(p.seed, 3) - 0.5) * 14 + (1 - k) * 8, (7 + k * 9) * (0.7 + p.seed * 0.5), Math.min(1, k * 1.5), p.seed * 6.28 + t * 3 * (p.seed > 0.5 ? 1 : -1));
+        if (i % 3 === 0) { g.globalCompositeOperation = 'lighter'; blit(g, S.spark4('#e9fbff'), p.x + (hash(p.seed, 4) - 0.5) * 24, p.y + (hash(p.seed, 6) - 0.5) * 24, 8 * Math.max(0, Math.sin(t * 7 + p.seed * 25)), k); g.globalCompositeOperation = 'source-over'; } });
     },
-    hearts(g, pts, n, t, now) {
-      for (let i = 0; i < n; i += 2) {
-        const p = pts[i], k = ageK(p, now); if (k <= 0) continue;
-        g.globalAlpha = k; g.fillStyle = p.seed < 0.5 ? '#ff5fa2' : '#ff8fc2';
-        g.beginPath(); heartPath(g, p.x + (p.seed - 0.5) * 10, p.y - (1 - k) * 16, 3.5 + k * 3.5); g.fill();
-      }
-    },
-    stars(g, pts, n, t, now) {
-      g.globalCompositeOperation = 'lighter';
-      for (let i = 0; i < n; i += 2) {
-        const p = pts[i], k = ageK(p, now); if (k <= 0) continue;
-        g.globalAlpha = k; g.fillStyle = p.seed < 0.6 ? '#ffe066' : '#fff6c2';
-        g.beginPath(); starPath(g, p.x + (p.seed - 0.5) * 12, p.y + (hash(p.seed, 1) - 0.5) * 12, 3.5 + k * 4, p.seed * 6 + t * 2); g.fill();
-      }
-    },
-    lightning(g, pts, n, t, now) {
-      const q = Math.floor(now / 70); // re-jag ~14×/s
-      g.lineJoin = 'round'; g.lineCap = 'round';
-      const path = () => {
-        g.beginPath();
-        for (let i = 0; i < n; i++) {
-          const p = pts[i], prev = pts[Math.max(0, i - 1)], dx = p.x - prev.x, dy = p.y - prev.y, l = Math.hypot(dx, dy) || 1;
-          const off = (hash(i, q) - 0.5) * 12 * (i / n);
-          const x = p.x - dy / l * off, y = p.y + dx / l * off; i ? g.lineTo(x, y) : g.moveTo(x, y);
-        }
-      };
-      g.globalAlpha = 0.35; g.strokeStyle = '#7cc8ff'; g.lineWidth = 7; path(); g.stroke();
-      g.globalAlpha = 0.95; g.strokeStyle = '#eaffff'; g.lineWidth = 2; path(); g.stroke();
-    },
-    rainbow(g, pts, n, t, now) {
-      g.lineCap = 'round';
-      for (let i = 1; i < n; i++) {
-        const k = i / n;
-        g.globalAlpha = k * 0.85; g.lineWidth = 3 + k * 10; g.strokeStyle = `hsl(${(i * 24 + t * 140) % 360},100%,62%)`;
-        g.beginPath(); g.moveTo(pts[i - 1].x, pts[i - 1].y); g.lineTo(pts[i].x, pts[i].y); g.stroke();
-      }
-    },
-    galaxy(g, pts, n, t, now) {
-      const pal = ['#8a3cff', '#ff4fd8', '#3ee0ff', '#ffffff'];
-      g.globalCompositeOperation = 'lighter';
-      for (let i = 0; i < n; i++) {
-        const p = pts[i], k = ageK(p, now); if (k <= 0) continue;
-        for (let j = 0; j < 2; j++) {
-          const sd = (p.seed + j * 0.37) % 1, d = (1 - k) * 18 + 3, a = sd * 20;
-          g.globalAlpha = k * (0.6 + 0.4 * Math.sin(t * 6 + sd * 9)); g.fillStyle = pal[Math.floor(sd * 4) % 4];
-          g.beginPath(); g.arc(p.x + Math.cos(a) * d, p.y + Math.sin(a) * d, 1 + k * 2.2, 0, Math.PI * 2); g.fill();
-        }
-        if (i % 5 === 0) { g.globalAlpha = k; g.fillStyle = '#ffffff'; g.beginPath(); starPath(g, p.x, p.y, 2 + k * 3, t); g.fill(); }
-      }
+    pages(g, pts, n, t, now, pl, cap, st) { // daily calendar: sheets with a red header flutter, flip and spin as they fall
+      const img = S.page();
+      each(pts, n, cap >> 1, Math.max(3, st * 2), p => { const k = ageK(p, now, 1000); if (k <= 0) return; const f = 1 - k, sw = Math.sin(p.seed * 11 + f * 5);
+        blit(g, img, p.x + sw * 11 + (p.seed - 0.5) * 10, p.y + f * f * 30 + f * 6, 11 + p.seed * 4, Math.min(1, k * 1.6), (p.seed - 0.5) * 1.2 + sw * 0.7 + f * 2 * (p.seed - 0.5), Math.cos(p.seed * 7 + f * 7)); });
     },
   };
 
@@ -1583,9 +1591,7 @@
       const dx = p.x - pl.last.x, dy = p.y - pl.last.y, dd = Math.hypot(dx, dy);
       if (pl.id === myId) pl.dir = myDir;
       else if (dd > 0.5) pl.dir = { x: dx / dd, y: dy / dd };
-      if (dd > 5) { pl.trail.push({ x: p.x, y: p.y, time: now, seed: Math.random() }); pl.last = { x: p.x, y: p.y }; }
-      const tr = trailTier(pl.eq.trail), tLife = TRAIL_LIFE[tr], tMax = TRAIL_PTS[tr];
-      while (pl.trail.length && (now - pl.trail[0].time > tLife || pl.trail.length > tMax)) pl.trail.shift();
+      trailStep(pl, p, now);
       pl.pos = p;
     }
 
@@ -1645,6 +1651,7 @@
       if (pl.trailVis && (itemVal(pl.eq.trail) || 'none') !== 'none') onScreen++;
     }
     fxLod = onScreen > 22 || fpsEma < 30 ? 0 : onScreen > 10 || fpsEma < 45 || mobileUI() ? 1 : 2;
+    trailFrame(fxLod);
     drawFunUnder(ctx, t);
     drawPotions(ctx, t);
     for (const pl of players.values()) if (pl.trailVis && (pl.id === myId || !lastSnapIds || lastSnapIds.has(pl.id))) drawTrail(ctx, pl, t, now);
