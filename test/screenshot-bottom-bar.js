@@ -29,7 +29,9 @@ const CHROME = process.env.CHROME || ['/usr/bin/google-chrome', '/usr/bin/chromi
     const pad = 16, x = Math.max(0, bx.x - pad), y = Math.max(0, bx.y - pad);
     await vp.screenshot({ path: path.join(ROOT, n + '.png'), clip: { x, y, width: Math.min(vw - x, bx.width + pad * 2), height: bx.height + pad * 2 } });
     await vp.screenshot({ path: path.join(os.tmpdir(), 'ocs-' + n + '-full.png') });
-    await vp.click('.menu-buttons [data-open=shop]'); await sleep(300); ok(await vp.evaluate(() => !!document.querySelector('.modal:not(.hidden)')), n + ' shop opens');
+    await vp.click('.menu-buttons [data-open=shop]'); await sleep(300); ok(await vp.evaluate(() => !!document.querySelector('.modal:not(.hidden)')), n + ' shop opens'); await sleep(400); await vp.screenshot({ path: path.join(os.tmpdir(), 'ocs-' + n + '-shop.png') });
+    await vp.keyboard.press('Escape'); await sleep(200); await vp.evaluate(() => document.querySelector('.menu-buttons [data-open=ach]').click()); await sleep(600); await vp.screenshot({ path: path.join(os.tmpdir(), 'ocs-' + n + '-ach.png') }); await vp.keyboard.press('Escape'); await sleep(200);
+    if (!/mobile/.test(n)) await vp.screenshot({ path: path.join(ROOT, 'screenshot-hud-full.png') });
   }
   ok(!errors.length, 'no page errors ' + errors.slice(0, 2).join('|'));
   await browser.close(); process.exit(fails ? 1 : 0);
