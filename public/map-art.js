@@ -26,8 +26,13 @@
       const key = cx + ',' + cy; let f = featCache.get(key); if (f) return f;
       const r = rng(hash(cx, cy, 11)), x0 = cx * CH, y0 = cy * CH, L = [];
       const add = (k, n, extra) => { for (let i = 0; i < n; i++) { const x = x0 + r() * CH, y = y0 + r() * CH; L.push(Object.assign({ k, x, y, z: zoneOf(x), s: r(), a: r() * 6.283, v: r() }, extra ? extra(r) : null)); } };
-      add('rock', 1); add('tuft', 6); add('flower', 4); // meadow (zone 1)
-      add('stump', 1); add('fern', 3); add('leaf', 5); if (r() < 0.35) add('mush', 1); // forest (zone 2)
+      if (r() < 0.5) add('rock', 1); add('tuft', 3); add('flower', 2); // meadow (zone 1)
+      if (r() < 0.5) add('stump', 1); add('fern', 1 + (r() < 0.5 ? 1 : 0)); add('leaf', 3); if (r() < 0.18) add('mush', 1); // forest (zone 2)
+      // sparse decor hugging the inner side of the walls (border + both faces of the door wall)
+      const edge = (x, y) => { const z = zoneOf(x), k = r() < 0.5 ? 'tuft' : (z === 1 ? (r() < 0.6 ? 'flower' : 'rock') : (r() < 0.5 ? 'fern' : 'leaf')); L.push({ k, x, y, z, s: r(), a: r() * 6.283, v: r() }); };
+      for (let t = 0; t < CH; t += 90) { if (r() > 0.55) continue; const j = 30 + r() * 30, u = t + r() * 60;
+        if (cy === 0) edge(x0 + u, j); if (y0 + CH >= WH && y0 < WH) edge(x0 + u, WH - j); if (cx === 0) edge(j, y0 + u); if (x0 + CH >= WW && x0 < WW) edge(WW - j, y0 + u);
+        if (x0 <= Z && x0 + CH > Z) { edge(Z - 30 - j, y0 + u); edge(Z + 30 + j, y0 + t + r() * 60); } }
       f = L.filter(d => d.x > 0 && d.x < WW && d.y > 0 && d.y < WH);
       if (featCache.size > 600) featCache.clear(); featCache.set(key, f); return f;
     }
@@ -56,9 +61,8 @@
             g.fillStyle = c; g.beginPath(); g.arc(d.x + ox * rr, d.y + oy * rr, rr * k, 0, 6.283); g.fill(); }
           g.fillStyle = 'rgba(255,255,255,.08)'; g.beginPath(); g.arc(d.x - rr * 0.3, d.y - rr * 0.45, rr * 0.3, 0, 6.283); g.fill(); break; }
         case 'stump': { const rr = 9 + s * 6; 
-          g.fillStyle = '#6b4a2b'; g.beginPath(); g.arc(d.x, d.y, rr, 0, 6.283); g.fill(); g.fillStyle = '#c79b62'; g.beginPath(); g.arc(d.x, d.y, rr * 0.78, 0, 6.283); g.fill();
-          g.strokeStyle = 'rgba(110,70,35,.6)'; g.lineWidth = 1; for (const k of [0.55, 0.32]) { g.beginPath(); g.arc(d.x, d.y, rr * k, 0, 6.283); g.stroke(); }
-          g.fillStyle = 'rgba(80,150,60,.7)'; g.beginPath(); g.arc(d.x + rr * 0.7, d.y - rr * 0.5, rr * 0.35, 0, 6.283); g.fill(); break; }
+          g.fillStyle = '#5a4430'; g.beginPath(); g.arc(d.x, d.y, rr, 0, 6.283); g.fill(); g.fillStyle = '#8a6a45'; g.beginPath(); g.arc(d.x, d.y, rr * 0.72, 0, 6.283); g.fill();
+          break; }
         case 'mush': if (lod < 0.5) break; { const c = 3 + s * 3; g.fillStyle = '#efe6cf'; g.fillRect(d.x - c * 0.25, d.y - c * 0.2, c * 0.5, c * 0.9);
           g.fillStyle = d.v > 0.5 ? '#c2563e' : '#a87a4c'; g.beginPath(); g.ellipse(d.x, d.y - c * 0.2, c, c * 0.6, 0, Math.PI, 0); g.closePath(); g.fill(); break; }
         case 'canopy': { const rr = 70 + s * 40; // top-down tree crown in the ground layer (always under entities), translucent
@@ -73,7 +77,7 @@
       const p = P[zone], x0 = cx * CH, y0 = cy * CH;
       g.fillStyle = p.base; g.fillRect(x0, y0, CH, CH);
       const near = []; for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (const d of feats(cx + i, cy + j)) if (d.z === zone && d.x + R[d.k] > x0 && d.x - R[d.k] < x0 + CH && d.y + R[d.k] > y0 && d.y - R[d.k] < y0 + CH) near.push(d);
-      for (const d of near) if (d.k === 'blob') { const rr = 90 + d.s * 80, gr = g.createRadialGradient(d.x, d.y, 0, d.x, d.y, rr); const c = d.v > 0.5 ? p.lite : p.dark; g.globalAlpha = 0.5; gr.addColorStop(0, c); gr.addColorStop(1, c + '00'); g.fillStyle = gr; g.fillRect(d.x - rr, d.y - rr, rr * 2, rr * 2); g.globalAlpha = 1; }
+      for (const d of near) if (d.k === 'blob') { const rr = 90 + d.s * 80, gr = g.createRadialGradient(d.x, d.y, 0, d.x, d.y, rr); const c = p.lite; g.globalAlpha = 0.5; gr.addColorStop(0, c); gr.addColorStop(1, c + '00'); g.fillStyle = gr; g.fillRect(d.x - rr, d.y - rr, rr * 2, rr * 2); g.globalAlpha = 1; }
       for (const d of near) if (d.k === 'patch') { const rr = 60 + d.s * 80; g.fillStyle = d.v > 0.5 ? p.patchA : p.patchB; g.globalAlpha = 0.22;
         const pts = []; for (let i = 0; i < 10; i++) { const a = i / 10 * 6.283, q = rr * (0.78 + 0.22 * Math.sin(d.a * 5 + i * 2.1)); pts.push([d.x + Math.cos(a) * q, d.y + Math.sin(a) * q * 0.75]); }
         g.beginPath(); for (let i = 0; i <= 10; i++) { const A = pts[i % 10], B = pts[(i + 1) % 10], mx = (A[0] + B[0]) / 2, my = (A[1] + B[1]) / 2; i ? g.quadraticCurveTo(A[0], A[1], mx, my) : g.moveTo(mx, my); } g.closePath(); g.fill(); g.globalAlpha = 1; }
@@ -82,7 +86,7 @@
       for (let i = 0; i < n; i++) { g.fillStyle = p.grain[(r() * 3) | 0]; g.globalAlpha = 0.08 + r() * 0.1; const sz = 1 + r() * 1.8; g.fillRect(x0 + r() * CH, y0 + r() * CH, sz, sz * (0.5 + r())); }
       g.globalAlpha = 1;
       // paths
-      for (const pa of PATHS) { if (pa[0] !== zone || !pa[1] || pa[2] > 0.7 || pa[2] < 0.3) continue; const s0 = pa[1] ? x0 - 80 : y0 - 80, s1 = pa[1] ? x0 + CH + 80 : y0 + CH + 80;
+      for (const pa of []) { if (pa[0] !== zone || !pa[1] || pa[2] > 0.7 || pa[2] < 0.3) continue; const s0 = pa[1] ? x0 - 80 : y0 - 80, s1 = pa[1] ? x0 + CH + 80 : y0 + CH + 80;
         const pts = []; for (let s = Math.floor(s0 / 24) * 24; s <= s1; s += 24) pts.push(pathPt(pa, s));
         const vis = pts.some(([x, y]) => x > x0 - 80 && x < x0 + CH + 80 && y > y0 - 80 && y < y0 + CH + 80); if (!vis) continue;
         g.lineCap = 'round'; g.lineJoin = 'round';
@@ -164,20 +168,21 @@
         for (let i = 0; i < n; i++) { const px = 2 + (L - 4 - pw) * i / (n - 1); g.beginPath(); g.moveTo(px, T * 0.14 + pw * 0.4); g.lineTo(px + pw / 2, T * 0.06); g.lineTo(px + pw, T * 0.14 + pw * 0.4); g.lineTo(px + pw, T * 0.94 - 3); g.arcTo(px + pw, T * 0.94, px, T * 0.94, 3); g.arcTo(px, T * 0.94, px, 0, 3); g.closePath();
           g.fillStyle = '#fbf8f0'; g.fill(); g.fillStyle = 'rgba(0,0,0,.08)'; g.fillRect(px + pw * 0.62, T * 0.2, pw * 0.38 - 1, T * 0.7); g.strokeStyle = '#8a8170'; g.lineWidth = 2; g.stroke(); }
         g.restore(); }
-      else if (k === 'ridge' || k === 'stone' || k === 'mossy') { const R = rng(w * 31 + h + (k === 'ridge' ? 0 : 7)), pts = [], n = Math.max(12, Math.round((w + h) / 12)), rx = w / 2, ry = h / 2, cx = w / 2, cy = h / 2, S = k === 'ridge' ? WS[2] : (k === 'mossy' ? { f: '#aeae9e', l: '#7c7a72' } : WS[1]);
+      else if (k === 'ridge' || k === 'stone' || k === 'mossy') { const R = rng(w * 31 + h + (k === 'ridge' ? 0 : 7)), pts = [], n = Math.max(12, Math.round((w + h) / 12)), rx = w / 2, ry = h / 2, cx = w / 2, cy = h / 2, S = k === 'stone' ? WS[1] : WS[2];
         for (let i = 0; i < n; i++) { const a = i / n * 6.2832, c = Math.cos(a), s = Math.sin(a), q = 1 / Math.pow(Math.pow(Math.abs(c), 6) + Math.pow(Math.abs(s), 6), 1 / 6), j = 1 - R() * Math.min(0.14, 7 / Math.min(w, h));
           pts.push({ x: cx + c * q * (rx - 1) * j, y: cy + s * q * (ry - 1) * j }); }
         const path = () => { g.beginPath(); smoothPath(g, pts, true); };
         path(); g.fillStyle = S.f; g.fill(); g.save(); path(); g.clip();
-        if (k === 'ridge') { g.strokeStyle = 'rgba(176,140,96,.4)'; g.lineWidth = 1.6; g.beginPath(); const along = w >= h; for (let i = 0; i < Math.max(2, (along ? h : w) / 9); i++) { const o = 6 + R() * ((along ? h : w) - 12), st = R() * (along ? w : h) * 0.5, L = (along ? w : h) * (0.25 + R() * 0.4); along ? (g.moveTo(st, o), g.lineTo(st + L, o + 1)) : (g.moveTo(o, st), g.lineTo(o + 1, st + L)); } g.stroke(); }
+        if (k !== 'stone') { g.strokeStyle = 'rgba(176,140,96,.4)'; g.lineWidth = 1.6; g.beginPath(); const along = w >= h; for (let i = 0; i < Math.max(2, (along ? h : w) / 9); i++) { const o = 6 + R() * ((along ? h : w) - 12), st = R() * (along ? w : h) * 0.5, L = (along ? w : h) * (0.25 + R() * 0.4); along ? (g.moveTo(st, o), g.lineTo(st + L, o + 1)) : (g.moveTo(o, st), g.lineTo(o + 1, st + L)); } g.stroke(); }
         else { const gr = g.createRadialGradient(w * 0.3, h * 0.7, 0, w * 0.3, h * 0.7, Math.max(w, h) * 0.6); gr.addColorStop(0, 'rgba(158,160,138,.6)'); gr.addColorStop(1, 'rgba(158,160,138,0)'); g.fillStyle = gr; g.fillRect(0, 0, w, h); }
+        g.strokeStyle = 'rgba(255,255,255,.13)'; g.lineWidth = Math.max(6, Math.min(w, h) * 0.3); g.beginPath(); g.moveTo(Math.min(w, h) * 0.45, Math.min(w, h) * 0.45); w >= h ? g.lineTo(w * 0.55, Math.min(w, h) * 0.45) : g.lineTo(Math.min(w, h) * 0.45, h * 0.5); g.lineCap = 'round'; g.stroke();
         const lw = Math.max(3, Math.min(8, Math.min(w, h) * 0.12)); path(); g.strokeStyle = S.l; g.lineWidth = lw * 2; g.stroke(); g.restore(); }
     }
     const sprites = new Map(); let spriteN = 0; const SS = 2, PAD = 12;
     function sprite(k, w, h) { const key = k + w + 'x' + h; let c = sprites.get(key); if (c) return c;
       if (sprites.size > 300) sprites.clear();
       c = document.createElement('canvas'); c.width = (w + PAD * 2) * SS; c.height = (h + PAD * 2) * SS; const g = c.getContext('2d'); g.scale(SS, SS); g.translate(PAD, PAD);
-      rr(g, 2, 5, w, h, Math.min(w, h) / 2.2); g.fillStyle = 'rgba(20,40,10,.2)'; g.fill(); // soft contact shadow
+      
       skin(g, k, w, h); sprites.set(key, c); spriteN++; return c; }
     const blit = (g, k, x, y, w, h) => g.drawImage(sprite(k, w, h), x - PAD, y - PAD, w + PAD * 2, h + PAD * 2);
     // ---------------------------------------------------------------- organic walls: one continuous wobbly band, baked into overlapping chunks (no seams)
@@ -219,21 +224,22 @@
     const WS = { 1: { f: '#b9b8a8', f2: '#9ea08a', l: '#87857d' }, 2: { f: '#8a6a45', f2: '#9a7a52', l: '#5a4430' } };
     function zoneFill(g, z, x0, y0, x1, y1, vert) { // flat fill + very soft variation (stone: greenish patches; wood: faint grain streaks)
       const S = WS[z]; g.fillStyle = S.f; g.fillRect(x0, y0, x1 - x0, y1 - y0);
-      const R = rng(((x0 / 64) | 0) * 131 + ((y0 / 64) | 0) * 7 + z);
-      if (z === 1) { for (let i = 0; i < 6; i++) { const x = x0 + R() * (x1 - x0), y = y0 + R() * (y1 - y0), r = 60 + R() * 120, gr = g.createRadialGradient(x, y, 0, x, y, r);
-          gr.addColorStop(0, 'rgba(158,160,138,.55)'); gr.addColorStop(1, 'rgba(158,160,138,0)'); g.fillStyle = gr; g.fillRect(x - r, y - r, r * 2, r * 2); } }
-      else { g.strokeStyle = 'rgba(176,140,96,.35)'; g.lineWidth = 2; g.lineCap = 'round'; g.beginPath();
-        for (let i = 0; i < 14; i++) { const L = 80 + R() * 200; if (vert) { const x = x0 + R() * (x1 - x0), y = y0 + R() * (y1 - y0); g.moveTo(x, y); g.lineTo(x + 2, y + L); } else { const x = x0 + R() * (x1 - x0), y = y0 + R() * (y1 - y0); g.moveTo(x, y); g.lineTo(x + L, y + 2); } } g.stroke(); } }
+      const C = 256; // world-anchored cells -> identical in every overlapping chunk (no seams)
+      for (let gy = Math.floor(y0 / C) - 1; gy <= Math.floor(y1 / C) + 1; gy++) for (let gx = Math.floor(x0 / C) - 1; gx <= Math.floor(x1 / C) + 1; gx++) { const R = rng(hash(gx, gy, 50 + z));
+        if (z === 1) { if (R() < 0.5) continue; const x = (gx + R()) * C, y = (gy + R()) * C, r = 70 + R() * 110, gr = g.createRadialGradient(x, y, 0, x, y, r);
+          gr.addColorStop(0, 'rgba(158,160,138,.55)'); gr.addColorStop(1, 'rgba(158,160,138,0)'); g.fillStyle = gr; g.fillRect(x - r, y - r, r * 2, r * 2); }
+        else { g.strokeStyle = 'rgba(176,140,96,.35)'; g.lineWidth = 2; g.lineCap = 'round'; g.beginPath();
+          for (let i = 0; i < 3; i++) { const L = 80 + R() * 160, x = (gx + R()) * C, y = (gy + R()) * C; if (vert) { g.moveTo(x, y); g.lineTo(x + 2, y + L); } else { g.moveTo(x, y); g.lineTo(x + L, y + 2); } } g.stroke(); } } }
     function paintWalls(g, x0, y0, x1, y1, door) {
-      const P = door ? DOOR_P : LOOP_P, OL = 11;
+      const P = door ? DOOR_P : LOOP_P, OL = door ? 4 : 11;
       if (!door) { const inner = new Path2D(); smoothPath(inner, LOOP, true); // ground strip between real boundary and wobbly edge
-        g.save(); g.clip(inner); for (const z of [1, 2]) { g.fillStyle = PAL[z].base; z === 1 ? g.fillRect(x0 - 50, y0 - 50, Math.max(0, Z - x0 + 50), y1 - y0 + 100) : g.fillRect(Math.max(Z, x0 - 50), y0 - 50, x1 - Math.max(Z, x0 - 50) + 50, y1 - y0 + 100); } g.restore(); }
+        g.save(); g.clip(inner); const outW = new Path2D(); outW.rect(-OUT, -OUT, WW + OUT * 2, WH + OUT * 2); outW.rect(0, 0, WW, WH); g.clip(outW, 'evenodd'); for (const z of [1, 2]) { g.fillStyle = PAL[z].base; z === 1 ? g.fillRect(x0 - 50, y0 - 50, Math.max(0, Z - x0 + 50), y1 - y0 + 100) : g.fillRect(Math.max(Z, x0 - 50), y0 - 50, x1 - Math.max(Z, x0 - 50) + 50, y1 - y0 + 100); } g.restore(); }
       for (const z of [1, 2]) { g.save(); g.clip(P, 'evenodd'); g.beginPath(); z === 1 ? g.rect(x0 - 50, y0 - 50, Math.max(0, Z - x0 + 50), y1 - y0 + 100) : g.rect(Z, y0 - 50, x1 - Z + 50, y1 - y0 + 100); g.clip();
         zoneFill(g, z, x0 - 50, y0 - 50, x1 + 50, y1 + 50, door || (x0 < 0 || x1 > WW));
         // thick uniform outline along the edge(s), inside the band only
         g.strokeStyle = WS[z].l; g.lineWidth = OL * 2; g.lineJoin = 'round';
         if (door) { const a = new Path2D(); smoothPath(a, DL, false); const b = new Path2D(); smoothPath(b, DR, false); g.stroke(a); g.stroke(b); }
-        else { const inner = new Path2D(); smoothPath(inner, LOOP, true); g.stroke(inner); }
+        else { const inner = new Path2D(); smoothPath(inner, LOOP, true); g.strokeStyle = 'rgba(255,255,255,.2)'; g.lineWidth = OL * 2 + 14; g.stroke(inner); g.strokeStyle = WS[z].l; g.lineWidth = OL * 2; g.stroke(inner); }
         g.restore(); }
     }
     const WC = 512, WOV = 3, wallCache = new Map();
@@ -249,23 +255,18 @@
     function drawBorder(g, t) { const [X0, Y0, X1, Y1] = viewRect(g), M = 60; // band covers [-OUT, 0+wobble] etc.
       drawChunks(g, false, Math.max(X0, -OUT), Math.max(Y0, -OUT), Math.min(X1, WW + OUT), Math.min(Y1, WH + OUT),
         (a, b, c, d) => a < M || b < M || c > WW - M || d > WH - M); }
-    function drawDoorWall(g, y0, y1) { drawChunks(g, true, Z - 40, Math.max(-40, y0), Z + 40, Math.min(WH + 40, y1), (a, b, c) => a < Z + 30 && c > Z - 30); }
+    function drawDoorWall(g) { const [, Y0, , Y1] = viewRect(g); drawChunks(g, true, Z - 40, Math.max(-40, Y0), Z + 40, Math.min(WH + 40, Y1), (a, b, c) => a < Z + 30 && c > Z - 30); }
     function rectObs(g, o, zone) {
       const long = Math.max(o.w, o.h) > Math.min(o.w, o.h) * 1.8;
-      const k = zone === 1 ? (long ? 'fence' : 'stone') : (long ? 'ridge' : 'mossy');
+      const k = zone === 1 ? 'stone' : (long ? 'ridge' : 'mossy');
       blit(g, k, Math.round(o.x - o.w / 2), Math.round(o.y - o.h / 2), Math.round(o.w), Math.round(o.h));
     }
     function rockObs(g, o, zone) {
-      const path = () => { g.beginPath(); for (let i = 0; i < 11; i++) { const a = i / 11 * Math.PI * 2, rr = o.r * (0.9 + 0.1 * Math.sin(o.id * 7 + i * 2.3)); i ? g.lineTo(o.x + Math.cos(a) * rr, o.y + Math.sin(a) * rr) : g.moveTo(o.x + Math.cos(a) * rr, o.y + Math.sin(a) * rr); } g.closePath(); };
-      const gr = g.createRadialGradient(o.x - o.r * 0.35, o.y - o.r * 0.4, o.r * 0.1, o.x, o.y, o.r);
-      if (zone === 1) { gr.addColorStop(0, '#e2e1d8'); gr.addColorStop(0.6, '#aeada3'); gr.addColorStop(1, '#7c7b73'); } else { gr.addColorStop(0, '#a3ab9c'); gr.addColorStop(0.6, '#6f776b'); gr.addColorStop(1, '#474d44'); }
-      g.save(); g.translate(3, 6); g.fillStyle = 'rgba(0,0,0,.16)'; path(); g.fill(); g.restore(); g.fillStyle = gr; path(); g.fill();
-      g.save(); path(); g.clip();
-      g.fillStyle = zone === 1 ? 'rgba(110,180,80,.45)' : 'rgba(70,140,55,.8)'; g.beginPath(); g.ellipse(o.x - o.r * 0.2, o.y - o.r * 0.8, o.r * (zone === 1 ? 0.5 : 0.85), o.r * 0.4, -0.2, 0, 6.283); g.fill();
-      g.strokeStyle = 'rgba(0,0,0,.22)'; g.lineWidth = 2; g.beginPath(); g.moveTo(o.x + o.r * 0.1, o.y - o.r * 0.1); g.lineTo(o.x + o.r * 0.45, o.y + o.r * 0.3); g.lineTo(o.x + o.r * 0.3, o.y + o.r * 0.6); g.stroke();
-      g.restore();
-      path(); g.strokeStyle = zone === 1 ? '#6a6a62' : '#3a4036'; g.lineWidth = 3; g.stroke();
-      g.strokeStyle = '#4ea53c'; g.lineWidth = 2; g.lineCap = 'round'; g.beginPath(); for (let i = 0; i < 4; i++) { const a = o.id + i * 1.6, bx = o.x + Math.cos(a) * o.r * 0.95, by = o.y + Math.sin(a) * o.r * 0.95 + 2; for (let k = -1; k <= 1; k++) { g.moveTo(bx + k * 2, by); g.lineTo(bx + k * 3.5, by - 7); } } g.stroke();
+      const S = WS[zone === 1 ? 1 : 2], path = () => { g.beginPath(); const P = []; for (let i = 0; i < 11; i++) { const a = i / 11 * Math.PI * 2, q = o.r * (0.9 + 0.1 * Math.sin(o.id * 7 + i * 2.3)); P.push({ x: o.x + Math.cos(a) * q, y: o.y + Math.sin(a) * q }); } smoothPath(g, P, true); };
+      path(); g.fillStyle = S.f; g.fill();
+      g.save(); path(); g.clip(); g.fillStyle = 'rgba(255,255,255,.22)'; g.beginPath(); g.ellipse(o.x - o.r * 0.25, o.y - o.r * 0.35, o.r * 0.45, o.r * 0.25, -0.4, 0, 6.283); g.fill();
+      if (zone !== 1) { g.strokeStyle = 'rgba(176,140,96,.45)'; g.lineWidth = 2; g.beginPath(); g.arc(o.x, o.y, o.r * 0.45, 0.4, 2.4); g.stroke(); }
+      g.restore(); path(); g.strokeStyle = S.l; g.lineWidth = Math.max(4, o.r * 0.14); g.lineJoin = 'round'; g.stroke();
     }
     function pylon(g, o, zone, armed, now) {
       const r = o.r;

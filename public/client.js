@@ -359,7 +359,7 @@
     }
     ctx.strokeStyle = 'rgba(255,90,90,0.10)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(o.x, o.y, G.OBSTACLES.robotRange, 0, Math.PI * 2); ctx.stroke(); // range
     const rp = MA.robotPal(G.zoneOf(o.x)), metal = (x0, y0, x1, y1) => { const g = ctx.createLinearGradient(x0, y0, x1, y1); g.addColorStop(0, rp[0]); g.addColorStop(0.35, rp[1]); g.addColorStop(0.6, rp[2]); g.addColorStop(1, rp[3]); return g; };
-    ctx.fillStyle = 'rgba(0,0,0,0.16)'; ctx.beginPath(); ctx.arc(o.x + 3, o.y + 6, r, 0, Math.PI * 2); ctx.fill(); // flat shadow (no shadowBlur: costly at 2.5x size)
+    // (no ground shadow) (no shadowBlur: costly at 2.5x size)
     ctx.fillStyle = metal(o.x - r, o.y - r, o.x + r, o.y + r); ctx.beginPath(); ctx.arc(o.x, o.y, r, 0, Math.PI * 2); ctx.fill(); // body (player-like round)
     ctx.strokeStyle = '#3a404d'; ctx.lineWidth = 3; ctx.stroke();
     ctx.strokeStyle = 'rgba(40,46,58,0.6)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(o.x - r * 0.8, o.y + r * 0.35); ctx.lineTo(o.x + r * 0.8, o.y + r * 0.35); ctx.stroke(); // panel seam
@@ -523,8 +523,7 @@
     ctx.lineWidth = 5; ctx.strokeStyle = col; ctx.shadowColor = col; ctx.shadowBlur = 22 * pulse;
     ctx.beginPath(); ctx.moveTo(Z - 22, 0); ctx.lineTo(Z - 22, H); ctx.moveTo(Z + 22, 0); ctx.lineTo(Z + 22, H); ctx.stroke();
     const y0 = Math.max(0, Math.floor((cam.y - 60) / 28) * 28), y1 = Math.min(H, cam.y + VH + 60);
-    MA.drawDoorWall(ctx, y0, y1);
-    ctx.shadowBlur = 0;
+    ctx.shadowBlur = 0; MA.drawDoorWall(ctx, y0, y1);
     if (!open) { ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,204,51,0.75)'; ctx.beginPath(); for (let y = y0; y < y1; y += 28) { ctx.moveTo(Z - 20, y); ctx.lineTo(Z + 20, y); } ctx.stroke(); }
     else { ctx.strokeStyle = 'rgba(93,255,143,0.35)'; ctx.lineWidth = 2; ctx.setLineDash([12, 16]); ctx.lineDashOffset = -t * 40; ctx.beginPath(); ctx.moveTo(Z, y0); ctx.lineTo(Z, y1); ctx.stroke(); ctx.setLineDash([]); }
     ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = '700 18px system-ui, sans-serif';
