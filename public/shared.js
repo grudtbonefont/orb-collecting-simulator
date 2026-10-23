@@ -179,11 +179,11 @@
     X('c_prism', 'color', 'Призма', 450, 'legendary', 'prism'),
     X('h_shard_crown', 'hat', 'Осколочная корона', 777, 'legendary', 'shardcrown'),
     // potions (зелья): picked up on the map, stack in the inventory, «Выпить» starts a short boost (same kind refreshes, never stacks)
-    { id: 'p_speed', type: 'potion', cat: 'misc', name: 'Зелье скорости', rarity: 'rare', icon: '💨', potion: 'speed', desc: 'Скорость +20 % на 60 с', stackable: true, maxStack: 20, base: false, price: null, sources: ['arena', 'admin'] },
-    { id: 'p_orbs', type: 'potion', cat: 'misc', name: 'Зелье богатства', rarity: 'rare', icon: '💰', potion: 'orbs', desc: 'Сферы +25 % на 90 с', stackable: true, maxStack: 20, base: false, price: null, sources: ['arena', 'admin'] },
-    { id: 'p_luck', type: 'potion', cat: 'misc', name: 'Зелье удачи', rarity: 'rare', icon: '🍀', potion: 'luck', desc: 'Шанс удачи ×1,25 на 90 с', stackable: true, maxStack: 20, base: false, price: null, sources: ['arena', 'admin'] },
-    { id: 'p_magnet', type: 'potion', cat: 'misc', name: 'Зелье магнита', rarity: 'rare', icon: '🧲', potion: 'magnet', desc: 'Радиус сбора +30 % на 60 с', stackable: true, maxStack: 20, base: false, price: null, sources: ['arena', 'admin'] },
-    { id: 'p_shard', type: 'potion', cat: 'misc', name: 'Зелье осколков', rarity: 'epic', icon: '✦', potion: 'shard', desc: '3 % шанс получить осколок за редкую (и ценнее) сферу, 120 с', stackable: true, maxStack: 20, base: false, price: null, sources: ['arena', 'admin'] },
+    { id: 'p_speed', type: 'potion', cat: 'misc', name: 'Зелье скорости', rarity: 'rare', icon: '💨', potion: 'speed', desc: 'Скорость +20 % на 60 с', stackable: true, maxStack: 99, base: false, price: null, sources: ['arena', 'admin'] },
+    { id: 'p_orbs', type: 'potion', cat: 'misc', name: 'Зелье богатства', rarity: 'rare', icon: '💰', potion: 'orbs', desc: 'Сферы +25 % на 90 с', stackable: true, maxStack: 99, base: false, price: null, sources: ['arena', 'admin'] },
+    { id: 'p_luck', type: 'potion', cat: 'misc', name: 'Зелье удачи', rarity: 'rare', icon: '🍀', potion: 'luck', desc: 'Шанс удачи ×1,25 на 90 с', stackable: true, maxStack: 99, base: false, price: null, sources: ['arena', 'admin'] },
+    { id: 'p_magnet', type: 'potion', cat: 'misc', name: 'Зелье магнита', rarity: 'rare', icon: '🧲', potion: 'magnet', desc: 'Радиус сбора +30 % на 60 с', stackable: true, maxStack: 99, base: false, price: null, sources: ['arena', 'admin'] },
+    { id: 'p_shard', type: 'potion', cat: 'misc', name: 'Зелье осколков', rarity: 'epic', icon: '✦', potion: 'shard', desc: '3 % шанс получить осколок за редкую (и ценнее) сферу, 120 с', stackable: true, maxStack: 99, base: false, price: null, sources: ['arena', 'admin'] },
     // emotes: shown above the head for 3 s; two are free for everyone, the rest are sold in the shop («Эмоции»)
     { id: 'e_wave', type: 'emote', cat: 'emote', name: 'Привет', rarity: 'common', icon: '👋', value: '👋', free: true, price: 0, stackable: false, maxStack: 1, base: false, sources: [] },
     { id: 'e_smile', type: 'emote', cat: 'emote', name: 'Улыбка', rarity: 'common', icon: '😀', value: '😀', free: true, price: 0, stackable: false, maxStack: 1, base: false, sources: [] },
@@ -234,7 +234,7 @@
   const SHARD_EXCHANGE = { orbs: 25, maxPerTrade: 99 }; // «Лавка осколков»: 1 shard → 25 orbs (was 40) (balance only, not the all-time total)
   const ITEM_BY_ID = {};
   for (const it of ITEMS) ITEM_BY_ID[it.id] = it;
-  const INV_CAP = 450;       // inventory capacity in UNITS (a stack of 10 uses 10); stacks only group items (≤ maxStack each)
+  const INV_CAP = 800;       // inventory capacity in UNITS (a stack of 10 uses 10); stacks only group items (≤ maxStack each)
   const INV_SLOTS = INV_CAP; // legacy name kept for old references
   const BUY_MAX_QTY = 99;
   const INV_CATEGORIES = CATEGORIES.concat([{ key: 'misc', name: 'Прочее' }]);

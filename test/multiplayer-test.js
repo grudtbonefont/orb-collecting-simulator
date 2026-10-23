@@ -641,10 +641,10 @@ async function codesSuite(URL) {
   ok(!nf.ok && nf.error === 'Код не найден или уже использован' && !ex.ok && ex.code === 'expired', 'unknown code → generic error; expired code → ' + ex.error);
   const o1 = await A.emit('code:redeem', 'TEST-ONCE'), o2 = await B.emit('code:redeem', 'test-once');
   ok(o1.ok && !o2.ok && o2.code === 'invalid', 'maxUses: 1 → the second account is refused');
-  await C.emit('test:grant', { id: 'c_coral', qty: 448, source: 'event' }); // shards are a currency now and take no inventory space
+  await C.emit('test:grant', { id: 'c_coral', qty: G.INV_CAP - 2, source: 'event' }); // shards are a currency now and take no inventory space
   const cb = C.profile.balance;
   r = await C.emit('code:redeem', 'TEST-GIFT');
-  ok(!r.ok && r.code === 'full' && C.profile.balance === cb && units(C, 'c_coral') === 448 && !units(C, G.SHARD_ID) && !units(C, 'c_lime'), 'rewards that do not fit into 450 units → refused, nothing given: ' + r.error);
+  ok(!r.ok && r.code === 'full' && C.profile.balance === cb && units(C, 'c_coral') === G.INV_CAP - 2 && !units(C, G.SHARD_ID) && !units(C, 'c_lime'), 'rewards that do not fit into the unit cap → refused, nothing given: ' + r.error);
   const rs = [];
   for (let i = 0; i < 5; i++) rs.push(await C.emit('code:redeem', 'BRUTE' + i));
   ok(rs.slice(0, 4).every(x => x.code === 'invalid') && rs[4].code === 'rate', 'rate limit: the 6th attempt within a minute is refused (' + rs[4].error + ')');
@@ -817,10 +817,10 @@ async function shardShopSuite(URL) {
   ok(r.ok && r.spent === 3 * 78 && r.qty === 3 && shards() === have - 234 && S.profile.inventory.filter(x => x.id === 'n_shard').reduce((n, x) => n + x.q, 0) === 3, 'shard shop ×3 «Осколочный ник»: exactly 234 shards spent, 3 copies stacked');
   // over-cap account (e.g. migrated): items kept, every grant refused until under the cap
   const INV = require('../lib/inventory');
-  const big = { inventory: { v: 1, slots: [{ id: 'c_coral', q: 99 }, { id: 'c_coral', q: 99 }, { id: 'c_coral', q: 99 }, { id: 'c_coral', q: 99 }, { id: 'c_coral', q: 99 }, { id: 'c_coral', q: 5 }, { id: G.SHARD_ID, q: 40 }] }, owned: [], equipped: {}, stats: {} };
+  const big = { inventory: { v: 1, slots: [{ id: 'c_coral', q: 99 }, { id: 'c_coral', q: 99 }, { id: 'c_coral', q: 99 }, { id: 'c_coral', q: 99 }, { id: 'c_coral', q: 99 }, { id: 'c_coral', q: 99 }, { id: 'c_coral', q: 99 }, { id: 'c_coral', q: 99 }, { id: 'c_coral', q: 99 }, { id: 'c_coral', q: 5 }, { id: G.SHARD_ID, q: 40 }] }, owned: [], equipped: {}, stats: {} };
   INV.migrateAccount(big);
   const gb = INV.grantItem(big, 'c_lime', 1, 'event'), gs = INV.grantItem(big, G.SHARD_ID, 1, 'event');
-  ok(INV.unitsUsed(big) === 500 && !gb.ok && gb.code === 'full' && INV.roomFor(big, G.ITEM_BY_ID.c_lime) === 0 && /500 \/ 450/.test(gb.error) && gs.ok && big.stats.shards === 41, `migration keeps an over-cap inventory (500 / ${G.INV_CAP}); item grants refused (${gb.error}); shards moved to the balance and still granted (41)`);
+  ok(INV.unitsUsed(big) === 1000 && !gb.ok && gb.code === 'full' && INV.roomFor(big, G.ITEM_BY_ID.c_lime) === 0 && /1000 \/ 800/.test(gb.error) && gs.ok && big.stats.shards === 41, `migration keeps an over-cap inventory (1000 / ${G.INV_CAP}); item grants refused (${gb.error}); shards moved to the balance and still granted (41)`);
   const shop = await (await fetch(URL + '/api/shop')).json();
   ok(shop.shardExchange.orbs === G.SHARD_EXCHANGE.orbs && shop.items.filter(i => i.exclusive).length === G.ITEMS.filter(i => i.exclusive).length && shop.events.koth.name === 'Царь горы', '/api/shop lists exclusives, events and the exchange rate');
   S.close(); W.close();
@@ -943,12 +943,12 @@ async function shopInventorySuite(URL) {
   await A.emit('test:grant', { id: 'n_pink', qty: 48, source: 'event' });
   const st2 = A.profile.inventory.filter(x => x.id === 'n_pink').map(x => x.q);
   ok(st2.join(',') === '99,99', `partial stack topped up first → [${st2}]`);
-  // capacity: 450 units in total (every unit in a stack counts)
+  // capacity: 800 units in total (every unit in a stack counts)
   const units = () => A.profile.inventory.reduce((n, x) => n + x.q, 0);
   const g2 = await A.emit('test:grant', { id: 'n_pink', qty: G.INV_CAP - units(), source: 'event' });
   ok(g2.ok && units() === G.INV_CAP && A.profile.used === G.INV_CAP && A.profile.cap === G.INV_CAP, `inventory filled to ${units()} / ${G.INV_CAP} units (${A.profile.inventory.length} stacks)`);
   const g3 = await A.emit('test:grant', { id: 'n_pink', qty: 1, source: 'event' });
-  ok(!g3.ok && g3.code === 'full' && /450 \/ 450/.test(g3.error), 'grant refused at the cap: ' + g3.error);
+  ok(!g3.ok && g3.code === 'full' && new RegExp(`${G.INV_CAP} / ${G.INV_CAP}`).test(g3.error), 'grant refused at the cap: ' + g3.error);
   const balF = A.profile.balance;
   const bf = await A.emit('buy', 'c_lime');
   ok(!bf.ok && bf.code === 'full' && /Инвентарь полон/.test(bf.error) && A.profile.balance === balF, 'buying with a full inventory refused, no orbs taken: ' + bf.error);
