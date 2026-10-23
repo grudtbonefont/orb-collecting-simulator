@@ -3408,7 +3408,7 @@
   function setFx(f, silent) {
     f = f || {}; const now = performance.now();
     const wasDisco = discoEnd > now;
-    discoEnd = f.disco > 0 ? now + f.disco : 0; x2End = f.x2 > 0 ? now + f.x2 : 0;
+    discoEnd = f.disco > 0 ? now + f.disco : 0; x2End = f.x2 > 0 ? now + f.x2 : 0; boostsS = (f.boosts || []).map(b => Object.assign({}, b, { end: now + b.left }));
     cev = f.custom ? Object.assign({}, f.custom, { end: now + f.custom.left }) : null; weatherNow = f.weather || ''; nightNow = !!f.night; restartEnd = f.restart > 0 ? now + f.restart : 0;
     if (!silent && cev && !f._seen) toastC('events', `⭐ Событие «${cev.name}»!`, 'ok');
     if (!silent && !wasDisco && discoEnd) toastC('disco', '🪩 Диско-ивент! Сферы ×1,5 и удача ×1,5', 'ok');
@@ -3501,11 +3501,14 @@
   $('admBanGo').addEventListener('click', () => { const n = $('admBanName').value.trim(); if (n) adm({ a: 'ban', name: n }); });
   $('admCmdGo').addEventListener('click', () => { const t = $('admCmd').value.trim(); if (t) adm({ a: 'cmd', text: t }, r => { if (r.ok) $('admCmd').value = ''; }); });
   $('admDiscoGo').addEventListener('click', () => adm({ a: 'disco', min: Number($('admDiscoMin').value) }));
+  let boostsS = [];
+  $('admX2Go').addEventListener('click', () => adm({ a: 'x2', min: Number($('admX2Min').value) }));
   function admCodes(list) {
     const box = $('admCodes'); box.textContent = ''; if (!list.length) { box.textContent = 'Нет'; return; }
     for (const c of list) { const row = document.createElement('div'); row.className = 'adm-pl'; const n = document.createElement('b'); const rw = c.rewards || {};
-      n.textContent = `${c.code} · ${[rw.orbs ? rw.orbs + ' сфер' : '', rw.shards ? rw.shards + ' оск.' : '', rw.items ? rw.items.map(i => i.id).join(',') : ''].filter(Boolean).join(', ')} · ${c.uses}/${c.maxUses || '∞'}${c.expiresAt ? ' · до ' + new Date(c.expiresAt).toLocaleDateString('ru-RU') : ''}${c.disabled ? ' · ВЫКЛ' : ''}`;
-      row.append(n, mkBtn(c.disabled ? 'Включить' : 'Отключить', () => adm({ a: 'code:toggle', code: c.code }))); box.appendChild(row); }
+      n.textContent = `${c.code} · ${[rw.orbs ? rw.orbs + ' сфер' : '', rw.shards ? rw.shards + ' оск.' : '', rw.items ? rw.items.map(i => i.id).join(',') : ''].filter(Boolean).join(', ')} · ${c.uses}/${c.maxUses || '∞'}${c.expiresAt ? ' · до ' + new Date(c.expiresAt).toLocaleDateString('ru-RU') : ''}${c.disabled ? ' · ВЫКЛ' : ''}${c.builtin ? ' · встроенный' : ''}`;
+      row.append(n); if (!c.builtin) row.append(mkBtn(c.disabled ? 'Включить' : 'Отключить', () => adm({ a: 'code:toggle', code: c.code })));
+      row.append(mkBtn('Удалить', () => { if (confirm(`Удалить код ${c.code}? Его больше нельзя будет активировать. Уже полученные награды останутся у игроков.`)) adm({ a: 'code:delete', code: c.code }); })); box.appendChild(row); }
   }
   function admLoadLog() { socket.emit('adm', { a: 'log' }, r => { const box = $('admLog'); box.textContent = ''; if (!r || !r.ok) return; for (const e of r.log) { const d = document.createElement('div'); d.textContent = `${new Date(e.at).toLocaleTimeString('ru-RU')} ${e.by}: ${e.action} ${e.d || ''}`; box.appendChild(d); } }); }
   $('admBossTimer').addEventListener('click', () => adm({ a: 'bosstimer' }));
@@ -3718,8 +3721,7 @@
     if (miniState && C.MINI[miniState.kind]) add(`${C.MINI[miniState.kind].icon} ${C.MINI[miniState.kind].name}`, () => adm({ a: 'stop', kind: 'mini' }));
     if (bossState) add('👹 Босс', () => adm({ a: 'stop', kind: 'boss' }));
     if (discoEnd > now) add('🪩 Диско ' + fmtLeft(discoEnd - now), () => adm({ a: 'disco' }));
-    if (x2End > now) add('✖️2 Сферы ×2 ' + fmtLeft(x2End - now), () => adm({ a: 'cmd', text: '/x2 0' }));
-    if (cev && cev.end > now) add('⭐ ' + cev.name + ' ' + fmtLeft(cev.end - now), () => adm({ a: 'custom', off: true }));
+    for (const b of boostsS) if (b.end > now) add((b.kind === 'x2' ? '✖️2 Сферы ×2 ' : '⭐ ' + b.name + ' ') + fmtLeft(b.end - now), () => adm({ a: 'boost:stop', id: b.id }));
     if (weatherNow) add(weatherNow === 'rain' ? '🌧️ Дождь' : '❄️ Снег', () => adm({ a: 'weather', w: 'off' }));
     if (nightNow) add('🌙 Ночь', () => adm({ a: 'night' }));
     if (restartEnd > now) add('⚠️ Перезапуск ' + fmtLeft(restartEnd - now), () => adm({ a: 'restart', sec: 0 }));

@@ -560,8 +560,8 @@ body.in-game .music-btn { display: none; }
 .qtrack.qt-min { width: auto; padding: 4px 9px; font-weight: 800; color: #ffd76a; border-radius: 14px; }
 
 /* admin panel */
-.adm-btn { right: 12px; bottom: 208px; font-size: 15px; line-height: 1; padding: 0; }
-@media (max-width: 640px) { .adm-btn { bottom: calc(222px + env(safe-area-inset-bottom)); } }
+.adm-btn { right: 12px; bottom: 258px; font-size: 15px; line-height: 1; padding: 0; }
+@media (max-width: 640px) { .adm-btn { bottom: calc(262px + env(safe-area-inset-bottom)); } }
 .adm-card { max-width: 620px; }
 .adm-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
 .adm-tab { background: rgba(255,255,255,.08); color: #c8d0f0; border: 0; border-radius: 8px; padding: 8px 12px; font: 700 13px system-ui, sans-serif; cursor: pointer; }

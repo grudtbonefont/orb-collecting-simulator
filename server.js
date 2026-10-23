@@ -255,20 +255,30 @@ const adminLog = (acc, action, detail) => { const d = detail ? JSON.stringify(de
 const DISCO = { orbMult: 1.5, luckMult: 1.5, rareMult: 1.5, defMin: 3, maxMin: 30 };
 // admin expansion: action log (memory, last 200), custom event, weather / night, restart countdown, admin promo codes (DB)
 const adminLogBuf = [];
-let customEv = null, customTimer = null, weather = '', night = false, restartAt = 0;
+let weather = '', night = false, restartAt = 0;
 const adminCodes = new Map(); // CODE -> { code, rewards{orbs,shards,items[]}, maxUses, expiresAt, disabled, createdAt, by }
-const findAdminCode = input => { const k = CODES.norm(input); const c = k && adminCodes.get(k); return c && !c.disabled ? c : null; };
-function setCustomEv(o) {
-  clearTimeout(customTimer);
-  if (o) { customEv = o; customTimer = setTimeout(() => { customEv = null; pushFx(); systemChat(`⭐ Событие «${o.name}» закончилось`); }, o.until - Date.now()); systemChat(`⭐ Событие «${o.name}»: сферы ×${o.orb}, удача ×${o.luck}, скорость ×${o.spd}`); }
-  else { if (customEv) systemChat(`⭐ Событие «${customEv.name}» закончилось`); customEv = null; }
-  pushFx();
+const findAdminCode = input => { const k = CODES.norm(input); const c = k && adminCodes.get(k); return c && !c.builtin && !c.disabled && !c.deleted ? c : null; };
+// built-in codes (lib/codes.js) deleted from the panel: a { code, builtin: true, deleted: true } marker row in the admin-codes table
+const findBuiltinCode = input => { const c = CODES.findCode(input); if (!c) return null; const m = adminCodes.get(CODES.norm(c.code)); return m && m.deleted ? null : c; };
+// Stackable boosts (admin only): every start adds an instance; identical instances stack by MULTIPLYING (×2 + ×2 = ×4).
+// Each instance has its own timer and can be stopped on its own from the panel.
+let boosts = [], boostSeq = 0;
+const boostsOn = (now = Date.now()) => boosts.filter(b => b.until > now);
+const boostMult = (kind, key, now = Date.now()) => boostsOn(now).reduce((m, b) => (!kind || b.kind === kind) ? m * (b[key] || 1) : m, 1);
+function addBoost(o) {
+  const b = Object.assign({ id: ++boostSeq }, o); boosts.push(b);
+  b.timer = setTimeout(() => { boosts = boosts.filter(x => x !== b); pushFx(); if (b.kind === 'custom') systemChat(`⭐ Событие «${b.name}» закончилось`); }, b.until - Date.now());
+  if (b.kind === 'custom') systemChat(`⭐ Событие «${b.name}»: сферы ×${b.orb}, удача ×${b.luck}, скорость ×${b.spd}`); else systemChat(`✖️2 Сферы ×2 на ${Math.round((b.until - Date.now()) / 60000)} мин`);
+  pushFx(); return b;
 }
-const customOn = (now = Date.now()) => !!customEv && customEv.until > now;
-let discoUntil = 0, x2Until = 0, discoTimer = null, x2Timer = null;
+function stopBoosts(pred) { const out = boosts.filter(pred); for (const b of out) { clearTimeout(b.timer); if (b.kind === 'custom') systemChat(`⭐ Событие «${b.name}» закончилось`); } boosts = boosts.filter(b => !out.includes(b)); pushFx(); return out.length; }
+function setCustomEv(o) { if (o) addBoost(Object.assign({ kind: 'custom' }, o)); else stopBoosts(b => b.kind === 'custom'); }
+const customOn = (now = Date.now()) => boostsOn(now).some(b => b.kind === 'custom');
+let discoUntil = 0, discoTimer = null;
 const discoOn = (now = Date.now()) => discoUntil > now;
-const x2On = (now = Date.now()) => x2Until > now;
-function fxState(now = Date.now()) { return { disco: Math.max(0, discoUntil - now), x2: Math.max(0, x2Until - now), custom: customOn(now) ? { name: customEv.name, left: customEv.until - now, orb: customEv.orb, luck: customEv.luck, spd: customEv.spd } : null, weather, night, restart: restartAt > now ? restartAt - now : 0 }; }
+const x2On = (now = Date.now()) => boostsOn(now).some(b => b.kind === 'x2');
+function fxState(now = Date.now()) { return { disco: Math.max(0, discoUntil - now), x2: boostsOn(now).filter(b => b.kind === 'x2').reduce((m, b) => Math.max(m, b.until - now), 0), x2m: boostMult('x2', 'orb', now), custom: customAgg(now), boosts: boostsOn(now).map(b => ({ id: b.id, kind: b.kind, name: b.name || 'Сферы ×2', left: b.until - now, orb: b.orb, luck: b.luck, spd: b.spd })), weather, night, restart: restartAt > now ? restartAt - now : 0 }; }
+function customAgg(now) { const l = boostsOn(now).filter(b => b.kind === 'custom'); return l.length ? { name: l.map(b => b.name).join(' + '), left: Math.max(...l.map(b => b.until - now)), orb: boostMult('custom', 'orb', now), luck: boostMult('custom', 'luck', now), spd: boostMult('custom', 'spd', now), n: l.length } : null; }
 function pushFx() { if (io) io.to('arena').emit('fx', fxState()); }
 function setDisco(min) { // min > 0: start / restart; 0: end now
   clearTimeout(discoTimer);
@@ -277,12 +287,7 @@ function setDisco(min) { // min > 0: start / restart; 0: end now
   else { discoUntil = 0; if (was) systemChat('🪩 Диско-ивент закончился'); }
   pushFx();
 }
-function setX2(min) {
-  clearTimeout(x2Timer);
-  if (min > 0) { x2Until = Date.now() + min * 60000; x2Timer = setTimeout(() => { x2Until = 0; pushFx(); }, min * 60000); systemChat(`✖️2 Сферы ×2 на ${min} мин`); }
-  else x2Until = 0;
-  pushFx();
-}
+function setX2(min) { if (min > 0) addBoost({ kind: 'x2', orb: 2, until: Date.now() + min * 60000 }); else stopBoosts(b => b.kind === 'x2'); }
 
 // ---------------------------------------------------------------- temporary obstacles + rotating lasers (numbers in G.OBSTACLES)
 // OBSTACLES=0 turns them off (the test suite does, except the obstacle tests).
@@ -1404,7 +1409,7 @@ io.on('connection', socket => {
     if (tries.length >= 5) { codeTries.set(a.key, tries); return ack({ ok: false, error: 'Слишком много попыток. Подождите минуту.', code: 'rate' }); }
     tries.push(now); codeTries.set(a.key, tries);
     if (a._redeeming) return ack({ ok: false, error: 'Подождите…', code: 'busy' });
-    const c = CODES.findCode(input) || findAdminCode(input), NOPE = { ok: false, error: 'Код не найден или уже использован', code: 'invalid' };
+    const c = findBuiltinCode(input) || findAdminCode(input), NOPE = { ok: false, error: 'Код не найден или уже использован', code: 'invalid' };
     if (!c) return ack(NOPE);
     const key = CODES.norm(c.code);
     if (a.codes.includes(key)) return ack(NOPE);
@@ -1535,10 +1540,21 @@ io.on('connection', socket => {
     const ev2 = { name: c.text, orb: num(o.orb, 0.1, 5, 1), luck: num(o.luck, 0.1, 5, 1), spd: num(o.spd, 0.3, 3, 1), until: Date.now() + num(o.min, 0.5, 120, 5) * 60000 };
     setCustomEv(ev2); return { ok: true, msg: `Событие «${ev2.name}» запущено` };
   }
-  async function codeList() { const out = []; for (const c of adminCodes.values()) out.push(Object.assign({}, c, { uses: await store.codeUses(c.code) })); return out.sort((x, y) => y.createdAt - x.createdAt); }
+  async function codeList() { // active codes only: built-in (not deleted) + panel codes (not deleted)
+    const out = [];
+    for (const c of CODES.CODES) { const k = CODES.norm(c.code), m = adminCodes.get(k); if (m && m.deleted) continue; out.push({ code: k, rewards: c.rewards, maxUses: c.maxUses, expiresAt: c.expiresAt ? Date.parse(c.expiresAt) : null, builtin: true, createdAt: 0, uses: await store.codeUses(k) }); }
+    const own = []; for (const c of adminCodes.values()) if (!c.builtin && !c.deleted) own.push(Object.assign({}, c, { uses: await store.codeUses(c.code) }));
+    return own.sort((x, y) => y.createdAt - x.createdAt).concat(out);
+  }
+  async function deleteCode(code) { // the code stops working; players keep what they already redeemed (nothing else is touched)
+    const k = CODES.norm(code), m = adminCodes.get(k);
+    if (CODES.findCode(k)) { if (m && m.deleted) return { ok: false, error: 'Уже удалён' }; const c = { code: k, builtin: true, deleted: true, deletedAt: Date.now(), by: acct.acc.name }; await store.saveAdminCode(c); adminCodes.set(k, c); }
+    else { if (!m || m.deleted) return { ok: false, error: 'Код не найден' }; m.deleted = true; m.deletedAt = Date.now(); await store.saveAdminCode(m); }
+    return { ok: true, msg: `Код ${k} удалён`, codes: await codeList() };
+  }
   async function createCode(o) {
     const code = CODES.norm(o.code); if (!/^[A-Z0-9_-]{3,32}$/.test(code)) return { ok: false, error: 'Код: 3–32 символа A–Z 0–9 _ -' };
-    if (CODES.findCode(code) || adminCodes.has(code)) return { ok: false, error: 'Такой код уже есть' };
+    if (CODES.findCode(code) || adminCodes.has(code)) return { ok: false, error: 'Такой код уже есть (или был удалён)' };
     const int = (v, hi) => { const x = Math.floor(Number(v)); return Number.isFinite(x) && x > 0 ? Math.min(hi, x) : 0; };
     const rewards = {}; if (int(o.orbs, 1e6)) rewards.orbs = int(o.orbs, 1e6); if (int(o.shards, 999)) rewards.shards = int(o.shards, 999);
     if (o.item && has(G.ITEM_BY_ID, o.item) && o.item !== G.SHARD_ID) rewards.items = [{ id: o.item, qty: int(o.itemQty, 99) || 1 }];
@@ -1548,7 +1564,7 @@ io.on('connection', socket => {
     return { ok: true, msg: `Код ${code} создан`, codes: await codeList() };
   }
   async function disableCode(code) {
-    const c = adminCodes.get(CODES.norm(code)); if (!c) return { ok: false, error: 'Код не найден (встроенные коды отключаются только в lib/codes.js)' };
+    const c = adminCodes.get(CODES.norm(code)); if (!c || c.builtin || c.deleted) return { ok: false, error: 'Код не найден (встроенные коды отключаются только в lib/codes.js)' };
     c.disabled = !c.disabled; await store.saveAdminCode(c);
     return { ok: true, msg: `${c.code} ${c.disabled ? 'отключён' : 'включён'}`, codes: await codeList() };
   }
@@ -1608,12 +1624,13 @@ io.on('connection', socket => {
       case 'gift': { const what = (args[0] || '').toLowerCase(), n = Math.floor(Number(args[1])); if (!['orbs', 'shards'].includes(what) || !(n >= 1 && n <= 100000)) return { ok: false, error: '/gift <orbs|shards> <кол-во>' }; return giftAll(what, n); }
       case 'weather': { const w = (args[0] || '').toLowerCase(); if (!['rain', 'snow', 'off', 'none', ''].includes(w)) return { ok: false, error: '/weather <rain|snow|off>' }; weather = w === 'rain' || w === 'snow' ? w : ''; pushFx(); return { ok: true, msg: weather ? 'Погода: ' + (weather === 'rain' ? 'дождь' : 'снег') : 'Погода выключена' }; }
       case 'night': night = !night; pushFx(); return { ok: true, msg: night ? 'Ночь включена' : 'Ночь выключена' };
-      case 'event': { if (args[0] === 'off' || (customOn() && !args.length)) { setCustomEv(null); return { ok: true, msg: 'Своё событие выключено' }; } const [name, orb, luck, spd, min] = args; return startCustom({ name, orb, luck, spd, min }); }
+      case 'event': { if (args[0] === 'off' || !args.length) { setCustomEv(null); return { ok: true, msg: 'Своё событие выключено' }; } const [name, orb, luck, spd, min] = args; return startCustom({ name, orb, luck, spd, min }); }
       case 'bosstimer': { const g = FX.resetBossTimer(); return { ok: true, msg: `Таймер босса сброшен (следующий через ~${Math.round(g / 60000)} мин)` }; }
       case 'restart': { const sec = args[0] === 'off' ? 0 : Math.max(10, Math.min(600, Number(args[0]) || 60)); restartAt = sec ? Date.now() + sec * 1000 : 0; pushFx(); if (sec) { io.to('arena').emit('adm:announce', { t: `Перезапуск сервера через ${sec} с`, by: a.name }); systemChat(`⚠️ Перезапуск сервера через ${sec} с`); } return { ok: true, msg: sec ? `Отсчёт перезапуска ${sec} с (только отображение)` : 'Отсчёт отменён' }; }
       case 'code': { // /code <CODE> <orbs> [shards] [maxUses] [days]  ·  /code off <CODE>  ·  /code list
         if (args[0] === 'list') { const l = await codeList(); return { ok: true, msg: l.map(c => `${c.code}${c.disabled ? ' (выкл)' : ''} ${c.uses}/${c.maxUses || '∞'}`).join(', ') || 'Нет кодов', codes: l }; }
         if (args[0] === 'off') return disableCode(args[1]);
+        if (args[0] === 'del') return deleteCode(args[1]);
         return createCode({ code: args[0], orbs: args[1], shards: args[2], maxUses: args[3], days: args[4] });
       }
       case 'hunt': return funStart('hunt', { orbs: args[0], shards: args[1], min: args[2] });
@@ -1741,12 +1758,15 @@ io.on('connection', socket => {
         case 'gift': { const n = Math.floor(Number(d.n)); if (!['orbs', 'shards'].includes(d.what) || !(n >= 1 && n <= 100000)) return ack({ ok: false, error: 'Количество?' }); return ack(giftAll(d.what, n)); }
         case 'weather': return ack(await runCommand('/weather ' + (['rain', 'snow'].includes(d.w) ? d.w : 'off')));
         case 'night': return ack(await runCommand('/night'));
-        case 'custom': if (d.off || customOn()) { setCustomEv(null); return ack({ ok: true, msg: 'Своё событие выключено' }); } return ack(startCustom(d));
+        case 'custom': if (d.off) { setCustomEv(null); return ack({ ok: true, msg: 'Своё событие выключено' }); } return ack(startCustom(d));
+        case 'x2': { const m = Math.floor(Number(d.min)); if (!(m >= 1 && m <= 120)) return ack({ ok: false, error: 'Минуты 1–120' }); setX2(m); return ack({ ok: true, msg: `+ Сферы ×2 на ${m} мин (×${boostMult('x2', 'orb')} сейчас)` }); }
+        case 'boost:stop': { const id = Number(d.id); const n = stopBoosts(b => b.id === id); return ack(n ? { ok: true, msg: 'Остановлено' } : { ok: false, error: 'Уже закончилось' }); }
         case 'bosstimer': return ack(await runCommand('/bosstimer'));
         case 'restart': return ack(await runCommand('/restart ' + (Number(d.sec) > 0 ? Number(d.sec) : 'off')));
         case 'codes': return ack({ ok: true, codes: await codeList() });
         case 'code:create': return ack(await createCode(d));
         case 'code:toggle': return ack(await disableCode(d.code));
+        case 'code:delete': return ack(await deleteCode(d.code));
         case 'log': return ack({ ok: true, log: adminLogBuf.slice(-200).reverse() });
         case 'fun': { if (!['hunt', 'giant', 'chaos', 'lava', 'ghost', 'freeze', 'chest', 'poll', 'endpoll'].includes(d.kind)) return ack({ ok: false, error: '?' }); return ack(funStart(d.kind, isObj(d.o) ? Object.assign({}, d.o, { opts: Array.isArray(d.o.opts) ? d.o.opts.map(String) : undefined }) : {})); }
         default: return ack({ ok: false, error: 'Неизвестное действие' });
@@ -1941,9 +1961,9 @@ function collectAround(pl, radius, now) {
     const rw = G.orbReward(ot.value, pl.acc.upgrades, pl, Math.random, o.t);
     if (weekendOn(now)) { const f = (pl.wkFrac || 0) + rw.value * (G.WEEKEND.mult - 1), whole = Math.floor(f + 1e-9); pl.wkFrac = f - whole; rw.value += whole; } // «Выходные»: ×1.5 (fraction carried) // «находка», luck ×2, multiplier (fraction in pl.frac) — server-side only
     if (C.boostMult(pl.acc.stats, 'orbs', now) > 1) { const f = (pl.bFrac || 0) + rw.value * (C.BOOSTS.orbs.mult - 1), whole = Math.floor(f + 1e-9); pl.bFrac = f - whole; rw.value += whole; } // quest boost «Сферы ×1.5»
-    const lm = (discoOn(now) ? DISCO.luckMult : 1) * (customOn(now) ? customEv.luck : 1) * G.potionMult(pl.acc.stats, 'luck', now);
+    const lm = (discoOn(now) ? DISCO.luckMult : 1) * boostMult('custom', 'luck', now) * G.potionMult(pl.acc.stats, 'luck', now);
     if (lm > 1 && !rw.lucky) { const p = G.upValue('luck', pl.acc.upgrades.luck) / 100, extra = p > 0 && p < 1 ? Math.min(1, p * (lm - 1) / (1 - p)) : 0; if (extra > 0 && Math.random() < extra) { rw.value *= 2; rw.lucky = true; } } // disco: luck chance ×1.5
-    { const xm = (discoOn(now) ? DISCO.orbMult : 1) * (x2On(now) ? 2 : 1) * (customOn(now) ? customEv.orb : 1) * G.potionMult(pl.acc.stats, 'orbs', now); if (xm > 1) { const f = (pl.xFrac || 0) + rw.value * (xm - 1), whole = Math.floor(f + 1e-9); pl.xFrac = f - whole; rw.value += whole; } } // disco ×1.5, admin /x2 ×2 (stack multiplicatively with weekend / boosts)
+    { const xm = (discoOn(now) ? DISCO.orbMult : 1) * boostMult(null, 'orb', now) * G.potionMult(pl.acc.stats, 'orbs', now); if (xm > 1) { const f = (pl.xFrac || 0) + rw.value * (xm - 1), whole = Math.floor(f + 1e-9); pl.xFrac = f - whole; rw.value += whole; } } // disco ×1.5, admin /x2 ×2 (stack multiplicatively with weekend / boosts)
     FX.onCollect(pl, o, rw.value);
     if (G.ORB_RANK[o.t] >= G.ORB_RANK.r && G.potionOn(pl.acc.stats, 'shard', now) && Math.random() < G.POTIONS.shard.chance) { const g = INV.grantItem(pl.acc, G.SHARD_ID, 1, 'arena'); if (g.ok) { pl.socket.emit('item', { id: G.SHARD_ID, qty: 1, source: 'arena' }); emitProfile(pl); } } // «Зелье осколков»
     if (rw.lucky) pl.lucky++;
@@ -2081,7 +2101,7 @@ function tickInner() {
     // is replayed instead of thrown away (dropped inputs = the client's prediction snaps back). Average speed stays capped.
     pl.budget = Math.min(pl.budget + dt / G.TICK_MS, 40);
     while (pl.inputs.length > 40) { pl.lastSeq = pl.inputs.shift().s; perf.dropped++; } // > 2 s behind: drop the oldest // keep latency bounded
-    const speed = G.speedFor(pl.acc.upgrades.speed) * C.boostMult(pl.acc.stats, 'speed', now) * (pl.frozen ? 0 : pl.spd || 1) * (customOn(now) ? customEv.spd : 1) * funSpeed(pl, now) * G.potionMult(pl.acc.stats, 'speed', now);
+    const speed = G.speedFor(pl.acc.upgrades.speed) * C.boostMult(pl.acc.stats, 'speed', now) * (pl.frozen ? 0 : pl.spd || 1) * boostMult('custom', 'spd', now) * funSpeed(pl, now) * G.potionMult(pl.acc.stats, 'speed', now);
     const solid = FX.solids();
     const radius = G.pickupFor(pl.acc.upgrades.magnet) * G.potionMult(pl.acc.stats, 'magnet', now);
     for (let steps = 0; pl.budget >= 1 && pl.inputs.length && steps < 12; steps++) { // ≤ 12 steps a tick: a backlog drains over a few ticks
@@ -2169,6 +2189,11 @@ process.on('unhandledRejection', e => console.error('Unhandled rejection:', e &&
 (async () => {
   await store.init();
   try { for (const c of await store.listAdminCodes()) adminCodes.set(c.code, c); } catch (e) { console.error('admin codes load failed:', e.message); }
+  try { // one summary line of active panel codes (code text + reward + limits only) for ops
+    const act = []; for (const c of adminCodes.values()) if (!c.builtin && !c.deleted && !c.disabled) act.push({ code: c.code, rewards: c.rewards, maxUses: c.maxUses, used: await store.codeUses(c.code), expiresAt: c.expiresAt ? new Date(c.expiresAt).toISOString() : null });
+    const off = [...adminCodes.values()].filter(c => c.deleted || c.disabled).map(c => c.code);
+    console.log('OCS_ACTIVE_PANEL_CODES ' + JSON.stringify({ active: act, removedOrDisabled: off }));
+  } catch (e) { console.error('codes summary failed:', e.message); }
   console.log(`Storage: ${store.describe()}, ${await store.countAccounts()} accounts`);
   if (TEST_HOOKS) console.warn('WARNING: OCS_TEST_HOOKS=1 — test-only socket events are enabled');
   await store.purgeExpiredSessions(Date.now());
