@@ -1251,9 +1251,9 @@
   // there are no gaps at high speed), every soft/glowing shape is a pre-rendered cached sprite (shadowBlur only once,
   // when a sprite is built), per-player and per-frame global particle budgets, off-screen trails are skipped by the caller.
   // tier: 0 common · 1 rare · 2 epic · 3 legendary · 4 shard-shop exclusive
-  const TRAIL_THEME = { sparks: ['player', '#ffffff'], neon: ['player', '#ffffff'], fire: ['#ff8a2e', '#ffe08a'], smoke: ['#c4cce0', '#8a93b8'],
-    bubbles: ['#9fe9ff', '#ffffff'], pixel: ['#3ee0ff', '#ff4d6d'], leaves: ['#7ed957', '#ffb347'], snow: ['#e8f6ff', '#9fd8ff'], hearts: ['#ff5fa2', '#ffd1e6'],
-    stars: ['#ffe066', '#fff6c2'], lightning: ['#7cc8ff', '#eaffff'], rainbow: ['rainbow', '#ffffff'], galaxy: ['#b46bff', '#7cc8ff'], comet: ['#ffcf5a', '#7cd8ff'], crystal: ['#9de8ff', '#ffb8f0'], pages: ['#ffffff', '#ff5a5a'] };
+  const TRAIL_THEME = { sparks: ['player', 'player'], neon: ['player', 'player'], fire: ['#ff8a2e', '#ffe08a'], smoke: ['#c4cce0', '#8a93b8'],
+    bubbles: ['#9fe9ff', '#ffb8f0'], pixel: ['#3ee0ff', '#ff4d6d'], leaves: ['#7ed957', '#ffb347'], snow: ['#9fd8ff', '#c9b8ff'], hearts: ['#ff5fa2', '#ffd1e6'],
+    stars: ['#ffe066', '#fff6c2'], lightning: ['#7cc8ff', '#eaffff'], rainbow: ['rainbow', 'rainbow'], galaxy: ['#b46bff', '#7cc8ff'], comet: ['#ffcf5a', '#7cd8ff'], crystal: ['#9de8ff', '#ffb8f0'], pages: ['#ff5a5a', '#ffd166'] };
   const TIER_OF = { common: 0, rare: 1, epic: 2, legendary: 3, exclusive: 3 };
   const TRAIL_LIFE = [650, 700, 800, 1000, 1150], TRAIL_PTS = [34, 38, 44, 54, 60]; // higher tiers keep a longer luminous tail
   const TRAIL_STEP = 6; // world px between emitted points (interpolated: fast movement leaves no gaps)
@@ -1265,8 +1265,8 @@
   let trailBudget = 1e9, trailLive = null; // live: drawing the main canvas (budgets apply); previews are never throttled
   function trailFrame(lod) { trailBudget = GLOBAL_CAP[lod]; }
   // pooled trail points
-  const TP_POOL = [];
-  function trailPoint(x, y, time) { const p = TP_POOL.pop() || { x: 0, y: 0, time: 0, seed: 0 }; p.x = x; p.y = y; p.time = time; p.seed = Math.random(); return p; }
+  const TP_POOL = []; let trailSeq = 0; // id: stable per point for its whole life (particle selection / phase never depends on the array index)
+  function trailPoint(x, y, time) { const p = TP_POOL.pop() || { x: 0, y: 0, time: 0, seed: 0, id: 0 }; p.x = x; p.y = y; p.time = time; p.seed = Math.random(); p.id = ++trailSeq; return p; }
   function trailClear(pl) { for (const p of pl.trail) if (TP_POOL.length < 4000) TP_POOL.push(p); pl.trail.length = 0; }
   function trailStep(pl, p, now) { // emit points every TRAIL_STEP px along the movement since the last point; trim by age / count
     const L = pl.last, dx = p.x - L.x, dy = p.y - L.y, d = Math.hypot(dx, dy);
@@ -1299,10 +1299,10 @@
       g.strokeStyle = 'rgba(255,170,240,0.5)'; g.lineWidth = 1.6; g.beginPath(); g.arc(0, 0, 15, 0.6, 1.9); g.stroke();
       g.fillStyle = '#fff'; g.beginPath(); g.ellipse(-7, -7, 4.5, 3, -0.7, 0, 6.283); g.fill(); g.beginPath(); g.arc(-1, -11, 1.6, 0, 6.283); g.fill(); }),
     star: c => shapeSpr('star' + c, c, g => { g.fillStyle = c; g.beginPath(); starPath(g, 0, 0, 18, 0); g.fill(); g.shadowBlur = 0; g.fillStyle = 'rgba(255,255,255,0.75)'; g.beginPath(); starPath(g, -2, -3, 7, 0); g.fill(); }),
-    spark4: c => shapeSpr('sp4' + c, c, g => { g.fillStyle = c; sparkle(g, 0, 0, 19); g.fillStyle = '#fff'; sparkle(g, 0, 0, 8); }),
+    spark4: c => shapeSpr('sp4' + c, c, g => { g.fillStyle = c; sparkle(g, 0, 0, 19); g.shadowBlur = 0; g.globalAlpha = 0.35; g.fillStyle = '#fff'; sparkle(g, 0, 0, 6); g.globalAlpha = 1; }),
     heart: c => shapeSpr('heart' + c, c, g => { g.fillStyle = c; g.beginPath(); heartPath(g, 0, 1, 15); g.fill(); g.shadowBlur = 0; g.lineWidth = 1.6; g.strokeStyle = 'rgba(120,0,50,0.35)'; g.stroke();
       g.fillStyle = 'rgba(255,255,255,0.8)'; g.beginPath(); g.ellipse(-6, -5, 3.6, 2.2, -0.6, 0, 6.283); g.fill(); }),
-    flake: () => shapeSpr('flake', '#9fd8ff', g => { g.strokeStyle = '#fff'; g.lineCap = 'round'; g.lineWidth = 2.6; g.beginPath();
+    flake: () => shapeSpr('flake', '#9fd8ff', g => { g.strokeStyle = '#d6efff'; g.lineCap = 'round'; g.lineWidth = 2.6; g.beginPath();
       for (let a = 0; a < 6; a++) { const c = Math.cos(a * 1.0472), s = Math.sin(a * 1.0472); g.moveTo(0, 0); g.lineTo(c * 17, s * 17); g.moveTo(c * 10, s * 10); g.lineTo(c * 10 + Math.cos(a * 1.0472 + 0.7) * 5, s * 10 + Math.sin(a * 1.0472 + 0.7) * 5); g.moveTo(c * 10, s * 10); g.lineTo(c * 10 + Math.cos(a * 1.0472 - 0.7) * 5, s * 10 + Math.sin(a * 1.0472 - 0.7) * 5); }
       g.stroke(); g.fillStyle = '#e8f6ff'; g.beginPath(); g.arc(0, 0, 3, 0, 6.283); g.fill(); }),
     leaf: c => shapeSpr('leaf' + c, null, g => { g.fillStyle = c; g.beginPath(); g.moveTo(-17, 0); g.quadraticCurveTo(-4, -12, 17, 0); g.quadraticCurveTo(-4, 12, -17, 0); g.fill();
@@ -1335,9 +1335,9 @@
   }
   function sparkle(g, x, y, s) { g.beginPath(); g.moveTo(x, y - s); g.lineTo(x + s * 0.25, y - s * 0.25); g.lineTo(x + s, y); g.lineTo(x + s * 0.25, y + s * 0.25); g.lineTo(x, y + s); g.lineTo(x - s * 0.25, y + s * 0.25); g.lineTo(x - s, y); g.lineTo(x - s * 0.25, y - s * 0.25); g.closePath(); g.fill(); }
   function trailFx(g, pl, pts, n, t, now, kind, tier, lod, under) {
-    const th = TRAIL_THEME[kind] || ['#ffffff', '#ffffff'];
-    const c1 = th[0] === 'player' ? colorOf(pl.eq, t) : th[0] === 'rainbow' ? `hsl(${Math.floor(t * 140) % 360},100%,62%)` : th[0], c2 = th[1];
-    const life = TRAIL_LIFE[tier], st = n > 30 ? 2 : 1;
+    const th = TRAIL_THEME[kind] || ['#9fe9ff', '#9fe9ff'];
+    const c1 = th[0] === 'player' ? colorOf(pl.eq, t) : th[0] === 'rainbow' ? `hsl(${Math.floor(t * 140) % 360},100%,62%)` : th[0], c2 = th[1] === 'player' || th[1] === 'rainbow' ? c1 : th[1];
+    const life = TRAIL_LIFE[tier], st = TRAIL_PTS[tier] > 40 ? 2 : 1;
     g.lineCap = 'round'; g.lineJoin = 'round';
     if (under) { // glow below the base trail
       if (tier === 0) { glowPath(g, pts, n, c1, 6, 0.12, st); return; }
@@ -1345,39 +1345,39 @@
       const pulse = tier >= 3 ? 0.78 + 0.22 * Math.sin(t * 6 + (pl.id ? pl.id.length : 0)) : 1;
       if (tier === 1) glowPath(g, pts, n, c1, 12, 0.2, st);
       else if (tier === 2) { glowPath(g, pts, n, c1, 22, 0.12, st); glowPath(g, pts, n, c2, 9, 0.12 + 0.14 * (0.5 + 0.5 * Math.sin(t * 3)), st); } // shimmer: colour shifts c1 ↔ c2
-      else { glowPath(g, pts, n, c1, 34 * pulse, 0.11, st); glowPath(g, pts, n, c2, 15 * pulse, 0.18, st); if (lod) glowPath(g, pts, n, '#ffffff', 4, 0.3, st); }
+      else { glowPath(g, pts, n, c1, 34 * pulse, 0.11, st); glowPath(g, pts, n, c2, 15 * pulse, 0.18, st); }
       return;
     }
     if (tier === 0 || lod === 0) return;
     g.globalCompositeOperation = 'lighter';
     let budget = lod === 2 ? FX_CAP[tier] : FX_CAP[tier] >> 1;
     if (trailLive) { budget = Math.min(budget, trailBudget); trailBudget -= budget; }
-    const sp = S.spark4(tier === 1 ? c2 : '#ffffff'), sStep = (tier === 1 ? 5 : 4) * st;
-    for (let i = n - 1; i >= 0 && budget > 0; i -= sStep) { // twinkling 4-point sparkles near the path
+    const sp = S.spark4(c2), sStep = (tier === 1 ? 5 : 4) * st;
+    for (let i = n - 1; i >= 0 && budget > 0; i--) { if (pts[i].id % sStep) continue; // twinkling 4-point sparkles near the path
       const p = pts[i], k = 1 - (now - p.time) / life; if (k <= 0) break;
       const tw = 0.5 + 0.5 * Math.sin(t * 9 + p.seed * 20);
       blit(g, sp, p.x + (p.seed - 0.5) * 24, p.y + (hash(p.seed, 5) - 0.5) * 24, (4 + tw * (tier >= 3 ? 9 : 6)) * (0.6 + 0.4 * k), k * (0.35 + 0.65 * tw)); budget--;
     }
     if (tier >= 2) { // drifting glow motes that fly off the path
-      const ga = glowSpr(c2 === '#ffffff' ? '#ffffff' : c2), gb = th[0] === 'player' || th[0] === 'rainbow' ? ga : glowSpr(c1);
-      for (let i = n - 1; i >= 0 && budget > 0; i -= 3 * st) {
-        const p = pts[i], k = 1 - (now - p.time) / life; if (k <= 0) break;
+      const ga = glowSpr(c2), gb = th[0] === 'rainbow' ? ga : glowSpr(c1);
+      for (let i = n - 1; i >= 0 && budget > 0; i--) {
+        const p = pts[i]; if (p.id % (3 * st)) continue; const k = 1 - (now - p.time) / life; if (k <= 0) break;
         const a = p.seed * 6.283 + t * 1.5, d = (1 - k) * (tier >= 3 ? 30 : 20) + 3;
-        blit(g, i & 2 ? gb : ga, p.x + Math.cos(a) * d, p.y + Math.sin(a) * d, 5 + k * 6, k * 0.85); budget--;
+        blit(g, p.id & 2 ? gb : ga, p.x + Math.cos(a) * d, p.y + Math.sin(a) * d, 5 + k * 6, k * 0.85); budget--;
       }
     }
     if (tier >= 3 && lod === 2) { // swirl: two strands spiralling around the tail
       g.fillStyle = c2;
       for (let i = st; i < n && budget > 1; i += 2 * st) {
         const p = pts[i], q = pts[i - 1], dx = p.x - q.x, dy = p.y - q.y, l = Math.hypot(dx, dy) || 1, f = i / n;
-        const off = Math.sin(i * 0.6 / st - t * 9) * (6 + 8 * f), r = 1.2 + 1.6 * f;
+        const off = Math.sin(p.id * 0.6 - t * 9) * (6 + 8 * f), r = 1.2 + 1.6 * f;
         g.globalAlpha = 0.25 + 0.7 * f; g.fillStyle = c2; g.fillRect(p.x - dy / l * off - r, p.y + dx / l * off - r, r * 2, r * 2);
         g.fillStyle = c1; g.fillRect(p.x + dy / l * off - r, p.y - dx / l * off - r, r * 2, r * 2);
         budget -= 2;
       }
     }
     if (tier >= 3) { // bursts from the head every 0.9 s
-      const h = pts[n - 1], u = (now % 900) / 900, rot = Math.floor(now / 900) * 0.7, m = lod === 2 ? 8 : 4, gs = glowSpr(th[0] === 'player' || th[0] === 'rainbow' ? '#ffffff' : c1);
+      const h = pts[n - 1], u = (now % 900) / 900, rot = Math.floor(now / 900) * 0.7, m = lod === 2 ? 8 : 4, gs = glowSpr(c2);
       for (let j = 0; j < m; j++) { const a = rot + j * 6.283 / m, r = 8 + u * 34; blit(g, gs, h.x + Math.cos(a) * r, h.y + Math.sin(a) * r, 4 + 8 * (1 - u), (1 - u) * 0.9); }
     }
     if (tier === 4) { // shard-shop exclusives: unique signature effects
@@ -1392,7 +1392,7 @@
           for (let j = 0; j <= 6; j++) { const a = rotH + j * 1.0472; j ? g.lineTo(h.x + Math.cos(a) * rad, h.y + Math.sin(a) * rad) : g.moveTo(h.x + Math.cos(a) * rad, h.y + Math.sin(a) * rad); }
           g.stroke();
         }
-      } else { const s4 = S.spark4('#ffffff'); for (let j = 0; j < 6; j++) { const a = t * 3 + j * 1.047; blit(g, s4, h.x + Math.cos(a) * 20, h.y + Math.sin(a) * 20, 9, 0.6); } }
+      } else { const s4 = S.spark4(c2); for (let j = 0; j < 6; j++) { const a = t * 3 + j * 1.047; blit(g, s4, h.x + Math.cos(a) * 20, h.y + Math.sin(a) * 20, 9, 0.6); } }
     }
   }
   function drawTrail(g, pl, t, now) {
@@ -1405,7 +1405,7 @@
     trailFx(g, pl, pts, n, t, now, kind, tier, lod, true);
     g.restore(); g.save();
     g.lineCap = 'round'; g.lineJoin = 'round';
-    if (TRAILS[kind]) TRAILS[kind](g, pts, n, t, now, pl, cap, Math.max(1, Math.ceil(n / cap)), lod);
+    if (TRAILS[kind]) TRAILS[kind](g, pts, n, t, now, pl, cap, Math.max(1, Math.ceil(TRAIL_PTS[tier] / cap)), lod);
     g.restore(); g.save();
     trailFx(g, pl, pts, n, t, now, kind, tier, lod, false);
     g.restore();
@@ -1429,14 +1429,14 @@
       for (let j = 0; j < n; j += st) {
         const i = pass ? n - 1 - j : j, p = pts[i], q = pts[Math.max(0, i - 1)], r = pts[Math.min(n - 1, i + 1)];
         let dx = r.x - q.x, dy = r.y - q.y; const l = Math.hypot(dx, dy) || 1; dx /= l; dy /= l;
-        const f = i / (n - 1), w = (w0 + (w1 - w0) * f * f) * (1 + (wob ? Math.sin(t * 11 + i * 0.7) * wob * (1 - f) : 0)), s = pass ? -1 : 1;
+        const f = i / (n - 1), w = (w0 + (w1 - w0) * f * f) * (1 + (wob ? Math.sin(t * 11 + p.id * 0.7) * wob * (1 - f) : 0)), s = pass ? -1 : 1;
         const x = p.x - dy * w * s, y = p.y + dx * w * s; (j || pass) ? g.lineTo(x, y) : g.moveTo(x, y);
       }
       if (!pass) { const p = pts[n - 1]; g.lineTo(p.x, p.y); }
     }
     g.closePath(); g.fill();
   }
-  const each = (pts, n, cap, stride, fn) => { let c = 0; for (let i = n - 1; i >= 0 && c < cap; i -= stride, c++) fn(pts[i], i); };
+  const each = (pts, n, cap, stride, fn) => { let c = 0; for (let i = n - 1; i >= 0 && c < cap; i--) { const p = pts[i]; if (p.id % stride) continue; c++; fn(p, p.id); } };
   const TRAILS = {
     smoke(g, pts, n, t, now, pl, cap, st) { // soft puffs that swell, rise and dissolve
       const img = S.smoke();
@@ -1449,21 +1449,20 @@
         blit(g, img, p.x + Math.sin(p.seed * 6.28 + f * 6) * 7, p.y - f * 22, (6 + p.seed * 10) * (0.6 + 0.4 * Math.min(1, f * 4)) * pop, k < 0.12 ? k * 8 : 0.95); });
     },
     sparks(g, pts, n, t, now, pl, cap, st) { // player-coloured sparks shoot out as short streaks with a hot core
-      g.globalCompositeOperation = 'lighter'; const col = colorOf(pl.eq, t), gw = glowSpr('#ffffff');
+      g.globalCompositeOperation = 'lighter'; const col = colorOf(pl.eq, t), gw = glowSpr(col);
       g.strokeStyle = col; g.lineWidth = 2;
       g.beginPath();
-      each(pts, n, cap >> 1, st, (p, i) => { const k = ageK(p, now, 700); if (k <= 0) return; for (let j = 0; j < 2; j++) { const a = p.seed * 6.28 + j * 3.1 + i * 0.3, d = (1 - k) * 26 + 4, x = p.x + Math.cos(a) * d, y = p.y + Math.sin(a) * d + (1 - k) * (1 - k) * 10, L = 3 + k * 5;
+      each(pts, n, cap >> 1, st, (p, i) => { const k = ageK(p, now, 700); if (k <= 0) return; for (let j = 0; j < 2; j++) { const a = p.seed * 6.28 + j * 3.1, d = (1 - k) * 26 + 4, x = p.x + Math.cos(a) * d, y = p.y + Math.sin(a) * d + (1 - k) * (1 - k) * 10, L = 3 + k * 5;
         g.moveTo(x, y); g.lineTo(x - Math.cos(a) * L, y - Math.sin(a) * L); } });
       g.globalAlpha = 0.9; g.stroke();
-      each(pts, n, cap >> 1, st, (p, i) => { const k = ageK(p, now, 700); if (k <= 0) return; const a = p.seed * 6.28 + i * 0.3, d = (1 - k) * 26 + 4;
+      each(pts, n, cap >> 1, st, (p, i) => { const k = ageK(p, now, 700); if (k <= 0) return; const a = p.seed * 6.28, d = (1 - k) * 26 + 4;
         blit(g, gw, p.x + Math.cos(a) * d, p.y + Math.sin(a) * d + (1 - k) * (1 - k) * 10, 5 + k * 7, k); });
     },
     pixel(g, pts, n, t, now, pl, cap, st) { // retro blocks snap to a grid, drop in steps and blink out
       const pal = ['#ff4d6d', '#ffd34d', '#3ee0ff', '#9dff4f'];
       each(pts, n, cap, st, p => { const k = ageK(p, now); if (k <= 0) return; const f = 1 - k;
-        const sz = 4 * Math.max(1, Math.round((1 + p.seed * 2) * (0.5 + k))), x = Math.round((p.x + (p.seed - 0.5) * 18) / 4) * 4, y = Math.round((p.y + (hash(p.seed, 1) - 0.5) * 18 + Math.floor(f * 4) * 4) / 4) * 4;
-        if (k < 0.3 && Math.floor(now / 70 + p.seed * 7) % 2) return; // blink out
-        blit(g, S.pix(pal[Math.floor(p.seed * 4) % 4]), x, y, sz * 1.1, 1); });
+        const sz = 4 * Math.max(1, Math.round((1 + p.seed * 2) * (0.5 + k))), x = Math.round((p.x + (p.seed - 0.5) * 18) / 4) * 4, y = Math.round((p.y + (hash(p.seed, 1) - 0.5) * 18 + f * 16) / 4) * 4;
+        blit(g, S.pix(pal[Math.floor(p.seed * 4) % 4]), x, y, sz * 1.1, Math.min(1, k * 3.3)); });
     },
     leaves(g, pts, n, t, now, pl, cap, st) { // tumbling leaves (flip + spin) drift down and sway
       const pal = ['#7ed957', '#ffb347', '#e8743b', '#c9e25a'];
@@ -1476,8 +1475,8 @@
         blit(g, img, p.x + Math.sin(p.seed * 6.28 + f * 4) * 8, p.y + f * 14, (6 + p.seed * 8) * (0.7 + 0.3 * k), Math.min(1, k * 1.6), p.seed * 3 + f * 1.5 * (p.seed - 0.5)); });
     },
     neon(g, pts, n, t, now, pl, cap, st) { // glowing tube in the player colour with a white-hot core (no shadowBlur)
-      const color = colorOf(pl.eq, t), s2 = n > 30 ? 2 : 1; g.globalCompositeOperation = 'lighter';
-      glowPath(g, pts, n, color, 26, 0.16, s2); glowPath(g, pts, n, color, 13, 0.5, s2); glowPath(g, pts, n, '#ffffff', 4, 0.9, s2);
+      const color = colorOf(pl.eq, t), s2 = 1; g.globalCompositeOperation = 'lighter';
+      glowPath(g, pts, n, color, 26, 0.16, s2); glowPath(g, pts, n, color, 13, 0.5, s2); glowPath(g, pts, n, color, 4, 0.55, s2);
       const h = pts[n - 1]; blit(g, glowSpr(color), h.x, h.y, 26 + 4 * Math.sin(t * 8), 0.7);
     },
     hearts(g, pts, n, t, now, pl, cap, st) { // beating hearts float up and sway, two shades
@@ -1488,7 +1487,7 @@
       g.globalCompositeOperation = 'lighter'; const dust = glowSpr('#fff6c2');
       each(pts, n, cap, Math.max(2, st), (p, i) => { const k = ageK(p, now, 800); if (k <= 0) return; const tw = 0.6 + 0.4 * Math.sin(t * 10 + p.seed * 30), big = p.seed > 0.85 ? 1.6 : 1;
         blit(g, S.star(p.seed < 0.6 ? '#ffe066' : '#fff6c2'), p.x + (p.seed - 0.5) * 14, p.y + (hash(p.seed, 1) - 0.5) * 14 + (1 - k) * 6, (9 + k * 7) * tw * big, k, p.seed * 6 + t * 2.5 * (p.seed > 0.5 ? 1 : -1));
-        if (i & 1) blit(g, dust, p.x + (hash(p.seed, 7) - 0.5) * 26, p.y + (hash(p.seed, 8) - 0.5) * 26, 4, k * tw); });
+        if (p.id & 1) blit(g, dust, p.x + (hash(p.seed, 7) - 0.5) * 26, p.y + (hash(p.seed, 8) - 0.5) * 26, 4, k * tw); });
     },
     lightning(g, pts, n, t, now, pl, cap, st) { // jagged bolt that re-forks ~14×/s, with branches and bright nodes
       const q = Math.floor(now / 70), s2 = n > 30 ? 2 : 1; g.globalCompositeOperation = 'lighter';
@@ -1506,39 +1505,39 @@
       g.globalCompositeOperation = 'lighter'; const o = S.flameO(), y = S.flameY(), em = S.ember();
       each(pts, n, cap, st, (p, i) => { const k = ageK(p, now, 700); if (k <= 0) return; const f = 1 - k, fl = 0.8 + 0.3 * Math.sin(t * 22 + p.seed * 40), x = p.x + Math.sin(p.seed * 9 + t * 7) * 3 * f, yy = p.y - f * 16;
         blit(g, o, x, yy, (10 + k * 22) * fl, k * 0.9); if (k > 0.35) blit(g, y, x, yy + 2, (6 + k * 12) * fl, k);
-        if (i % 3 === 0) { const ef = (f * 1.4) % 1; blit(g, em, p.x + (hash(p.seed, 3) - 0.5) * 20 + Math.sin(t * 9 + p.seed * 20) * 3, p.y - ef * 34, 3 + 3 * (1 - ef), (1 - ef) * 0.95); } });
+        if (p.id % 3 === 0) { const ef = f; blit(g, em, p.x + (hash(p.seed, 3) - 0.5) * 20 + Math.sin(t * 9 + p.seed * 20) * 3, p.y - ef * 34, 3 + 3 * (1 - ef), (1 - ef) * 0.95); } });
     },
     rainbow(g, pts, n, t, now, pl, cap, st) { // six-band ribbon that waves and flows, sparkly edges
-      const s2 = n > 30 ? 2 : 1, h0 = t * 120;
+      const s2 = 1, h0 = t * 120;
       for (let b = 0; b < 6; b++) {
         g.strokeStyle = `hsl(${(h0 + b * 50) % 360},100%,${62 + (b === 0 ? 8 : 0)}%)`; g.lineWidth = 3.2; g.beginPath();
         for (let i = 0; i < n; i += s2) { const p = pts[i], q = pts[Math.max(0, i - 1)], r = pts[Math.min(n - 1, i + 1)]; let dx = r.x - q.x, dy = r.y - q.y; const l = Math.hypot(dx, dy) || 1, f = i / (n - 1);
-          const off = (b - 2.5) * 2.6 * (0.35 + 0.65 * f) + Math.sin(t * 6 - i * 0.25) * 3 * (1 - f); const x = p.x - dy / l * off, y = p.y + dx / l * off; i ? g.lineTo(x, y) : g.moveTo(x, y); }
+          const off = (b - 2.5) * 2.6 * (0.35 + 0.65 * f) + Math.sin(t * 6 - p.id * 0.25) * 3 * (1 - f); const x = p.x - dy / l * off, y = p.y + dx / l * off; i ? g.lineTo(x, y) : g.moveTo(x, y); }
         g.globalAlpha = 0.85; g.stroke();
       }
     },
     galaxy(g, pts, n, t, now, pl, cap, st) { // swirling cosmic dust in a faint nebula, with twinkling stars
-      const pal = ['#8a3cff', '#ff4fd8', '#3ee0ff', '#ffffff']; g.globalCompositeOperation = 'lighter';
+      const pal = ['#8a3cff', '#ff4fd8', '#3ee0ff', '#ffd6ff']; g.globalCompositeOperation = 'lighter';
       each(pts, n, cap >> 2, st * 4, p => { const k = ageK(p, now, 1000); if (k <= 0) return; blit(g, S.nebula(p.seed < 0.5 ? 'rgba(138,60,255,0.5)' : 'rgba(255,79,216,0.4)'), p.x, p.y, 30 + (1 - k) * 20, k * 0.45); });
       each(pts, n, cap, st, (p, i) => { const k = ageK(p, now, 1000); if (k <= 0) return; const sd = p.seed, d = (1 - k) * 22 + 3, a = sd * 20 + (1 - k) * 3;
         blit(g, glowSpr(pal[Math.floor(sd * 4) % 4]), p.x + Math.cos(a) * d, p.y + Math.sin(a) * d, 4 + k * 6, k * (0.6 + 0.4 * Math.sin(t * 6 + sd * 9)));
-        if (i % 6 === 0) blit(g, S.spark4('#ffffff'), p.x, p.y, (4 + k * 7) * (0.6 + 0.4 * Math.sin(t * 8 + sd * 20)), k); });
+        if (p.id % 6 === 0) blit(g, S.spark4('#e0b8ff'), p.x, p.y, (4 + k * 7) * (0.6 + 0.4 * Math.sin(t * 8 + sd * 20)), k); });
     },
-    comet(g, pts, n, t, now, pl, cap, st) { // exclusive: tapered fiery tail (red → orange → white-hot core), blue ion streak, debris
-      const s2 = n > 30 ? 2 : 1;
+    comet(g, pts, n, t, now, pl, cap, st) { // exclusive: tapered fiery tail (red → orange → golden core), blue ion streak, debris
+      const s2 = 1;
       g.globalAlpha = 0.45; g.fillStyle = '#ff5a3a'; taper(g, pts, n, 1, 14, 0.25, t, s2);
       g.globalAlpha = 0.7; g.fillStyle = '#ffb347'; taper(g, pts, n, 0.5, 9, 0.2, t, s2);
-      g.globalAlpha = 0.95; g.fillStyle = '#fff3c4'; taper(g, pts, n, 0, 4, 0, t, s2);
+      g.globalAlpha = 0.95; g.fillStyle = '#ffd27a'; taper(g, pts, n, 0, 3, 0, t, s2);
       g.globalCompositeOperation = 'lighter'; g.strokeStyle = '#7cd8ff'; g.lineWidth = 1.6; g.globalAlpha = 0.5; g.beginPath();
-      for (let i = 0; i < n; i += s2) { const p = pts[i], f = 1 - i / n, w = 10 * f + Math.sin(t * 5 + i * 0.4) * 3 * f; i ? g.lineTo(p.x + w * 0.7, p.y - w) : g.moveTo(p.x + w * 0.7, p.y - w); }
+      for (let i = 0; i < n; i += s2) { const p = pts[i], f = 1 - i / n, w = 10 * f + Math.sin(t * 5 + p.id * 0.4) * 3 * f; i ? g.lineTo(p.x + w * 0.7, p.y - w) : g.moveTo(p.x + w * 0.7, p.y - w); }
       g.stroke(); const em = S.ember();
       each(pts, n, cap >> 1, st * 2, p => { const k = ageK(p, now, 900); if (k <= 0) return; blit(g, em, p.x + (p.seed - 0.5) * 22, p.y + (hash(p.seed, 2) - 0.5) * 22, 3 + k * 4, k); });
     },
     crystal(g, pts, n, t, now, pl, cap, st) { // exclusive: spinning prismatic shards with glints
-      const pal = ['#9de8ff', '#ffffff', '#c7a6ff', '#ffb8f0'];
+      const pal = ['#9de8ff', '#b8f0ff', '#c7a6ff', '#ffb8f0'];
       each(pts, n, cap, Math.max(2, st), (p, i) => { const k = ageK(p, now, 900); if (k <= 0) return;
         blit(g, S.shard(pal[Math.floor(p.seed * 4) % 4]), p.x + (p.seed - 0.5) * 14, p.y + (hash(p.seed, 3) - 0.5) * 14 + (1 - k) * 8, (7 + k * 9) * (0.7 + p.seed * 0.5), Math.min(1, k * 1.5), p.seed * 6.28 + t * 3 * (p.seed > 0.5 ? 1 : -1));
-        if (i % 3 === 0) { g.globalCompositeOperation = 'lighter'; blit(g, S.spark4('#e9fbff'), p.x + (hash(p.seed, 4) - 0.5) * 24, p.y + (hash(p.seed, 6) - 0.5) * 24, 8 * Math.max(0, Math.sin(t * 7 + p.seed * 25)), k); g.globalCompositeOperation = 'source-over'; } });
+        if (p.id % 3 === 0) { g.globalCompositeOperation = 'lighter'; blit(g, S.spark4('#9de8ff'), p.x + (hash(p.seed, 4) - 0.5) * 24, p.y + (hash(p.seed, 6) - 0.5) * 24, 8 * Math.max(0, Math.sin(t * 7 + p.seed * 25)), k); g.globalCompositeOperation = 'source-over'; } });
     },
     pages(g, pts, n, t, now, pl, cap, st) { // daily calendar: sheets with a red header flutter, flip and spin as they fall
       const img = S.page();
