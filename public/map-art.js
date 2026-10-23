@@ -140,43 +140,43 @@
     // ---------------------------------------------------------------- patterns: border + door wall + obstacle skins
     function pat(w, h, paint) { const c = document.createElement('canvas'); c.width = w; c.height = h; paint(c.getContext('2d'), w, h); return c; }
     const T = {};
-    const bricks = (base, cols, moss) => (g, w, h) => { g.fillStyle = base; g.fillRect(0, 0, w, h); const r = rng(5);
-      for (let row = 0; row < 4; row++) for (let i = -1; i < 4; i++) { const x = i * 32 + (row % 2) * 16, y = row * 16; g.fillStyle = cols[(r() * 3) | 0]; g.fillRect(x + 1.5, y + 1.5, 29, 13); g.fillStyle = 'rgba(255,255,255,.18)'; g.fillRect(x + 2, y + 2, 27, 2); g.fillStyle = 'rgba(0,0,0,.14)'; g.fillRect(x + 2, y + 12, 27, 2); }
-      for (let i = 0; i < moss; i++) { g.fillStyle = 'rgba(80,150,60,.6)'; g.beginPath(); g.ellipse(r() * w, r() * h, 4 + r() * 6, 2 + r() * 3, r() * 3, 0, 6.283); g.fill(); } };
-    T.stone = pat(96, 64, bricks('#9a9a90', ['#c4c3b8', '#b6b5aa', '#cfcec4'], 0));           // zone 1: light stone
-    T.mossy = pat(96, 64, bricks('#5e6459', ['#7f877a', '#737a6e', '#89917f'], 16));         // zone 2: mossy stone
-    T.fence = pat(40, 64, (g, w, h) => { g.fillStyle = '#8a6238'; g.fillRect(0, 0, w, h); for (let i = 0; i < 2; i++) { const x = i * 20; g.fillStyle = i ? '#c8955a' : '#bb8a50'; g.fillRect(x + 1.5, 0, 17, h);
-      g.fillStyle = 'rgba(255,255,255,.18)'; g.fillRect(x + 3, 0, 2, h); g.strokeStyle = 'rgba(90,55,25,.5)'; g.lineWidth = 1; g.beginPath(); g.moveTo(x + 10, 6); g.lineTo(x + 11, 30); g.moveTo(x + 8, 38); g.lineTo(x + 9, 58); g.stroke();
-      g.fillStyle = '#6b4626'; g.beginPath(); g.arc(x + 10, 16, 1.3, 0, 6.283); g.arc(x + 10, 48, 1.3, 0, 6.283); g.fill(); } });
-    T.log = pat(64, 32, (g, w, h) => { g.fillStyle = '#4e331c'; g.fillRect(0, 0, w, h); for (let i = 0; i < 2; i++) { const y = i * 16; const gr = g.createLinearGradient(0, y, 0, y + 16); gr.addColorStop(0, '#8a5e34'); gr.addColorStop(0.5, '#734c28'); gr.addColorStop(1, '#583a1e'); g.fillStyle = gr; g.fillRect(0, y + 1, w, 14);
-      g.strokeStyle = 'rgba(40,25,10,.45)'; g.lineWidth = 1; g.beginPath(); g.moveTo(0, y + 6); g.bezierCurveTo(20, y + 4, 40, y + 9, 64, y + 6); g.stroke(); }
-      g.fillStyle = 'rgba(80,150,60,.55)'; g.beginPath(); g.ellipse(18, 2, 8, 3, 0, 0, 6.283); g.ellipse(50, 17, 6, 2.5, 0, 0, 6.283); g.fill(); });
-    const patterns = new WeakMap(); const ptn = (g, k) => { let m = patterns.get(g); if (!m) { m = {}; patterns.set(g, m); } return m[k] || (m[k] = g.createPattern(T[k], 'repeat')); };
+    // clean flat skins: base fill, soft top highlight, bottom edge shade, darker outline, 1 subtle detail. Sprites baked once and cached.
+    const SK = { stone: ['#cfcabd', '#8f8a7e', 'rgba(255,255,255,.28)', 'rgba(0,0,0,.13)'], fence: ['#c89a62', '#7a5530', 'rgba(255,240,210,.28)', 'rgba(60,30,10,.16)'],
+      mossy: ['#8b9182', '#4e5448', 'rgba(255,255,255,.18)', 'rgba(0,0,0,.16)'], log: ['#9a6c40', '#583a1e', 'rgba(255,230,190,.22)', 'rgba(40,20,5,.2)'] };
+    const rr = (g, x, y, w, h, r) => { r = Math.max(0, Math.min(r, w / 2, h / 2)); g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); };
+    function skin(g, k, x, y, w, h) {
+      const [base, line, hi, lo] = SK[k], r = Math.min(14, Math.min(w, h) * 0.28);
+      rr(g, x, y, w, h, r); g.fillStyle = base; g.fill();
+      g.save(); rr(g, x, y, w, h, r); g.clip();
+      const e = Math.min(h, w) * 0.22, hh = Math.min(10, e);
+      g.fillStyle = hi; g.fillRect(x, y, w, hh); g.fillStyle = lo; g.fillRect(x, y + h - hh, w, hh);
+      if (k === 'mossy') { g.fillStyle = 'rgba(110,160,80,.45)'; g.beginPath(); g.ellipse(x + w * 0.3, y + 2, w * 0.22, Math.min(h * 0.12, 9), 0, 0, 6.283); g.fill(); }
+      if (k === 'stone' && w > 40 && h > 40) { g.strokeStyle = 'rgba(0,0,0,.08)'; g.lineWidth = 2; g.beginPath(); g.moveTo(x + w * 0.62, y + h * 0.3); g.lineTo(x + w * 0.72, y + h * 0.52); g.stroke(); }
+      if (k === 'log' || k === 'fence') { const along = w >= h; g.strokeStyle = 'rgba(0,0,0,.08)'; g.lineWidth = 2; g.beginPath(); if (along) { g.moveTo(x + r, y + h * 0.5); g.lineTo(x + w - r, y + h * 0.5); } else { g.moveTo(x + w * 0.5, y + r); g.lineTo(x + w * 0.5, y + h - r); } g.stroke(); }
+      g.restore(); rr(g, x + 1.5, y + 1.5, w - 3, h - 3, r - 1); g.strokeStyle = line; g.lineWidth = 3; g.stroke();
+    }
+    const sprites = new Map(); let spriteN = 0;
+    function sprite(k, w, h) { const key = k + w + 'x' + h; let c = sprites.get(key); if (c) return c;
+      if (sprites.size > 300) sprites.clear();
+      c = document.createElement('canvas'); c.width = Math.ceil(w) + 6; c.height = Math.ceil(h) + 8; const g = c.getContext('2d');
+      rr(g, 3, 6, w, h, Math.min(14, Math.min(w, h) * 0.28)); g.fillStyle = 'rgba(0,0,0,.16)'; g.fill(); skin(g, k, 0, 0, w, h); sprites.set(key, c); spriteN++; return c; }
     function drawBorder(g, t) {
       const B = 46;
-      for (const [zone, x0, x1] of [[1, -B, Z], [2, Z, WW + B]]) {
-        g.save(); g.beginPath(); g.rect(x0, -B, x1 - x0, WH + 2 * B); g.rect(0, 0, WW, WH); g.clip('evenodd');
-        g.fillStyle = ptn(g, zone === 1 ? 'stone' : 'log'); g.fillRect(x0, -B, x1 - x0, WH + 2 * B); g.restore();
-      }
-      g.save(); g.lineWidth = 4; g.strokeStyle = 'rgba(60,50,30,.6)'; g.strokeRect(0, 0, WW, WH); g.strokeStyle = 'rgba(0,0,0,.4)'; g.lineWidth = 14; g.strokeRect(-B, -B, WW + 2 * B, WH + 2 * B); g.restore();
+      g.fillStyle = SK.stone[0]; g.fillRect(-B, -B, Z + B, B); g.fillRect(-B, WH, Z + B, B); g.fillRect(-B, 0, B, WH);
+      g.fillStyle = SK.log[0]; g.fillRect(Z, -B, WW - Z + B, B); g.fillRect(Z, WH, WW - Z + B, B); g.fillRect(WW, 0, B, WH);
+      g.fillStyle = SK.stone[2]; g.fillRect(-B, -B, Z + B, 8); g.fillRect(-B, WH, Z + B, 8); g.fillStyle = SK.log[2]; g.fillRect(Z, -B, WW - Z + B, 8); g.fillRect(Z, WH, WW - Z + B, 8);
+      g.save(); g.lineWidth = 3; g.strokeStyle = 'rgba(60,50,30,.55)'; g.strokeRect(0, 0, WW, WH); g.strokeStyle = 'rgba(0,0,0,.35)'; g.lineWidth = 6; g.strokeRect(-B, -B, WW + 2 * B, WH + 2 * B); g.restore();
     }
     function drawDoorWall(g, y0, y1) {
-      g.save(); g.fillStyle = ptn(g, 'stone'); g.fillRect(Z - 22, y0, 22, y1 - y0); g.fillStyle = ptn(g, 'log'); g.fillRect(Z, y0, 22, y1 - y0);
-      for (let y = Math.floor(y0 / 220) * 220; y < y1; y += 220) { // posts
-        g.fillStyle = 'rgba(0,0,0,.25)'; g.fillRect(Z - 30, y + 4, 64, 34); g.fillStyle = '#c9c8bd'; g.fillRect(Z - 32, y, 32, 32); g.fillStyle = '#6e4a2a'; g.fillRect(Z, y, 32, 32);
-        g.strokeStyle = 'rgba(0,0,0,.4)'; g.lineWidth = 2; g.strokeRect(Z - 32, y, 64, 32); g.fillStyle = 'rgba(255,255,255,.2)'; g.fillRect(Z - 30, y + 2, 60, 3);
-        g.fillStyle = '#c79b62'; g.beginPath(); g.arc(Z + 16, y + 16, 9, 0, 6.283); g.fill(); g.strokeStyle = 'rgba(110,70,35,.6)'; g.lineWidth = 1; g.beginPath(); g.arc(Z + 16, y + 16, 5, 0, 6.283); g.stroke();
-      }
+      g.save(); g.fillStyle = SK.stone[0]; g.fillRect(Z - 22, y0, 22, y1 - y0); g.fillStyle = SK.log[0]; g.fillRect(Z, y0, 22, y1 - y0);
+      g.strokeStyle = 'rgba(0,0,0,.3)'; g.lineWidth = 2; g.strokeRect(Z - 22, y0, 44, y1 - y0);
+      for (let y = Math.floor(y0 / 220) * 220; y < y1; y += 220) g.drawImage(sprite('stone', 64, 32), Z - 32, y);
       g.restore();
     }
-    // obstacles — same geometry as before, themed by zone (zone 1: light stone / wooden fence, zone 2: logs / mossy stone)
     function rectObs(g, o, zone) {
-      const x0 = o.x - o.w / 2, y0 = o.y - o.h / 2, long = Math.max(o.w, o.h) > Math.min(o.w, o.h) * 1.8;
+      const long = Math.max(o.w, o.h) > Math.min(o.w, o.h) * 1.8;
       const k = zone === 1 ? (long ? 'fence' : 'stone') : (long ? 'log' : 'mossy');
-      g.fillStyle = 'rgba(0,0,0,.16)'; g.fillRect(x0 + 3, y0 + 6, o.w, o.h);
-      g.save(); g.translate(x0, y0); if ((k === 'fence' && o.w > o.h) || (k === 'log' && o.h > o.w)) { g.rotate(-Math.PI / 2); g.translate(-o.h, 0); g.fillStyle = ptn(g, k); g.fillRect(0, 0, o.h, o.w); } else { g.fillStyle = ptn(g, k); g.fillRect(0, 0, o.w, o.h); } g.restore();
-      const sh = g.createLinearGradient(x0, y0, x0 + o.w, y0 + o.h); sh.addColorStop(0, 'rgba(255,255,255,.12)'); sh.addColorStop(1, 'rgba(0,0,0,.22)'); g.fillStyle = sh; g.fillRect(x0, y0, o.w, o.h);
-      g.strokeStyle = k === 'stone' ? '#6e6e66' : k === 'mossy' ? '#3a4036' : '#4a2f18'; g.lineWidth = 3; g.strokeRect(x0 + 1.5, y0 + 1.5, o.w - 3, o.h - 3);
+      g.drawImage(sprite(k, Math.round(o.w), Math.round(o.h)), Math.round(o.x - o.w / 2), Math.round(o.y - o.h / 2));
     }
     function rockObs(g, o, zone) {
       const path = () => { g.beginPath(); for (let i = 0; i < 11; i++) { const a = i / 11 * Math.PI * 2, rr = o.r * (0.9 + 0.1 * Math.sin(o.id * 7 + i * 2.3)); i ? g.lineTo(o.x + Math.cos(a) * rr, o.y + Math.sin(a) * rr) : g.moveTo(o.x + Math.cos(a) * rr, o.y + Math.sin(a) * rr); } g.closePath(); };
