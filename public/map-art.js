@@ -25,9 +25,8 @@
       const key = cx + ',' + cy; let f = featCache.get(key); if (f) return f;
       const r = rng(hash(cx, cy, 11)), x0 = cx * CH, y0 = cy * CH, L = [];
       const add = (k, n, extra) => { for (let i = 0; i < n; i++) { const x = x0 + r() * CH, y = y0 + r() * CH; L.push(Object.assign({ k, x, y, z: zoneOf(x), s: r(), a: r() * 6.283, v: r() }, extra ? extra(r) : null)); } };
-      add('blob', 10); add('patch', 3); if (r() < 0.45) add('pool', 1);
-      add('rock', 5); add('tuft', 26); add('flower', 12); add('mush', 3); add('cry', 5);
-      if (r() < 0.3) add('ruin', 1); if (r() < 0.32) add('lamp', 1);
+      add('blob', 6); if (r() < 0.6) add('patch', 1); // calm ground: no pools, mushrooms, ruins or lanterns
+      if (r() < 0.6) add('rock', 1); add('tuft', 7); add('flower', 3); add('cry', 2);
       f = L.filter(d => d.x > 0 && d.x < WW && d.y > 0 && d.y < WH);
       if (featCache.size > 600) featCache.clear(); featCache.set(key, f); return f;
     }
@@ -49,7 +48,7 @@
         case 'mush': { const c = 4 + s * 5, cap = d.z === 1 ? (d.v > 0.5 ? '#a8584a' : '#9b7a52') : '#5fb8b0'; g.fillStyle = '#d9cfb8'; g.fillRect(d.x - c * 0.25, d.y - c * 0.2, c * 0.5, c * 0.9);
           if (d.z === 2) { g.fillStyle = 'rgba(95,200,190,.18)'; g.beginPath(); g.ellipse(d.x, d.y, c * 2.2, c * 1.6, 0, 0, 6.283); g.fill(); }
           g.fillStyle = cap; g.beginPath(); g.ellipse(d.x, d.y - c * 0.2, c, c * 0.55, 0, Math.PI, 0); g.closePath(); g.fill(); g.fillStyle = 'rgba(255,255,255,.55)'; g.fillRect(d.x - c * 0.4, d.y - c * 0.55, c * 0.25, c * 0.15); break; }
-        case 'cry': if (d.z === 1 && d.v > 0.15) break; { const n = 2 + ((d.v * 10) | 0) % 3, hgt = 12 + s * 16;
+        case 'cry': if (d.z === 1) break; { const n = 1 + ((d.v * 10) | 0) % 2, hgt = 8 + s * 8;
           g.fillStyle = 'rgba(0,0,0,.25)'; g.beginPath(); g.ellipse(d.x + 3, d.y + 2, hgt * 0.5, hgt * 0.18, 0, 0, 6.283); g.fill();
           for (let i = 0; i < n; i++) { const a = -1.57 + (i - (n - 1) / 2) * 0.45, l = hgt * (1 - i * 0.18), w = 3.5 + s * 2.5, bx = d.x + (i - (n - 1) / 2) * 4;
             g.save(); g.translate(bx, d.y); g.rotate(a + 1.57); g.beginPath(); g.moveTo(-w, 0); g.lineTo(-w, -l * 0.75); g.lineTo(0, -l); g.lineTo(w, -l * 0.75); g.lineTo(w, 0); g.closePath();
@@ -70,30 +69,24 @@
       const p = P[zone], x0 = cx * CH, y0 = cy * CH;
       g.fillStyle = p.base; g.fillRect(x0, y0, CH, CH);
       const near = []; for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (const d of feats(cx + i, cy + j)) if (d.z === zone && d.x + R[d.k] > x0 && d.x - R[d.k] < x0 + CH && d.y + R[d.k] > y0 && d.y - R[d.k] < y0 + CH) near.push(d);
-      for (const d of near) if (d.k === 'blob') { const rr = 90 + d.s * 80, gr = g.createRadialGradient(d.x, d.y, 0, d.x, d.y, rr); const c = d.v > 0.5 ? p.lite : p.dark; gr.addColorStop(0, c); gr.addColorStop(1, c + '00'); g.fillStyle = gr; g.fillRect(d.x - rr, d.y - rr, rr * 2, rr * 2); }
-      for (const d of near) if (d.k === 'patch') { const rr = 60 + d.s * 80; g.fillStyle = d.v > 0.5 ? p.patchA : p.patchB; g.globalAlpha = 0.55;
+      for (const d of near) if (d.k === 'blob') { const rr = 90 + d.s * 80, gr = g.createRadialGradient(d.x, d.y, 0, d.x, d.y, rr); const c = d.v > 0.5 ? p.lite : p.dark; g.globalAlpha = 0.5; gr.addColorStop(0, c); gr.addColorStop(1, c + '00'); g.fillStyle = gr; g.fillRect(d.x - rr, d.y - rr, rr * 2, rr * 2); g.globalAlpha = 1; }
+      for (const d of near) if (d.k === 'patch') { const rr = 60 + d.s * 80; g.fillStyle = d.v > 0.5 ? p.patchA : p.patchB; g.globalAlpha = 0.22;
         const pts = []; for (let i = 0; i < 10; i++) { const a = i / 10 * 6.283, q = rr * (0.78 + 0.22 * Math.sin(d.a * 5 + i * 2.1)); pts.push([d.x + Math.cos(a) * q, d.y + Math.sin(a) * q * 0.75]); }
         g.beginPath(); for (let i = 0; i <= 10; i++) { const A = pts[i % 10], B = pts[(i + 1) % 10], mx = (A[0] + B[0]) / 2, my = (A[1] + B[1]) / 2; i ? g.quadraticCurveTo(A[0], A[1], mx, my) : g.moveTo(mx, my); } g.closePath(); g.fill(); g.globalAlpha = 1; }
       // grain (texture specks)
-      const r = rng(hash(cx, cy, 3 + zone)), n = lod < 1 ? 60 : 260;
-      for (let i = 0; i < n; i++) { g.fillStyle = p.grain[(r() * 3) | 0]; g.globalAlpha = 0.35 + r() * 0.4; const sz = 1 + r() * 2.4; g.fillRect(x0 + r() * CH, y0 + r() * CH, sz, sz * (0.5 + r())); }
+      const r = rng(hash(cx, cy, 3 + zone)), n = lod < 1 ? 30 : 110;
+      for (let i = 0; i < n; i++) { g.fillStyle = p.grain[(r() * 3) | 0]; g.globalAlpha = 0.15 + r() * 0.2; const sz = 1 + r() * 1.8; g.fillRect(x0 + r() * CH, y0 + r() * CH, sz, sz * (0.5 + r())); }
       g.globalAlpha = 1;
       // paths
-      for (const pa of PATHS) { if (pa[0] !== zone) continue; const s0 = pa[1] ? x0 - 80 : y0 - 80, s1 = pa[1] ? x0 + CH + 80 : y0 + CH + 80;
+      for (const pa of PATHS) { if (pa[0] !== zone || !pa[1] || pa[2] > 0.7) continue; const s0 = pa[1] ? x0 - 80 : y0 - 80, s1 = pa[1] ? x0 + CH + 80 : y0 + CH + 80;
         const pts = []; for (let s = Math.floor(s0 / 24) * 24; s <= s1; s += 24) pts.push(pathPt(pa, s));
         const vis = pts.some(([x, y]) => x > x0 - 80 && x < x0 + CH + 80 && y > y0 - 80 && y < y0 + CH + 80); if (!vis) continue;
         g.lineCap = 'round'; g.lineJoin = 'round';
-        for (const [w, c, a] of [[78, p.pathEdge, 0.55], [60, p.path, 0.7]]) { g.strokeStyle = c; g.globalAlpha = a; g.lineWidth = w; g.beginPath(); pts.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.stroke(); }
+        for (const [w, c, a] of [[70, p.pathEdge, 0.22], [54, p.path, 0.3]]) { g.strokeStyle = c; g.globalAlpha = a; g.lineWidth = w; g.beginPath(); pts.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.stroke(); }
         g.globalAlpha = 1;
-        for (const [x, y] of pts) { const rr = rng(hash(Math.round(x), Math.round(y), 5)); for (let k = 0; k < (lod < 1 ? 1 : 3); k++) { g.fillStyle = p.pathPeb; g.globalAlpha = 0.6; const px = x + (rr() - 0.5) * 50, py = y + (rr() - 0.5) * 50; g.beginPath(); g.ellipse(px, py, 2 + rr() * 3, 1.5 + rr() * 2, rr() * 3, 0, 6.283); g.fill(); }
-          if (zone === 2 && rr() < 0.12) { g.globalAlpha = 0.7; g.fillStyle = '#8c6bff'; g.fillRect(x - 2, y - 2, 4, 4); } }
+        for (const [x, y] of pts) { const rr = rng(hash(Math.round(x), Math.round(y), 5)); for (let k = 0; k < (lod < 1 ? 0 : 1); k++) { g.fillStyle = p.pathPeb; g.globalAlpha = 0.3; const px = x + (rr() - 0.5) * 50, py = y + (rr() - 0.5) * 50; g.beginPath(); g.ellipse(px, py, 2 + rr() * 3, 1.5 + rr() * 2, rr() * 3, 0, 6.283); g.fill(); }
+          if (zone === 2 && rr() < 0.05) { g.globalAlpha = 0.45; g.fillStyle = '#8c6bff'; g.fillRect(x - 2, y - 2, 4, 4); } }
         g.globalAlpha = 1; }
-      // pools
-      for (const d of near) if (d.k === 'pool') { const rx = 34 + d.s * 30, ry = rx * (0.45 + d.v * 0.25);
-        if (zone === 2) { const gl = g.createRadialGradient(d.x, d.y, 0, d.x, d.y, rx * 1.8); gl.addColorStop(0, 'rgba(150,90,255,.28)'); gl.addColorStop(1, 'rgba(150,90,255,0)'); g.fillStyle = gl; g.fillRect(d.x - rx * 2, d.y - rx * 2, rx * 4, rx * 4); }
-        g.fillStyle = 'rgba(0,0,0,.25)'; g.beginPath(); g.ellipse(d.x, d.y + 2, rx + 4, ry + 3, d.a * 0.3, 0, 6.283); g.fill();
-        g.fillStyle = p.pool; g.globalAlpha = 0.85; g.beginPath(); g.ellipse(d.x, d.y, rx, ry, d.a * 0.3, 0, 6.283); g.fill(); g.globalAlpha = 1;
-        g.strokeStyle = p.poolRim; g.lineWidth = 2; g.stroke(); g.strokeStyle = 'rgba(255,255,255,.22)'; g.lineWidth = 2; g.beginPath(); g.ellipse(d.x - rx * 0.2, d.y - ry * 0.3, rx * 0.45, ry * 0.25, d.a * 0.3, 3.6, 5.4); g.stroke(); }
       const order = ['ruin', 'rock', 'mush', 'cry', 'flower', 'tuft', 'lamp'];
       const dec = near.filter(d => order.includes(d.k)).sort((a, b) => a.y - b.y);
       for (const d of dec) { if (lod < 0.5 && (d.k === 'mush' || d.k === 'lamp')) continue; paintDecor(g, d, p, lod); }
@@ -136,18 +129,18 @@
         g.save(); g.translate(-cam.x, -cam.y);
         for (let cy = cy0; cy <= cy1; cy++) for (let cx = cx0; cx <= cx1; cx++) {
           const r = rng(hash(cx, cy, 21));
-          for (let i = 0; i < 7; i++) { const x = cx * CH + r() * CH, y = cy * CH + r() * CH, z = zoneOf(x), p = P[z], h = 12 + r() * 9, sw = RM ? 0 : Math.sin(t * 1.7 + x * 0.013 + y * 0.007) * 3.2;
+          for (let i = 0; i < 2; i++) { const x = cx * CH + r() * CH, y = cy * CH + r() * CH, z = zoneOf(x), p = P[z], h = 12 + r() * 9, sw = RM ? 0 : Math.sin(t * 1.7 + x * 0.013 + y * 0.007) * 3.2;
             if (x > WW || y > WH) continue;
             g.strokeStyle = p.tuft[i % 3]; g.lineWidth = z === 1 ? 2 : 1.5; g.lineCap = 'round'; g.beginPath();
             for (let k = -2; k <= 2; k++) { g.moveTo(x + k * 2, y); g.quadraticCurveTo(x + k * 3 + sw * 0.4, y - h * 0.55, x + k * 4.2 + sw, y - h * (1 - Math.abs(k) * 0.14)); } g.stroke(); }
           if (!RM) {
-            for (let i = 0; i < 3; i++) { const bx = cx * CH + r() * CH, by = cy * CH + r() * CH, ph = r() * 9, z = zoneOf(bx);
+            for (let i = 0; i < 1; i++) { const bx = cx * CH + r() * CH, by = cy * CH + r() * CH, ph = r() * 9, z = zoneOf(bx); if (r() < 0.6) continue;
               const x = bx + Math.sin(t * 0.6 + ph) * 40, y = by + Math.cos(t * 0.45 + ph * 1.3) * 30, a = 0.35 + 0.65 * Math.max(0, Math.sin(t * 1.9 + ph * 3));
               if (x > WW || y > WH) continue;
               const gl = g.createRadialGradient(x, y, 0, x, y, 9); gl.addColorStop(0, `rgba(${P[z].fly},${0.55 * a})`); gl.addColorStop(1, `rgba(${P[z].fly},0)`); g.fillStyle = gl; g.fillRect(x - 9, y - 9, 18, 18);
               g.fillStyle = `rgba(255,255,230,${0.9 * a})`; g.fillRect(x - 1, y - 1, 2, 2); }
-            for (const d of feats(cx, cy)) if (d.k === 'cry' && (d.z === 2 || d.v <= 0.15)) { const a = Math.max(0, Math.sin(t * 2.3 + d.a * 7)); if (a < 0.7) continue;
-              const x = d.x + (d.v - 0.5) * 8, y = d.y - (12 + d.s * 16) * 0.8, s = 4 * (a - 0.7) / 0.3 + 1; g.fillStyle = `rgba(255,255,255,${(a - 0.7) * 3})`;
+            for (const d of feats(cx, cy)) if (d.k === 'cry' && d.z === 2 && d.v < 0.4) { const a = Math.max(0, Math.sin(t * 2.3 + d.a * 7)); if (a < 0.7) continue;
+              const x = d.x + (d.v - 0.5) * 8, y = d.y - (8 + d.s * 8) * 0.8, s = 4 * (a - 0.7) / 0.3 + 1; g.fillStyle = `rgba(255,255,255,${(a - 0.7) * 3})`;
               g.beginPath(); g.moveTo(x, y - s * 2); g.lineTo(x + s * 0.4, y); g.lineTo(x, y + s * 2); g.lineTo(x - s * 0.4, y); g.closePath(); g.fill(); g.fillRect(x - s * 1.6, y - 0.6, s * 3.2, 1.2); }
           }
         }
