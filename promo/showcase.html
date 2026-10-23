@@ -1,0 +1,59 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:var(--w);height:var(--h);overflow:hidden;background:#04060f;font-family:Montserrat,sans-serif}
+body{position:relative}
+.bg{position:absolute;inset:0;background:radial-gradient(ellipse at 30% 20%,#1b2a6b 0%,transparent 55%),radial-gradient(ellipse at 85% 80%,#4a1a6e 0%,transparent 50%),linear-gradient(160deg,#060a1c,#02030a)}
+.panel{position:absolute;border-radius:18px;overflow:hidden;border:2px solid rgba(120,170,255,.55);box-shadow:0 0 40px rgba(80,160,255,.35),0 20px 50px rgba(0,0,0,.7)}
+.panel img{width:100%;height:100%;object-fit:cover;display:block}
+.panel .cap{position:absolute;left:0;right:0;bottom:0;padding:8px 12px;font:700 15px Montserrat;color:#fff;background:linear-gradient(transparent,rgba(0,0,0,.85));letter-spacing:.5px}
+.shade{position:absolute;inset:0;pointer-events:none}
+.vig{position:absolute;inset:0;background:radial-gradient(ellipse at center,transparent 45%,rgba(0,0,0,.85) 100%)}
+.orb{position:absolute;border-radius:50%;filter:blur(.5px)}
+.title{position:absolute;font-family:'Rubik Mono One',Montserrat,sans-serif;color:#fff;line-height:.95;text-shadow:0 0 18px #3ee0ff,0 0 42px #3ee0ff,0 0 80px #7a5cff}
+.title b{color:#ffe08a;text-shadow:0 0 18px #ffcc33,0 0 44px #ff9a1a}
+.tag{position:absolute;font:800 var(--tag) Montserrat;color:#bfe9ff;letter-spacing:1px;text-shadow:0 0 12px rgba(62,224,255,.6)}
+.tag i{font-style:normal;color:#ffcc33;margin:0 .35em}
+.cta{position:absolute;font:900 var(--cta) Montserrat;color:#081020;background:linear-gradient(90deg,#3ee0ff,#7affc4);padding:.55em 1.1em;border-radius:999px;box-shadow:0 0 30px rgba(62,224,255,.75),0 0 70px rgba(122,255,196,.35)}
+.url{position:absolute;font:600 var(--url) Montserrat;color:#8fa3d9}
+.feat{position:absolute;display:flex;flex-wrap:wrap;gap:8px}
+.feat span{font:700 var(--feat) Montserrat;color:#e6ecff;background:rgba(20,30,70,.75);border:1px solid rgba(120,150,255,.45);padding:5px 11px;border-radius:999px}
+</style></head><body><div class="bg"></div><div id="root"></div><div class="vig"></div><div id="top"></div>
+<script>
+const P = new URLSearchParams(location.search), sq = P.get('sq') === '1';
+const W = sq ? 1080 : 1280, H = sq ? 1080 : 720;
+document.documentElement.style.setProperty('--w', W + 'px'); document.documentElement.style.setProperty('--h', H + 'px');
+const root = document.getElementById('root'), topL = document.getElementById('top');
+const panel = (src, cap, x, y, w, h, rot, z, pos) => { const d = document.createElement('div'); d.className = 'panel';
+  Object.assign(d.style, { left: x + 'px', top: y + 'px', width: w + 'px', height: h + 'px', transform: `rotate(${rot}deg)`, zIndex: z });
+  d.innerHTML = `<img src="../${src}" style="object-position:${pos || 'center'}"><div class="cap">${cap}</div>`; root.appendChild(d); };
+const el = (cls, html, css) => { const d = document.createElement('div'); d.className = cls; d.innerHTML = html; Object.assign(d.style, css); topL.appendChild(d); return d; };
+// glowing orbs accent
+const cols = ['#3ee0ff', '#7affc4', '#b26bff', '#ffcc33', '#ff4d9a', '#4d7cff'];
+let seed = 7; const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
+for (let i = 0; i < 26; i++) { const c = cols[i % 6], r = 4 + rnd() * 14, o = document.createElement('div'); o.className = 'orb';
+  Object.assign(o.style, { left: rnd() * W + 'px', top: rnd() * H + 'px', width: r + 'px', height: r + 'px', background: `radial-gradient(circle at 35% 35%,#fff,${c} 45%,transparent 72%)`, boxShadow: `0 0 ${r * 2}px ${c}`, zIndex: 3, opacity: .9 }); topL.appendChild(o); }
+const feats = ['6 редкостей орбов', 'Ивенты арены', '6 мини-игр', '75+ косметик', 'Лавка осколков', 'Мультиплеер'].map(f => `<span>${f}</span>`).join('');
+if (!sq) {
+  document.documentElement.style.cssText += ';--tag:22px;--cta:24px;--url:15px;--feat:14px';
+  panel('screenshot-trails-epic.png', '✨ Эпические шлейфы', 650, 40, 560, 315, 4, 1);
+  panel('screenshot-event-koth.png', '👑 Царь горы', 760, 330, 470, 264, -5, 2);
+  panel('screenshot-minigames-6.png', '🎮 6 мини-игр', 600, 450, 320, 200, 5, 3, 'center top');
+  el('shade', '', { background: 'linear-gradient(90deg,rgba(3,5,14,.97) 0%,rgba(3,5,14,.8) 36%,rgba(3,5,14,0) 50%)', zIndex: 2 });
+  el('title', 'ORB<br>COLLECTING<br><b>SIMULATOR</b>', { left: '56px', top: '70px', fontSize: '58px', zIndex: 5 });
+  el('tag', 'Собирай орбы<i>•</i>Соревнуйся<i>•</i>Прокачивайся', { left: '58px', top: '290px', zIndex: 5 });
+  el('feat', feats, { left: '58px', top: '345px', width: '470px', zIndex: 5 });
+  el('cta', '▶ Играй бесплатно в браузере', { left: '58px', top: '515px', zIndex: 5 });
+  el('url', 'orb-collecting-simulator.onrender.com', { left: '64px', top: '600px', zIndex: 5 });
+} else {
+  document.documentElement.style.cssText += ';--tag:28px;--cta:32px;--url:20px;--feat:18px';
+  panel('screenshot-trails-epic.png', '✨ Эпические шлейфы', 40, 360, 560, 315, -5, 1);
+  panel('screenshot-event-koth.png', '👑 Царь горы', 500, 330, 540, 304, 4, 2);
+  panel('screenshot-shard-shop.png', '🔮 Лавка осколков', 70, 640, 470, 260, 3, 3, 'center top');
+  panel('screenshot-minigames-6.png', '🎮 6 мини-игр', 560, 620, 460, 270, -4, 2, 'center top');
+  el('shade', '', { background: 'linear-gradient(180deg,rgba(3,5,14,.96) 0%,rgba(3,5,14,.75) 26%,rgba(3,5,14,0) 36%,rgba(3,5,14,0) 76%,rgba(3,5,14,.95) 90%)', zIndex: 4 });
+  el('title', 'ORB COLLECTING<br><b>SIMULATOR</b>', { left: 0, right: 0, textAlign: 'center', top: '60px', fontSize: '70px', zIndex: 5 });
+  el('tag', 'Собирай орбы<i>•</i>Соревнуйся<i>•</i>Прокачивайся', { left: 0, right: 0, textAlign: 'center', top: '232px', zIndex: 5 });
+  el('cta', '▶ Играй бесплатно в браузере', { left: '50%', transform: 'translateX(-50%)', bottom: '78px', whiteSpace: 'nowrap', zIndex: 5 });
+  el('url', 'orb-collecting-simulator.onrender.com', { left: 0, right: 0, textAlign: 'center', bottom: '36px', zIndex: 5 });
+}
+</script></body></html>
