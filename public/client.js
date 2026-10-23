@@ -2111,36 +2111,71 @@
     const next = ch.tiers[done] || null, v = C.achValue(ch.tiers[0], p);
     return { done, next, v, max: done === ch.tiers.length };
   }
+  const CAT_COL = { orbs: '#4fc3ff', boss: '#ff4d6d', events: '#ffb020', games: '#9b7bff', quests: '#ffd166', danger: '#ff7a1a', explore: '#2ee6a6', collect: '#ff6bd6' };
+  const METALS = ['bronze', 'silver', 'gold', 'diamond'];
+  const metalOf = (i, n) => METALS[n === 1 ? 2 : Math.round(i * 3 / (n - 1))];
+  function rwChips(rw) { // reward → chips (text kept compatible with rewardText)
+    const box = document.createElement('span'); box.className = 'rw-chips';
+    const add = (cls, t) => { const s = document.createElement('span'); s.className = 'rw-chip ' + cls; s.textContent = t; box.appendChild(s); };
+    if (!rw) return box;
+    if (rw.orbs) add('orb', `🔮 +${fmt(rw.orbs)} сфер`);
+    if (rw.shards) add('shard', `💎 +${rw.shards} оск.`);
+    if (rw.boost) add('boost', `${C.BOOSTS[rw.boost].icon} ${C.BOOSTS[rw.boost].name} · ${rw.min} мин`);
+    if (rw.item) { const it = G.ITEM_BY_ID[rw.item]; add('item', `🎁 «${it ? it.name : rw.item}»`); }
+    if (rw.potion) add('potion', '+ 🧪 зелье');
+    return box;
+  }
+  function confetti(el) { // burst in a layer over the modal card (survives list re-renders)
+    if (!el || !el.isConnected) return; const card = el.closest('.modal-card') || document.body, cr = card.getBoundingClientRect(), er = el.getBoundingClientRect();
+    const fx = document.createElement('div'); fx.className = 'cf-layer'; fx.style.left = (er.left - cr.left + 34) + 'px'; fx.style.top = (er.top - cr.top + er.height / 2) + 'px';
+    const cols = ['#ffd166', '#ff6bd6', '#4fc3ff', '#5dff8f', '#ff7a1a', '#fff'];
+    for (let i = 0; i < 28; i++) { const s = document.createElement('i'); s.className = 'cf'; const a = Math.random() * Math.PI * 2, d = 50 + Math.random() * 90;
+      s.style.cssText = `--dx:${Math.cos(a) * d}px;--dy:${Math.sin(a) * d - 30}px;--r:${Math.random() * 720 - 360}deg;background:${cols[i % cols.length]};animation-delay:${Math.random() * 80}ms`; fx.appendChild(s); }
+    card.appendChild(fx); el.classList.add('burst'); setTimeout(() => fx.remove(), 1300);
+  }
+  window.OCSConfetti = confetti;
+  let achSeen = null;
   function renderAch() {
     if (!profile) return;
     const p = achProfile(profile), got = (profile.stats && profile.stats.ach) || {};
-    const nDone = C.ACH.filter(a => got[a.id]).length;
+    const nDone = C.ACH.filter(a => got[a.id]).length, fresh = achSeen ? C.ACH.filter(a => got[a.id] && !achSeen.has(a.id)) : [];
+    achSeen = new Set(C.ACH.filter(a => got[a.id]).map(a => a.id));
     $('achCount').textContent = `${nDone} / ${C.ACH.length}`;
-    const tr = $('achTrophy'); if (tr) { tr.classList.toggle('done', nDone >= C.ACH.length); $('achTrophyTxt').textContent = nDone >= C.ACH.length ? 'Получено!' : `${nDone} / ${C.ACH.length}`; $('achTrophyBar').style.width = Math.round(nDone / C.ACH.length * 100) + '%'; }
+    const pct = Math.round(nDone / C.ACH.length * 100);
+    const tr = $('achTrophy'); if (tr) { tr.classList.toggle('done', nDone >= C.ACH.length); $('achTrophyTxt').textContent = nDone >= C.ACH.length ? 'Получено!' : `${nDone} / ${C.ACH.length} · ${pct}%`; $('achTrophyBar').style.width = pct + '%'; }
+    const card = $('ach').querySelector('.modal-card'); card.classList.add('ach-v2'); card.style.setProperty('--ac', CAT_COL[achCat] || '#4fc3ff');
     const tabs = $('achTabs'); tabs.textContent = '';
     for (const c of C.ACH_CATS) {
-      const tiers = C.ACH.filter(a => a.cat === c.key), n = tiers.filter(a => got[a.id]).length;
+      const tiers = C.ACH.filter(a => a.cat === c.key), n = tiers.filter(a => got[a.id]).length, col = CAT_COL[c.key];
       const b = document.createElement('button'); b.type = 'button'; b.className = 'ach-tab' + (c.key === achCat ? ' active' : '') + (n === tiers.length ? ' full' : ''); b.dataset.cat = c.key; b.setAttribute('role', 'tab');
-      b.innerHTML = `<span class="ic">${c.icon}</span><span class="nm">${esc(c.name)}</span><span class="cnt">${n}/${tiers.length}</span>`;
+      b.style.setProperty('--c', col); b.style.setProperty('--p', (n / tiers.length * 360).toFixed(0) + 'deg');
+      b.innerHTML = `<span class="ring"><span class="ic">${c.icon}</span></span><span class="nm">${esc(c.name)}</span><span class="cnt">${n}/${tiers.length}</span>`;
       b.onclick = () => { achCat = c.key; renderAch(); };
       tabs.appendChild(b);
     }
     const list = $('achList'); list.textContent = '';
-    for (const ch of C.CHAINS.filter(x => x.cat === achCat)) {
-      const s = chainState(ch, p, got), n = ch.tiers.length;
-      const el = document.createElement('div'); el.className = 'ach-item' + (s.max ? ' done' : ''); el.dataset.chain = ch.id;
+    const cat = C.ACH_CATS.find(c => c.key === achCat), catT = C.ACH.filter(a => a.cat === achCat), catN = catT.filter(a => got[a.id]).length;
+    const hd = document.createElement('div'); hd.className = 'ach-cathead'; hd.innerHTML = `<span class="big">${cat.icon}</span><div><b>${esc(cat.name)}</b><small>${catN} из ${catT.length} ступеней</small></div>`; list.appendChild(hd);
+    const chains = C.CHAINS.filter(x => x.cat === achCat).map(ch => [ch, chainState(ch, p, got)]).sort((a, b) => a[1].max - b[1].max);
+    for (const [ch, s] of chains) {
+      const n = ch.tiers.length;
+      const el = document.createElement('div'); el.className = 'ach-item v2 ' + (s.max ? 'done' : s.v > 0 ? 'active' : 'fresh'); el.dataset.chain = ch.id;
       const ic = document.createElement('div'); ic.className = 'ach-ic'; ic.textContent = ch.icon;
+      if (s.max) { const ck = document.createElement('span'); ck.className = 'ach-check'; ck.textContent = '✓'; ic.appendChild(ck); }
       const body = document.createElement('div'); body.className = 'ach-body';
-      const nm = document.createElement('b'); nm.textContent = (s.done ? ch.tiers[s.done - 1].name : ch.name) + (s.max ? ' ✓' : '');
-      const pips = document.createElement('span'); pips.className = 'ach-pips'; pips.textContent = n > 1 ? ' ' + ch.tiers.map((t, i) => (i < s.done ? '★' : '☆')).join('') : '';
-      nm.appendChild(pips);
+      const nm = document.createElement('b'); nm.className = 'ach-nm'; nm.textContent = s.done ? ch.tiers[s.done - 1].name : ch.name;
+      const medals = document.createElement('span'); medals.className = 'ach-medals';
+      ch.tiers.forEach((t, i) => { const m = document.createElement('span'); m.className = `medal ${metalOf(i, n)} ${i < s.done ? 'got' : i === s.done ? 'next' : 'locked'}`; m.textContent = n > 1 ? ['I', 'II', 'III', 'IV', 'V'][i] : '★'; m.title = `${t.name}: ${t.desc}`; medals.appendChild(m); });
+      const top = document.createElement('div'); top.className = 'ach-top'; top.append(nm, medals);
       const ds = document.createElement('div'); ds.className = 'ach-desc';
       ds.textContent = s.max ? 'Все ступени пройдены!' : `Дальше: ${s.next.name} — ${s.next.desc}`;
-      const bar = document.createElement('div'); bar.className = 'ach-bar'; const fill = document.createElement('i');
-      const goal = s.max ? ch.tiers[n - 1].goal : s.next.goal; fill.style.width = Math.min(100, s.v / goal * 100) + '%'; bar.appendChild(fill);
+      const goal = s.max ? ch.tiers[n - 1].goal : s.next.goal;
+      const bar = document.createElement('div'); bar.className = 'ach-bar big'; const fill = document.createElement('i'); fill.style.width = Math.min(100, s.v / goal * 100) + '%'; bar.appendChild(fill);
       const meta = document.createElement('div'); meta.className = 'ach-meta';
-      meta.textContent = `${fmt(Math.min(s.v, goal))} / ${fmt(goal)}${ch.unit ? ' ' + ch.unit : ''}` + (s.max ? '' : ` · награда: ${C.rewardText(s.next.reward)}`);
-      body.append(nm, ds, bar, meta); el.append(ic, body); list.appendChild(el);
+      const pv = document.createElement('span'); pv.className = 'pv'; pv.textContent = `${fmt(Math.min(s.v, goal))} / ${fmt(goal)}${ch.unit ? ' ' + ch.unit : ''}`; meta.appendChild(pv);
+      if (!s.max) meta.appendChild(rwChips(s.next.reward));
+      body.append(top, ds, bar, meta); el.append(ic, body); list.appendChild(el);
+      if (fresh.some(a => a.chain === ch.id) && !$('ach').classList.contains('hidden')) requestAnimationFrame(() => confetti(document.querySelector(`#achList .ach-item[data-chain="${ch.id}"]`)));
     }
   }
   // ---- daily quests + boosts
@@ -2159,65 +2194,72 @@
     e.stopImmediatePropagation(); e.preventDefault();
     qtMin = !!fold; store.set('ocs_qt_min', qtMin ? '1' : '0'); updateQuestTracker();
   });
+  const Q_ICON = { orbs: '🔮', rare: '💠', runner: '💨', mg: '🎮', zone2: '🚪', boss: '👹', chest: '🧰', portal: '🌀', event: '🎪', play: '⏱️', gold: '🌧️' };
+  const DIFF_NM = ['', 'Лёгкое', 'Среднее', 'Сложное'];
   function updateQuestTracker() {
     const el = $('qTrack'), d = profile && profile.stats && profile.stats.daily;
     if (!d || !Array.isArray(d.q)) { el.classList.add('hidden'); return; }
     el.classList.remove('hidden');
-    const n = d.q.filter(q => q.done).length;
-    el.textContent = ''; el.classList.toggle('qt-min', qtMin);
-    if (qtMin) { el.textContent = `📜 ${n}/${d.q.length}`; el.title = 'Развернуть задания'; return; }
+    const n = d.q.filter(q => q.done).length, sk = streakNow(profile.stats);
+    el.textContent = ''; el.classList.toggle('qt-min', qtMin); el.classList.toggle('qt-all', n === d.q.length);
+    if (qtMin) { el.textContent = `📜 ${n}/${d.q.length}` + (sk ? ` 🔥${sk}` : ''); el.title = 'Развернуть задания'; return; }
     el.title = 'Задания дня (Q)';
     const x = document.createElement('span'); x.className = 'qt-x'; x.textContent = '▾'; x.title = 'Свернуть'; x.setAttribute('role', 'button'); el.appendChild(x);
-    const h = document.createElement('div'); h.className = 'qt-head'; h.textContent = `📜 Задания ${n}/${d.q.length}` + (streakNow(profile.stats) ? ` · 🔥${streakNow(profile.stats)}` : ''); el.appendChild(h);
+    const h = document.createElement('div'); h.className = 'qt-head'; h.innerHTML = `<span>📜 Задания <b>${n}/${d.q.length}</b></span>` + (sk ? `<span class="qt-fl">🔥${sk}</span>` : ''); el.appendChild(h);
     for (const q of d.q) {
       const def = C.QUEST_BY_ID[q.id]; if (!def) continue;
-      const row = document.createElement('div'); row.className = 'qt-row' + (q.done ? ' done' : '');
-      row.textContent = `${q.done ? '✅' : '▫️'} ${def.text} ${q.done ? '' : `${fmt(q.p)}/${fmt(def.goal)}`}`; el.appendChild(row);
+      const row = document.createElement('div'); row.className = 'qt-row d' + def.diff + (q.done ? ' done' : '');
+      row.innerHTML = `<span class="qt-i">${q.done ? '✅' : Q_ICON[def.kind] || '▫️'}</span><span class="qt-t"></span><span class="qt-n">${q.done ? '' : `${fmt(q.p)}/${fmt(def.goal)}`}</span><i class="qt-bar" style="width:${Math.min(100, q.p / def.goal * 100)}%"></i>`;
+      row.querySelector('.qt-t').textContent = def.text; el.appendChild(row);
     }
   }
   let questTab = 'daily';
   document.querySelectorAll('#qTabs .tab').forEach(b => b.addEventListener('click', () => { questTab = b.dataset.qtab; renderQuests(); }));
+  const hms = ms => { const s = Math.max(0, Math.floor(ms / 1000)), d = Math.floor(s / 86400), p = x => String(x).padStart(2, '0'); return (d ? d + ' д ' : '') + `${p(Math.floor(s / 3600) % 24)}:${p(Math.floor(s / 60) % 60)}:${p(s % 60)}`; };
+  function qTimer() { const t = document.querySelector('#qReset .qr-t'); if (!t) return; t.textContent = hms(questTab === 'weekly' ? C.weekResetIn(Date.now() + srvSkew) : C.resetIn(Date.now())); }
+  setInterval(() => { if (!$('quests').classList.contains('hidden')) qTimer(); }, 1000);
+  function qCard(def, q, weekly, rw) {
+    const el = document.createElement('div'); el.className = 'q-item v2' + (weekly ? ' weekly' : ' d' + def.diff) + (q.done ? ' done' : ''); if (weekly) el.dataset.weekly = q.id; else el.dataset.diff = def.diff;
+    const ic = document.createElement('div'); ic.className = 'q-ic'; ic.textContent = Q_ICON[def.kind] || '📜';
+    const body = document.createElement('div'); body.className = 'q-body';
+    const top = document.createElement('div'); top.className = 'q-top';
+    const nm = document.createElement('b'); nm.textContent = def.text;
+    const df = document.createElement('span'); df.className = 'q-diff'; df.textContent = weekly ? '👑 Неделя' : '★'.repeat(def.diff) + ' ' + DIFF_NM[def.diff];
+    top.append(nm, df);
+    const pctv = Math.min(100, q.p / def.goal * 100);
+    const bar = document.createElement('div'); bar.className = 'ach-bar big'; const fill = document.createElement('i'); fill.style.width = pctv + '%'; bar.appendChild(fill);
+    const meta = document.createElement('div'); meta.className = 'ach-meta';
+    const pv = document.createElement('span'); pv.className = 'pv'; pv.textContent = `${fmt(Math.floor(Math.min(q.p, def.goal)))} / ${fmt(def.goal)} · ${Math.floor(pctv)}%`;
+    meta.append(pv, rwChips(rw));
+    body.append(top, bar, meta); el.append(ic, body);
+    if (q.done) { const st = document.createElement('span'); st.className = 'q-stamp'; st.textContent = 'ВЫПОЛНЕНО'; el.appendChild(st); }
+    return el;
+  }
   function renderWeekly() {
     const list = $('qList'), st = profile.stats || {}, wk = C.weekKey(Date.now() + srvSkew);
     const w = st.weekly && st.weekly.wk === wk ? st.weekly : { q: C.WEEKLY.map(q => ({ id: q.id, p: 0, done: false })) };
-    const ms = C.weekResetIn(Date.now() + srvSkew), dd = Math.floor(ms / 86400000), hh = Math.floor(ms / 3600000) % 24, mm = Math.floor(ms / 60000) % 60;
-    $('qStreak').textContent = `🗓 ${w.q.filter(q => q.done).length}/${C.WEEKLY.length}`;
-    $('qReset').textContent = `5 больших заданий на неделю. Сброс в понедельник 00:00 по Москве (через ${dd ? dd + ' д ' : ''}${hh} ч ${mm} мин). Прогресс сохраняется.`;
+    $('qStreak').textContent = `👑 ${w.q.filter(q => q.done).length}/${C.WEEKLY.length}`; $('qStreak').className = 'pill q-pill wk';
+    $('qReset').innerHTML = `<span class="qr-l">⏳ Сброс в понедельник 00:00 МСК</span><span class="qr-t"></span><small>5 больших заданий на неделю. Прогресс сохраняется.</small>`;
     $('qBonus').innerHTML = '';
-    for (const q of w.q) {
-      const def = C.WEEKLY_BY_ID[q.id]; if (!def) continue;
-      const el = document.createElement('div'); el.className = 'q-item weekly' + (q.done ? ' done' : ''); el.dataset.weekly = q.id;
-      const top = document.createElement('div'); top.className = 'q-top';
-      const nm = document.createElement('b'); nm.textContent = (q.done ? '✅ ' : '') + def.text;
-      const df = document.createElement('span'); df.className = 'q-diff'; df.textContent = '🗓'; top.append(nm, df);
-      const bar = document.createElement('div'); bar.className = 'ach-bar'; const fill = document.createElement('i'); fill.style.width = Math.min(100, q.p / def.goal * 100) + '%'; bar.appendChild(fill);
-      const meta = document.createElement('div'); meta.className = 'ach-meta'; meta.textContent = `${fmt(Math.floor(q.p))} / ${fmt(def.goal)} · награда: ${C.rewardText(Object.assign({ potion: 1 }, def.rw))}`;
-      el.append(top, bar, meta); list.appendChild(el);
-    }
+    for (const q of w.q) { const def = C.WEEKLY_BY_ID[q.id]; if (def) list.appendChild(qCard(def, q, true, Object.assign({ potion: 1 }, def.rw))); }
+    qTimer();
   }
   function renderQuests() {
     if (!profile) return;
     document.querySelectorAll('#qTabs .tab').forEach(b => b.classList.toggle('active', b.dataset.qtab === questTab));
+    $('quests').querySelector('.modal-card').classList.toggle('q-wk', questTab === 'weekly'); $('quests').querySelector('.modal-card').classList.add('q-v2');
     $('questsTitle').textContent = questTab === 'weekly' ? '🗓 Еженедельные задания' : '📜 Задания дня';
     if (questTab === 'weekly') { $('qList').textContent = ''; renderWeekly(); return; }
     const d = profile.stats && profile.stats.daily, list = $('qList'); list.textContent = '';
-    $('qStreak').textContent = `🔥 Серия: ${streakNow(profile.stats)}`;
-    const ms = C.resetIn(Date.now()), hh = Math.floor(ms / 3600000), mm = Math.floor(ms / 60000) % 60;
-    $('qReset').textContent = `3 новых задания каждый день в 00:00 по Москве (через ${hh} ч ${mm} мин). Выполните все три — бонус и +1 к серии.`;
+    const sk = streakNow(profile.stats);
+    $('qStreak').className = 'pill q-pill' + (sk ? ' hot' : ''); $('qStreak').innerHTML = `<span class="fl">🔥</span> Серия: <b>${fmt(sk)}</b>`;
+    $('qReset').innerHTML = `<span class="qr-l">⏳ Новые задания через</span><span class="qr-t"></span><small>Сброс в 00:00 по Москве. Выполните все три — бонус и +1 к серии.</small>`;
+    qTimer();
     if (!d) return;
-    for (const q of d.q) {
-      const def = C.QUEST_BY_ID[q.id]; if (!def) continue;
-      const el = document.createElement('div'); el.className = 'q-item' + (q.done ? ' done' : ''); el.dataset.diff = def.diff;
-      const top = document.createElement('div'); top.className = 'q-top';
-      const nm = document.createElement('b'); nm.textContent = (q.done ? '✅ ' : '') + def.text;
-      const df = document.createElement('span'); df.className = 'q-diff'; df.textContent = '★'.repeat(def.diff) + '☆'.repeat(3 - def.diff);
-      top.append(nm, df);
-      const bar = document.createElement('div'); bar.className = 'ach-bar'; const fill = document.createElement('i'); fill.style.width = Math.min(100, q.p / def.goal * 100) + '%'; bar.appendChild(fill);
-      const meta = document.createElement('div'); meta.className = 'ach-meta'; meta.textContent = `${fmt(q.p)} / ${fmt(def.goal)} · награда: ${C.rewardText(Object.assign({ potion: 1 }, q.rw))}`;
-      el.append(top, bar, meta); list.appendChild(el);
-    }
+    for (const q of d.q) { const def = C.QUEST_BY_ID[q.id]; if (def) list.appendChild(qCard(def, q, false, Object.assign({ potion: 1 }, q.rw))); }
     const st = profile.stats, next = st.streakDay === d.day ? st.streak : streakNow(st) + 1;
-    $('qBonus').innerHTML = d.bonus ? `🎉 Бонус за все задания получен! Серия: <b>${fmt(st.streak || 0)}</b> 🔥` : `Бонус за все 3: <b>${esc(C.rewardText(C.allDoneBonus(next)))}</b> (растёт с серией)`;
+    $('qBonus').className = 'q-bonus' + (d.bonus ? ' got' : '');
+    $('qBonus').innerHTML = d.bonus ? `🎉 Бонус за все задания получен! Серия: <b>${fmt(st.streak || 0)}</b> 🔥` : `🎁 Бонус за все 3: <b>${esc(C.rewardText(C.allDoneBonus(next)))}</b> <small>(растёт с серией)</small>`;
   }
   function updateBoostsHud() {
     const el = $('hudBoosts'), b = profile && profile.stats && profile.stats.boosts, now = Date.now();
