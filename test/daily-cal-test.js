@@ -26,6 +26,17 @@ const mk = () => { const a = { balance: 0, total: 0, inventory: INV.emptyInvento
   for (let i = 1; i <= 3; i++, t += DAY) D.claimDaily(a, t);
   const s0 = a.stats.shards; r = D.claimDaily(a, t); t += DAY;
   ok(r.ok && r.reward.day === 4 && r.reward.dup === 'e_calendar' && !r.reward.item && a.stats.shards === s0 + 3 && INV.countItem(a, 'e_calendar') === 1, 'second cycle: owned emote → 3 shards instead');
+  // paid skip
+  const b = mk(); b.stats.shards = 120;
+  r = D.skipDaily(b, T0); ok(!r.ok && r.code === 'claim_first' && b.stats.shards === 120, 'skip before free claim refused');
+  D.claimDaily(b, T0);
+  r = D.skipDaily(b, T0 + 1000); ok(r.ok && r.reward.day === 2 && r.reward.skip && b.stats.shards === 70 && b.stats.cal.n === 2 && INV.countItem(b, 'p_speed') === 1, 'skip: −50 shards, day 2 reward taken now');
+  r = D.skipDaily(b, T0 + 2000); ok(!r.ok && r.code === 'skipped' && b.stats.shards === 70 && b.stats.cal.n === 2, 'second skip same day refused');
+  r = D.claimDaily(b, T0 + 2000); ok(!r.ok, 'free claim still done for today after skip');
+  r = D.claimDaily(b, T0 + DAY); ok(r.ok && r.reward.day === 3, 'next day: free claim continues at day 3');
+  b.stats.shards = 49; r = D.skipDaily(b, T0 + DAY); ok(!r.ok && r.code === 'shards' && b.stats.shards === 49 && b.stats.cal.n === 3, 'not enough shards refused, nothing changed');
+  const w = mk(); w.stats.cal = { n: 13, day: C.dayKey(T0) }; w.stats.shards = 50; // day 13 claimed today → skip takes day 14
+  r = D.skipDaily(w, T0); ok(r.ok && r.reward.day === 14 && INV.hasItem(w, 't_pages') && w.stats.shards === 5 && D.calState(w, T0).idx === 0 && D.calState(w, T0).cycle === 1, 'skip to day 14 wraps the cycle');
   // over the wire: rate limit + once per day
   const PORT = 3161, DF = '/tmp/ocs-cal-test.json'; try { fs.unlinkSync(DF); } catch (_) {}
   const proc = spawn(process.execPath, ['server.js'], { cwd: __dirname + '/..', env: Object.assign({}, process.env, { PORT: String(PORT), DATA_FILE: DF, DATABASE_URL: '', EVENT_EVERY_MS: '0', OBSTACLES: '0' }), stdio: 'ignore' });
@@ -41,6 +52,9 @@ const mk = () => { const a = { balance: 0, total: 0, inventory: INV.emptyInvento
     ok(!c2.ok && c2.code === 'rate', 'immediate second claim rate-limited');
     await new Promise(r => setTimeout(r, 1600)); const c3 = await em('daily:claim');
     ok(!c3.ok && c3.code === 'claimed', 'second claim same day refused by the server');
+    const k1 = await em('daily:skip'); ok(!k1.ok && k1.code === 'rate', 'skip rate-limited');
+    await new Promise(r => setTimeout(r, 1600)); const k2 = await em('daily:skip');
+    ok(!k2.ok && k2.code === 'shards', 'socket skip without shards refused');
     s.close();
   } finally { proc.kill(); try { fs.unlinkSync(DF); } catch (_) {} }
   console.log(f ? `${f} FAILED` : 'ALL PASS'); process.exit(f ? 1 : 0);

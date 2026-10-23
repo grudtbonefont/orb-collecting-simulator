@@ -1085,3 +1085,11 @@ input[type=checkbox] { accent-color: var(--ui-cyan); }
 }
 .cal-day.next { border-style: dashed; border-color: rgba(255, 204, 51, .55); }
 .cal-day { min-width: 0; overflow: hidden; } .cal-day .cal-rw { overflow-wrap: anywhere; }
+.cal-rw { display: flex; flex-wrap: wrap; gap: 3px; justify-content: center; align-items: center; }
+.cal-ic { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; }
+.cal-it .ico.sm { width: 30px; height: 30px; }
+.cal-day.big .cal-it .ico.sm { width: 38px; height: 38px; }
+.cal-cur b { font-weight: 700; }
+.cal-skip { background: linear-gradient(180deg, rgba(150, 110, 255, .35), rgba(90, 60, 200, .35)); border: 1px solid rgba(180, 150, 255, .5); }
+.cal-skip.poor { opacity: .6; }
+.cal-foot { flex-wrap: wrap; gap: 8px; }

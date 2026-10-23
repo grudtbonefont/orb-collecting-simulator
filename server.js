@@ -1377,6 +1377,24 @@ io.on('connection', socket => {
       ack({ ok: true, reward: r.reward, state: r.state, profile: ownProfile(a) });
     } finally { a._calBusy = false; }
   });
+  socket.on('daily:skip', async ack => {
+    ack = safeAck(ack);
+    if (!acct) return ack({ ok: false, error: 'Сначала войдите в аккаунт' });
+    const now = Date.now();
+    if (now - calLast < 1500) return ack({ ok: false, error: 'Не так быстро! Подождите пару секунд.', code: 'rate' });
+    calLast = now;
+    const a = acct.acc;
+    if (a._calBusy) return ack({ ok: false, error: 'Подождите…', code: 'busy' });
+    a._calBusy = true;
+    try {
+      const r = DAILY.skipDaily(a, now);
+      if (!r.ok) return ack(r);
+      accountChanged(a);
+      try { await flush(); } catch (_) { /* retried by the periodic flush */ }
+      if (pl) pl.socket.emit('bal', { b: a.balance, t: a.total, s: pl.session });
+      ack({ ok: true, reward: r.reward, state: r.state, profile: ownProfile(a) });
+    } finally { a._calBusy = false; }
+  });
   // ---- promo codes (lib/codes.js): once per account, global maxUses, atomic, 5 attempts / minute / account
   socket.on('code:redeem', async (input, ack) => {
     ack = safeAck(ack);

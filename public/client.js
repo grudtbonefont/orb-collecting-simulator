@@ -2327,15 +2327,16 @@
     $('qBonus').innerHTML = d.bonus ? `🎉 Бонус за все задания получен! Серия: <b>${fmt(st.streak || 0)}</b> 🔥` : `🎁 Бонус за все 3: <b>${esc(C.rewardText(C.allDoneBonus(next)))}</b> <small>(растёт с серией)</small>`;
   }
   // ------------------------------------------------------------ daily rewards calendar (server: lib/daily.js, C.CALENDAR)
-  const calInfo = () => { const c = (profile && profile.stats && profile.stats.cal) || {}, n = Math.max(0, c.n | 0), L = C.CALENDAR.length; return { n, idx: n % L, cycle: Math.floor(n / L), can: c.day !== C.dayKey(Date.now()) }; };
+  const CAL_SKIP = 50;
+  const calInfo = () => { const c = (profile && profile.stats && profile.stats.cal) || {}, n = Math.max(0, c.n | 0), L = C.CALENDAR.length, t = C.dayKey(Date.now()), can = c.day !== t; return { n, idx: n % L, cycle: Math.floor(n / L), can, skip: !can && c.skip !== t }; };
   function updateCalDot() { const d = $('calDot'); if (d) d.classList.toggle('hidden', !(profile && calInfo().can)); }
-  function calRewardHtml(rw) {
+  function calRewardHtml(rw) { // icon-based: item/potion sprites (same as inventory), currency icons, amounts; names in title
     const out = [];
     if (rw.item) { const it = G.ITEM_BY_ID[rw.item]; const ow = profile && (profile.inventory || []).some(s => s.id === rw.item);
-      out.push(`<span class="cal-it rar-${it.rarity}" title="${esc(it.name)}"></span><b class="cal-nm" style="color:${G.RARITIES[it.rarity].color}">${esc(it.name)}</b>${ow ? `<small class="cal-dup">уже есть → ${shardsH(rw.dup)}</small>` : ''}`); }
-    if (rw.orbs) out.push(`<span class="cal-v">${orbsH(rw.orbs)}</span>`);
-    if (rw.shards) out.push(`<span class="cal-v">${shardsH(rw.shards)}</span>`);
-    for (const p of rw.potions || []) { const d = G.ITEM_BY_ID[p]; out.push(`<span class="cal-v" title="${esc(d.name)}">${d.icon} ${esc(d.name.replace('Зелье ', ''))}</span>`); }
+      out.push(`<span class="cal-ic cal-it" data-icon="${esc(rw.item)}" title="${esc(it.name)} (${esc(G.RARITIES[it.rarity].name)})"></span>${ow ? `<small class="cal-dup" title="Уже есть — выдаются осколки">→ ${shardsH(rw.dup)}</small>` : ''}`); }
+    if (rw.orbs) out.push(`<span class="cal-ic cal-cur" title="${fmt(rw.orbs)} сфер">${ORB_I}<b>${fmt(rw.orbs)}</b></span>`);
+    if (rw.shards) out.push(`<span class="cal-ic cal-cur" title="${fmt(rw.shards)} осколков">${SHARD_I}<b>${fmt(rw.shards)}</b></span>`);
+    for (const p of rw.potions || []) out.push(`<span class="cal-ic cal-it" data-icon="${esc(p)}" title="${esc(G.ITEM_BY_ID[p].name)}"></span>`);
     return out.join('');
   }
   function renderCal() {
@@ -2346,26 +2347,30 @@
       const st = i < s.idx ? 'got' : i === s.idx ? (s.can ? 'today' : 'next') : 'locked';
       const el = document.createElement('div'); el.className = 'cal-day ' + st + (rw.item ? ' big' : ''); el.dataset.day = i + 1; if (st === 'next') el.title = 'Завтра';
       el.innerHTML = `<div class="cal-n">День ${i + 1}</div><div class="cal-rw">${calRewardHtml(rw)}</div>${st === 'got' ? '<div class="cal-ok">✓</div>' : ''}`;
-      const sp = el.querySelector('.cal-it'); if (sp) sp.appendChild(iconEl(rw.item, 'sm'));
+      el.querySelectorAll('.cal-it').forEach(sp => sp.appendChild(iconEl(sp.dataset.icon, 'sm')));
       grid.appendChild(el);
     });
     const btn = $('calClaim'); btn.disabled = !s.can; btn.textContent = s.can ? `Забрать награду дня ${s.idx + 1}` : '✓ Сегодня получено';
+    const sk = $('calSkip'), have = (profile.stats && profile.stats.shards) || 0; sk.classList.toggle('hidden', !s.skip); sk.classList.toggle('poor', have < CAL_SKIP);
+    sk.innerHTML = `⏭ Пропустить день за ${CAL_SKIP} ${SHARD_I}`; sk.title = `Забрать награду дня ${s.idx + 1} сейчас (1 раз в день). У вас ${fmt(have)} осколков`;
     calTick();
   }
   function calTick() { const el = $('calTimer'); if (!el || $('cal').classList.contains('hidden')) return; el.textContent = calInfo().can ? '' : `Следующая через ${fmtDur(C.resetIn(Date.now()))}`; }
   setInterval(() => { calTick(); updateCalDot(); }, 1000);
-  $('calClaim').onclick = () => {
-    const btn = $('calClaim'); btn.disabled = true;
-    socket.emit('daily:claim', res => {
-      if (!res || !res.ok) { toast((res && res.error) || 'Ошибка', 'err'); renderCal(); return; }
+  const calAct = (ev, btn) => { btn.disabled = true;
+    socket.emit(ev, res => {
+      if (!res || !res.ok) { toast((res && res.error) || 'Ошибка', 'err'); btn.disabled = false; renderCal(); return; }
+      btn.disabled = false;
       setProfile(res.profile); renderCal();
       const r = res.reward, parts = [];
       if (r.item) parts.push('«' + G.ITEM_BY_ID[r.item].name + '»');
       if (r.orbs) parts.push(orbsH(r.orbs)); if (r.shards) parts.push(shardsH(r.shards));
       for (const p of (r.potions || []).concat(r.pending || [])) parts.push(G.ITEM_BY_ID[p].icon + ' ' + esc(G.ITEM_BY_ID[p].name));
-      toast('', 'ok', `📅 Награда дня ${r.day}: ${parts.join(', ')}${r.dup ? ' <small>(предмет уже был — выданы осколки)</small>' : ''}${r.pending ? ' <small>(зелья придут, когда освободится место)</small>' : ''}`);
+      toast('', 'ok', `${r.skip ? `⏭ Пропуск за ${r.cost} ${SHARD_I} — награда` : '📅 Награда'} дня ${r.day}: ${parts.join(', ')}${r.dup ? ' <small>(предмет уже был — выданы осколки)</small>' : ''}${r.pending ? ' <small>(зелья придут, когда освободится место)</small>' : ''}`);
     });
   };
+  $('calClaim').onclick = () => calAct('daily:claim', $('calClaim'));
+  $('calSkip').onclick = () => calAct('daily:skip', $('calSkip'));
   function updateBoostsHud() {
     const el = $('hudBoosts'), b = profile && profile.stats && profile.stats.boosts, now = Date.now();
     const on = b ? Object.keys(C.BOOSTS).filter(k => b[k] > now) : [];
