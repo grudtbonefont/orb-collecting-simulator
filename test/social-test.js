@@ -21,7 +21,7 @@ const ROOT = process.cwd(), PORT = 3145, URL = 'http://localhost:' + PORT, sleep
   // 1. profile card: click on the other player
   const clickAt = async (p, wx, wy) => { const xy = await p.evaluate(([x, y]) => window.OCSWorldToClient(x, y), [wx, wy]); await p.mouse.click(xy.x, xy.y); };
   await clickAt(A, 900, 980); await A.waitForSelector('#pcard:not(.hidden)', { timeout: 4000 }).catch(() => {});
-  const txt = await A.textContent('#pcard'); ok(/BobTest/.test(txt) && /\/78/.test(txt) && /Побеждено боссов/.test(txt) && /Время в игре/.test(txt), 'profile card of other player');
+  const txt = await A.textContent('#pcard'); ok(/BobTest/.test(txt) && new RegExp('/' + require('../public/content.js').ACH.length).test(txt) && /Побеждено боссов/.test(txt) && /Время в игре/.test(txt), 'profile card of other player');
   ok(!/pass|token|ip/i.test(JSON.stringify(await A.evaluate(() => new Promise(r => setTimeout(() => window.__s.emit('profile:public', 0, r), 400))))), 'bad id → no data');
   await A.screenshot({ path: ROOT + '/screenshot-profile.png' });
   await A.click('#pcClose'); await sleep(400); await clickAt(A, 900, 900); await A.waitForSelector('#pcard:not(.hidden)', { timeout: 4000 }).catch(() => {}); ok(/Alice \(вы\)/.test(await A.textContent('#pcName')), 'own profile card'); await A.click('#pcClose');

@@ -7,7 +7,7 @@ const ROOT = process.cwd(), PORT = 3144, URL = 'http://localhost:' + PORT, sleep
   for (let i = 0; i < 100; i++) { try { if ((await fetch(URL + '/api/health')).ok) break; } catch (_) {} await sleep(200); }
   const def = G.ITEM_BY_ID.h_trophy; ok(def && def.cat === 'hat' && def.price == null && !def.exclusive, 'Кубок: hat, not in shop / shard shop');
   const shop = await (await fetch(URL + '/api/shop')).json(); ok(!shop.items.some(i => i.id === 'h_trophy' && (i.price > 0 || i.shardPrice > 0)), 'no price in shop api');
-  const ids = C.ACH.map(a => a.id); ok(ids.length === 78, 'total tiers ' + ids.length);
+  const ids = C.ACH.map(a => a.id); const N = ids.length; ok(N === 79, 'total tiers ' + N);
   const b = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox'] }); const errs = [];
   async function reg(name, play = true) { const p = await (await b.newContext({ viewport: { width: 1280, height: 720 } })).newPage(); p.on('pageerror', e => errs.push(e.message));
     await p.goto(URL); await sleep(300); await p.click('.auth-tab[data-mode=register]'); await p.fill('#nick', name); await p.fill('#pass', 'demo-pass-123'); await p.fill('#pass2', 'demo-pass-123'); await p.click('#authSubmit'); await p.waitForSelector('#profile:not(.hidden)');
@@ -18,11 +18,11 @@ const ROOT = process.cwd(), PORT = 3144, URL = 'http://localhost:' + PORT, sleep
   const prof = p => p.evaluate(() => new Promise(res => { const go = () => window.__s.emit('profile:get', null, x => x && x.profile ? res(x.profile) : setTimeout(go, 400)); go(); }));
   // A: completes the last tier while playing → awarded live
   const A = await reg('TrophyA');
-  await st(A, { achSet: ids.slice(0, -1) }); await sleep(400); let pa = await prof(A); ok(!pa.inventory.some(s => s.id === 'h_trophy'), '77/78: no trophy yet');
-  await A.click('[data-open=ach]'); await sleep(300); ok(/77 \/ 78/.test(await A.textContent('#achTrophyTxt')) && /Все достижения → Кубок/.test(await A.textContent('#achTrophy')), 'achievements UI: final reward line 77 / 78');
+  await st(A, { achSet: ids.slice(0, -1) }); await sleep(400); let pa = await prof(A); ok(!pa.inventory.some(s => s.id === 'h_trophy'), `${N - 1}/${N}: no trophy yet`);
+  await A.click('[data-open=ach]'); await sleep(300); ok(new RegExp(`${N - 1} / ${N}`).test(await A.textContent('#achTrophyTxt')) && /Все достижения → Кубок/.test(await A.textContent('#achTrophy')), 'achievements UI: final reward line 77 / 78');
   await A.evaluate(() => document.querySelectorAll('.modal').forEach(m => m.classList.add('hidden'))); await A.evaluate(() => { document.getElementById('toasts').textContent = ''; });
   await st(A, { achSet: ids }); await sleep(600); pa = await prof(A);
-  ok(pa.inventory.filter(s => s.id === 'h_trophy').length === 1 && pa.stats.trophyAt, '78/78: trophy granted to inventory');
+  ok(pa.inventory.filter(s => s.id === 'h_trophy').length === 1 && pa.stats.trophyAt, `${N}/${N}: trophy granted to inventory`);
   ok(/Кубок/.test(await A.textContent('#toasts')), 'notification on award');
   await st(A, { achSet: ids }); await sleep(400); pa = await prof(A); ok(pa.inventory.filter(s => s.id === 'h_trophy').reduce((n, s) => n + s.q, 0) === 1, 'granted only once');
   const eq = await A.evaluate(() => new Promise(r => window.__s.emit('inv:equip', 'h_trophy', r))); await sleep(400); ok(eq && eq.ok, 'equippable as hat: ' + JSON.stringify(eq).slice(0, 80));

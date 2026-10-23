@@ -50,7 +50,7 @@
     { id: 'nearlaser', cat: 'danger', icon: '🔥', name: 'По краю', desc: n => `Проведите ${fmtN(n)} с рядом с лазером, не попав под луч`, stat: p => p.stats.nearLaserSec, goals: [30, 180, 900, 3000], unit: 'с' },
     { id: 'zone2', cat: 'explore', icon: '🚪', name: 'Первопроходец', desc: () => 'Откройте дверь во 2-ю зону', stat: p => (p.stats.unlockedDoor2 ? 1 : 0), goals: [1], k: 1.5, noBase: true }, // not baseline-based: unlocked accounts get it once after the reset
     { id: 'dist', cat: 'explore', icon: '👣', name: 'Путешественник', desc: n => `Пройдите ${fmtN(n)} м`, stat: p => p.stats.distM, goals: [2000, 25000, 150000, 600000], unit: 'м' },
-    { id: 'play', cat: 'explore', icon: '⏱️', name: 'Ветеран', desc: n => `Проведите в игре ${n >= 60 ? fmtN(n / 60) + ' ч' : n + ' мин'}`, stat: playMin, goals: [60, 300, 1500, 6000], unit: 'мин' },
+    { id: 'play', cat: 'explore', icon: '⏱️', name: 'Ветеран', desc: n => `Проведите в игре ${n >= 60 ? fmtN(n / 60) + ' ч' : n + ' мин'}`, stat: playMin, goals: [20, 60, 300, 720, 1440], unit: 'мин' },
     { id: 'items', cat: 'collect', icon: '🎨', name: 'Коллекционер', desc: n => `Соберите ${fmtN(n)} разных предметов`, stat: p => p.items, goals: [3, 10, 20, 40] },
     { id: 'buys', cat: 'collect', icon: '🛒', name: 'Покупатель', desc: n => `Совершите ${fmtN(n)} ${pl(n, 'покупку', 'покупки', 'покупок')} в магазине`, stat: p => p.stats.buys, goals: [1, 5, 20, 60], k: 0.8 },
     { id: 'codes', cat: 'collect', icon: '🎟️', name: 'Охотник за кодами', desc: n => `Активируйте ${fmtN(n)} ${pl(n, 'промокод', 'промокода', 'промокодов')}`, stat: p => p.codesUsed, goals: [1, 3, 6], k: 0.7, noBase: true }, // distinct redeemed codes, all sources; not baseline-based (Oct 2026 fix)
