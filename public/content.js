@@ -53,7 +53,7 @@
     { id: 'play', cat: 'explore', icon: '⏱️', name: 'Ветеран', desc: n => `Проведите в игре ${n >= 60 ? fmtN(n / 60) + ' ч' : n + ' мин'}`, stat: playMin, goals: [60, 300, 1500, 6000], unit: 'мин' },
     { id: 'items', cat: 'collect', icon: '🎨', name: 'Коллекционер', desc: n => `Соберите ${fmtN(n)} разных предметов`, stat: p => p.items, goals: [3, 10, 20, 40] },
     { id: 'buys', cat: 'collect', icon: '🛒', name: 'Покупатель', desc: n => `Совершите ${fmtN(n)} ${pl(n, 'покупку', 'покупки', 'покупок')} в магазине`, stat: p => p.stats.buys, goals: [1, 5, 20, 60], k: 0.8 },
-    { id: 'codes', cat: 'collect', icon: '🎟️', name: 'Охотник за кодами', desc: n => `Активируйте ${fmtN(n)} ${pl(n, 'промокод', 'промокода', 'промокодов')}`, stat: p => p.codesUsed, goals: [1, 3, 6], k: 0.7 },
+    { id: 'codes', cat: 'collect', icon: '🎟️', name: 'Охотник за кодами', desc: n => `Активируйте ${fmtN(n)} ${pl(n, 'промокод', 'промокода', 'промокодов')}`, stat: p => p.codesUsed, goals: [1, 3, 6], k: 0.7, noBase: true }, // distinct redeemed codes, all sources; not baseline-based (Oct 2026 fix)
   ];
   function pl(n, one, few, many) { const a = n % 10, b = n % 100; return a === 1 && b !== 11 ? one : a >= 2 && a <= 4 && (b < 12 || b > 14) ? few : many; }
   function fmtN(n) { return Number(n).toLocaleString('ru-RU'); }

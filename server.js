@@ -68,7 +68,7 @@ function newAccount(name, passHash) {
 // Only what the owner may see about their own account (never the hash/key).
 function ownProfile(a) {
   const { pwResetMark, ...stats } = a.stats || {}; // internal marker stays server-side
-  return { name: a.name, balance: a.balance, shards: (a.stats && a.stats.shards) || 0, codesUsed: (a.codes || []).length, total: a.total, equipped: a.equipped, upgrades: a.upgrades, stats, mustChangePw: !!(a.stats && a.stats.mustChangePw),
+  return { name: a.name, balance: a.balance, shards: (a.stats && a.stats.shards) || 0, codesUsed: new Set((a.codes || []).map(c => String(c).trim().toUpperCase())).size, total: a.total, equipped: a.equipped, upgrades: a.upgrades, stats, mustChangePw: !!(a.stats && a.stats.mustChangePw),
     inventory: a.inventory.slots.map(s => ({ id: s.id, q: s.q, src: s.src })), slots: G.INV_CAP, cap: G.INV_CAP, used: INV.unitsUsed(a), createdAt: a.createdAt };
 }
 async function loadAccount(key) {
