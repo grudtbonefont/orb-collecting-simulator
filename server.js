@@ -712,7 +712,7 @@ app.get('/api/leaderboard', async (req, res) => {
   try { res.json(await leaderboard(limit, req.query.name)); }
   catch (e) { console.error('leaderboard failed:', e.message); res.status(503).json({ error: 'unavailable' }); }
 });
-app.get('/api/health', (req, res) => res.json({ ok: true, online: players.size, orbs: orbs.size, targetOrbs: targetOrbs(), event: ev ? ev.kind + ':' + ev.phase : null, eventsEnabled: EV_EVERY !== 0, weekend: weekendState().on, obstacles: obstacles.length, mini: FX.miniNow() ? FX.miniNow().kind : null, boss: FX.bossNow() ? FX.bossNow().phase : null, world: G.WORLD,
+app.get('/api/health', (req, res) => res.json({ ok: true, perf: req.query.perf === '1' ? (perf.at = 0, perfReport()) : perfReport(), online: players.size, orbs: orbs.size, targetOrbs: targetOrbs(), event: ev ? ev.kind + ':' + ev.phase : null, eventsEnabled: EV_EVERY !== 0, weekend: weekendState().on, obstacles: obstacles.length, mini: FX.miniNow() ? FX.miniNow().kind : null, boss: FX.bossNow() ? FX.bossNow().phase : null, world: G.WORLD,
   storage: store.mode, version: VERSION, uptimeSec: Math.round(process.uptime()) }));
 app.get('/api/shop', (req, res) => res.json({ items: G.ITEMS, upgrades: G.UPGRADES, minigames: G.MINIGAMES, orbs: G.ORB_TYPES, events: G.EVENTS, shardExchange: G.SHARD_EXCHANGE }));
 app.use((req, res) => res.status(404).type('text').send('Not found'));
@@ -1221,7 +1221,7 @@ io.on('connection', socket => {
     if (!pl || !isObj(m)) return;
     const s = Number(m.s), x = Number(m.x), y = Number(m.y);
     if (!Number.isFinite(s) || !Number.isFinite(x) || !Number.isFinite(y)) return;
-    if (pl.inputs.length >= 40) return;
+    if (pl.inputs.length >= 60) { perf.dropped++; return; }
     pl.inputs.push({ s, x: Math.max(-1, Math.min(1, x)), y: Math.max(-1, Math.min(1, y)) });
   });
 
@@ -1985,17 +1985,29 @@ function potionPickup(pl) {
     mapPots.splice(i, 1); pushPots(); pl.socket.emit('item', { id: p.item, qty: 1, source: 'arena' }); accountChanged(pl.acc); return;
   }
 }
+// tick cost / loop lag / dropped inputs (exposed in /api/health as perf; reset each report window of 60 s)
+const perf = { n: 0, sum: 0, max: 0, lagMax: 0, dropped: 0, at: Date.now(), last: null };
+function perfReport() { const now = Date.now(); if (now - perf.at < 60000 && perf.last) return perf.last;
+  perf.last = { tickAvgMs: perf.n ? +(perf.sum / perf.n).toFixed(3) : 0, tickMaxMs: +perf.max.toFixed(2), lagMaxMs: perf.lagMax, inputsDropped: perf.dropped, ticks: perf.n };
+  if (now - perf.at >= 60000) Object.assign(perf, { n: 0, sum: 0, max: 0, lagMax: 0, dropped: 0, at: now }); return perf.last; }
 function tick() {
+  const t0 = process.hrtime.bigint();
+  try { tickInner(); } finally { const ms = Number(process.hrtime.bigint() - t0) / 1e6; perf.n++; perf.sum += ms; if (ms > perf.max) perf.max = ms; }
+}
+function tickInner() {
   const now = Date.now(), dt = Math.min(250, now - lastTickAt);
+  perf.lagMax = Math.max(perf.lagMax, now - lastTickAt - G.TICK_MS);
   lastTickAt = now;
   for (const pl of players.values()) {
     pl.x0 = pl.x; pl.y0 = pl.y;
-    pl.budget = Math.min(pl.budget + 1, 6);
-    while (pl.inputs.length > 12) pl.lastSeq = pl.inputs.shift().s; // keep latency bounded
+    // movement budget grows with real elapsed time (not per tick), so a burst of inputs delayed by the network or a late tick
+    // is replayed instead of thrown away (dropped inputs = the client's prediction snaps back). Average speed stays capped.
+    pl.budget = Math.min(pl.budget + dt / G.TICK_MS, 40);
+    while (pl.inputs.length > 40) { pl.lastSeq = pl.inputs.shift().s; perf.dropped++; } // > 2 s behind: drop the oldest // keep latency bounded
     const speed = G.speedFor(pl.acc.upgrades.speed) * C.boostMult(pl.acc.stats, 'speed', now) * (pl.frozen ? 0 : pl.spd || 1) * (customOn(now) ? customEv.spd : 1) * funSpeed(pl, now) * G.potionMult(pl.acc.stats, 'speed', now);
     const solid = FX.solids();
     const radius = G.pickupFor(pl.acc.upgrades.magnet) * G.potionMult(pl.acc.stats, 'magnet', now);
-    while (pl.budget >= 1 && pl.inputs.length) {
+    for (let steps = 0; pl.budget >= 1 && pl.inputs.length && steps < 12; steps++) { // ≤ 12 steps a tick: a backlog drains over a few ticks
       const inp = pl.inputs.shift();
       pl.budget -= 1;
       const px = pl.x;

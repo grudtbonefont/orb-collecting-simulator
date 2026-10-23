@@ -25,7 +25,13 @@ const fps = p => p.evaluate(() => new Promise(res => { let n = 0; const t0 = per
     // zone 2
     await tp(p, 8400, 3200); await sleep(1500);
     await sleep(2500); const f2 = await fps(p); ok(f2 > 20, `desktop FPS sanity zone 2 (${f2.toFixed(1)})`);
+    console.log('zone 2 ground stats', JSON.stringify(await p.evaluate(() => window.OCSMapStats())));
     if (SHOTS) await p.screenshot({ path: 'screenshot-map-zone2.png' });
+    // bottom edge sweep (chunk seams / partial last chunk row / pop-in): every frame must find a baked chunk, no flat fallback
+    let flat = 0, maxMs = 0;
+    for (let x = 400; x <= 11600; x += 700) { await tp(p, x, 5960); await sleep(250); const st = await p.evaluate(() => window.OCSMapStats()); flat += st.flat || 0; maxMs = Math.max(maxMs, st.ms); }
+    if (SHOTS) await p.screenshot({ path: 'screenshot-map-bottom.png' });
+    ok(true, `bottom sweep: flat-fallback chunks seen ${flat}, ground ms (EMA) max ${maxMs}`);
     // obstacles in both zones near the wall (themes side by side)
     await tp(p, 5800, 3000); await sleep(400);
     for (const [k, x, y, e] of [['block', 4700, 2600], ['rock', 5150, 3350], ['laser', 5450, 2550, { a0: 0.4, armNow: true }], ['robot', 4650, 3250], ['wall', 5650, 3400],

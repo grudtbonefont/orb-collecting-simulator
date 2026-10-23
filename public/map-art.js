@@ -25,7 +25,6 @@
       const key = cx + ',' + cy; let f = featCache.get(key); if (f) return f;
       const r = rng(hash(cx, cy, 11)), x0 = cx * CH, y0 = cy * CH, L = [];
       const add = (k, n, extra) => { for (let i = 0; i < n; i++) { const x = x0 + r() * CH, y = y0 + r() * CH; L.push(Object.assign({ k, x, y, z: zoneOf(x), s: r(), a: r() * 6.283, v: r() }, extra ? extra(r) : null)); } };
-      add('blob', 6); if (r() < 0.6) add('patch', 1);
       add('rock', 1); add('tuft', 6); add('flower', 4); // meadow (zone 1)
       add('stump', 1); add('fern', 3); add('leaf', 5); if (r() < 0.35) add('mush', 1); // forest (zone 2)
       f = L.filter(d => d.x > 0 && d.x < WW && d.y > 0 && d.y < WH);
@@ -39,7 +38,7 @@
       const only = { flower: 1, rock: 1, bush: 2, stump: 2, fern: 2, leaf: 2, mush: 2, canopy: 2 }[d.k];
       if (only && only !== z) return;
       switch (d.k) {
-        case 'rock': { const rr = 5 + s * 8; g.fillStyle = 'rgba(0,0,0,.18)'; rockShape(g, d.x + 2, d.y + 3, rr, d.a); g.fill();
+        case 'rock': { const rr = 5 + s * 8; 
           g.fillStyle = p.rock; rockShape(g, d.x, d.y, rr, d.a); g.fill(); g.fillStyle = p.rockHi; rockShape(g, d.x - rr * 0.2, d.y - rr * 0.25, rr * 0.5, d.a + 1, 6); g.fill(); break; }
         case 'tuft': if (lod < 1) break; { const h = 6 + s * 7; g.strokeStyle = p.tuft[(d.v * 3) | 0]; g.lineWidth = 1.7; g.lineCap = 'round'; g.beginPath();
           for (let i = -2; i <= 2; i++) { g.moveTo(d.x + i * 1.6, d.y); g.quadraticCurveTo(d.x + i * 2.6, d.y - h * 0.6, d.x + i * 3.4 + (d.v - 0.5) * 3, d.y - h * (1 - Math.abs(i) * 0.15)); } g.stroke(); break; }
@@ -55,7 +54,7 @@
           for (const [ox, oy, k, c] of [[0, 0, 1, '#2f7a30'], [-0.45, -0.2, 0.62, '#3a8c38'], [0.4, -0.25, 0.58, '#3a8c38'], [-0.1, -0.4, 0.5, '#4ea046'], [0.15, 0.15, 0.45, '#358233']]) {
             g.fillStyle = c; g.beginPath(); g.arc(d.x + ox * rr, d.y + oy * rr, rr * k, 0, 6.283); g.fill(); }
           g.fillStyle = 'rgba(255,255,255,.08)'; g.beginPath(); g.arc(d.x - rr * 0.3, d.y - rr * 0.45, rr * 0.3, 0, 6.283); g.fill(); break; }
-        case 'stump': { const rr = 9 + s * 6; g.fillStyle = 'rgba(0,0,0,.25)'; g.beginPath(); g.ellipse(d.x + 3, d.y + 4, rr + 2, rr, 0, 0, 6.283); g.fill();
+        case 'stump': { const rr = 9 + s * 6; 
           g.fillStyle = '#6b4a2b'; g.beginPath(); g.arc(d.x, d.y, rr, 0, 6.283); g.fill(); g.fillStyle = '#c79b62'; g.beginPath(); g.arc(d.x, d.y, rr * 0.78, 0, 6.283); g.fill();
           g.strokeStyle = 'rgba(110,70,35,.6)'; g.lineWidth = 1; for (const k of [0.55, 0.32]) { g.beginPath(); g.arc(d.x, d.y, rr * k, 0, 6.283); g.stroke(); }
           g.fillStyle = 'rgba(80,150,60,.7)'; g.beginPath(); g.arc(d.x + rr * 0.7, d.y - rr * 0.5, rr * 0.35, 0, 6.283); g.fill(); break; }
@@ -78,8 +77,8 @@
         const pts = []; for (let i = 0; i < 10; i++) { const a = i / 10 * 6.283, q = rr * (0.78 + 0.22 * Math.sin(d.a * 5 + i * 2.1)); pts.push([d.x + Math.cos(a) * q, d.y + Math.sin(a) * q * 0.75]); }
         g.beginPath(); for (let i = 0; i <= 10; i++) { const A = pts[i % 10], B = pts[(i + 1) % 10], mx = (A[0] + B[0]) / 2, my = (A[1] + B[1]) / 2; i ? g.quadraticCurveTo(A[0], A[1], mx, my) : g.moveTo(mx, my); } g.closePath(); g.fill(); g.globalAlpha = 1; }
       // grain (texture specks)
-      const r = rng(hash(cx, cy, 3 + zone)), n = lod < 1 ? 30 : 110;
-      for (let i = 0; i < n; i++) { g.fillStyle = p.grain[(r() * 3) | 0]; g.globalAlpha = 0.15 + r() * 0.2; const sz = 1 + r() * 1.8; g.fillRect(x0 + r() * CH, y0 + r() * CH, sz, sz * (0.5 + r())); }
+      const r = rng(hash(cx, cy, 3 + zone)), n = lod < 1 ? 30 : 90;
+      for (let i = 0; i < n; i++) { g.fillStyle = p.grain[(r() * 3) | 0]; g.globalAlpha = 0.08 + r() * 0.1; const sz = 1 + r() * 1.8; g.fillRect(x0 + r() * CH, y0 + r() * CH, sz, sz * (0.5 + r())); }
       g.globalAlpha = 1;
       // paths
       for (const pa of PATHS) { if (pa[0] !== zone || !pa[1] || pa[2] > 0.7 || pa[2] < 0.3) continue; const s0 = pa[1] ? x0 - 80 : y0 - 80, s1 = pa[1] ? x0 + CH + 80 : y0 + CH + 80;
@@ -108,53 +107,35 @@
     function getChunk(cx, cy, res, budget) {
       const key = cx + ',' + cy + '@' + res; let e = cache.get(key);
       if (e) { cache.delete(key); cache.set(key, e); return e.c; }
-      if (budget.n <= 0) { for (const r2 of [1.5, 1, 0.5, 0.25]) { const o = cache.get(cx + ',' + cy + '@' + r2); if (o) return o.c; } return null; }
+      if (budget.n <= 0) { for (const r2 of [1.5, 1, 0.5, 0.25]) { const o = cache.get(cx + ',' + cy + '@' + r2); if (o) return o.c; } return low.get(cx + ',' + cy) || null; }
       budget.n--; e = makeChunk(cx, cy, res); cache.set(key, e); pxUsed += e.px;
       while (pxUsed > PX_CAP && cache.size > 1) { const k = cache.keys().next().value; pxUsed -= cache.get(k).px; cache.delete(k); }
       return e.c;
     }
+    // whole-world 0.25-res picture, baked a few chunks per frame after load (never evicted): the fallback while sharper chunks build
+    const low = new Map(), NX = Math.ceil(WW / CH), NY = Math.ceil(WH / CH); let bakeI = 0;
+    function prebake() { for (let k = 0; k < 3 && bakeI < NX * NY; k++, bakeI++) { const cx = bakeI % NX, cy = (bakeI / NX) | 0; low.set(cx + ',' + cy, makeChunk(cx, cy, 0.25).c); } }
     const resFor = (zoom, dpr) => { const q = zoom * dpr; const r = q >= 1.2 ? 1.5 : q >= 0.7 ? 1 : q >= 0.35 ? 0.5 : 0.25; return COARSE ? (zoom < 0.4 ? 0.25 : Math.min(1, r)) : r; };
     let stats = { chunks: 0, built: 0 };
-    function drawGround(g, cam, VW, VH, zoom, dpr, t) {
+    let gms = 0; // EMA of the ground's frame cost (ms) — window.OCSMapStats().ms
+    function drawGround(g, cam, VW, VH, zoom, dpr, t) { const T0 = performance.now(); drawGround0(g, cam, VW, VH, zoom, dpr, t); gms = gms * 0.95 + (performance.now() - T0) * 0.05; stats.ms = +gms.toFixed(3); }
+    function drawGround0(g, cam, VW, VH, zoom, dpr, t) {
       g.fillStyle = '#05060d'; g.fillRect(0, 0, VW, VH);
       const res = resFor(zoom, dpr), budget = { n: res <= 0.5 ? 8 : 3 }, n0 = budget.n;
       const cx0 = Math.max(0, Math.floor(cam.x / CH)), cx1 = Math.min(Math.ceil(WW / CH) - 1, Math.floor((cam.x + VW) / CH));
       const cy0 = Math.max(0, Math.floor(cam.y / CH)), cy1 = Math.min(Math.ceil(WH / CH) - 1, Math.floor((cam.y + VH) / CH));
-      let cnt = 0; const ov = 1 / (res * zoom * dpr) + 0.01;
+      prebake(); let cnt = 0, flat = 0; const ov = 1 / (res * zoom * dpr) + 0.01;
       for (let cy = cy0; cy <= cy1; cy++) for (let cx = cx0; cx <= cx1; cx++) {
         const c = getChunk(cx, cy, res, budget); cnt++;
         const x = cx * CH - cam.x, y = cy * CH - cam.y, w = Math.min(CH, WW - cx * CH), h = Math.min(CH, WH - cy * CH);
-        if (c) g.drawImage(c, 0, 0, c.width * w / CH, c.height * h / CH, x, y, w + ov, h + ov);
-        else { g.fillStyle = P[zoneOf(cx * CH + CH / 2)].base; g.fillRect(x, y, w + ov, h + ov); }
+        if (c) { const sw = Math.max(1, Math.floor(c.width * w / CH)), sh = Math.max(1, Math.floor(c.height * h / CH)); g.drawImage(c, 0, 0, sw, sh, x, y, w + (w < CH ? 0 : ov), h + (h < CH ? 0 : ov)); }
+        else { flat++; g.fillStyle = P[zoneOf(cx * CH + CH / 2)].base; g.fillRect(x, y, w + ov, h + ov); }
       }
-      stats = { chunks: cnt, built: n0 - budget.n, cache: cache.size, res };
-      // live details: swaying grass, fireflies, crystal shimmer (skipped when zoomed far out)
-      if (zoom >= 0.45) {
-        g.save(); g.translate(-cam.x, -cam.y);
-        for (let cy = cy0; cy <= cy1; cy++) for (let cx = cx0; cx <= cx1; cx++) {
-          const r = rng(hash(cx, cy, 21));
-          for (let i = 0; i < 2; i++) { const x = cx * CH + r() * CH, y = cy * CH + r() * CH, z = zoneOf(x), p = P[z], h = 12 + r() * 9, sw = RM ? 0 : Math.sin(t * 1.7 + x * 0.013 + y * 0.007) * 3.2;
-            if (x > WW || y > WH) continue;
-            g.strokeStyle = p.tuft[i % 3]; g.lineWidth = z === 1 ? 2 : 1.5; g.lineCap = 'round'; g.beginPath();
-            for (let k = -2; k <= 2; k++) { g.moveTo(x + k * 2, y); g.quadraticCurveTo(x + k * 3 + sw * 0.4, y - h * 0.55, x + k * 4.2 + sw, y - h * (1 - Math.abs(k) * 0.14)); } g.stroke(); }
-          if (!RM) {
-            for (let i = 0; i < 1; i++) { const bx = cx * CH + r() * CH, by = cy * CH + r() * CH, ph = r() * 9, z = zoneOf(bx); if (r() < 0.6) continue;
-              if (z !== 2) continue; const x = bx + Math.sin(t * 0.6 + ph) * 40, y = by + Math.cos(t * 0.45 + ph * 1.3) * 30, a = 0.35 + 0.65 * Math.max(0, Math.sin(t * 1.9 + ph * 3));
-              if (x > WW || y > WH) continue;
-              const gl = g.createRadialGradient(x, y, 0, x, y, 9); gl.addColorStop(0, `rgba(${P[z].fly},${0.55 * a})`); gl.addColorStop(1, `rgba(${P[z].fly},0)`); g.fillStyle = gl; g.fillRect(x - 9, y - 9, 18, 18);
-              g.fillStyle = `rgba(255,255,230,${0.9 * a})`; g.fillRect(x - 1, y - 1, 2, 2); }
-            for (const d of feats(cx, cy)) if (false) { const a = Math.max(0, Math.sin(t * 2.3 + d.a * 7)); if (a < 0.7) continue;
-              const x = d.x + (d.v - 0.5) * 8, y = d.y - (8 + d.s * 8) * 0.8, s = 4 * (a - 0.7) / 0.3 + 1; g.fillStyle = `rgba(255,255,255,${(a - 0.7) * 3})`;
-              g.beginPath(); g.moveTo(x, y - s * 2); g.lineTo(x + s * 0.4, y); g.lineTo(x, y + s * 2); g.lineTo(x - s * 0.4, y); g.closePath(); g.fill(); g.fillRect(x - s * 1.6, y - 0.6, s * 3.2, 1.2); }
-          }
-        }
-        g.restore();
-      }
+      stats = { chunks: cnt, built: n0 - budget.n, cache: cache.size, res, flat, flatMax: Math.max(flat, stats.flatMax || 0), baked: low.size };
     }
     // ambient vignette in screen space (under players/orbs, over the ground)
     function drawVignette(g, VW, VH) {
-      const vg = g.createRadialGradient(VW / 2, VH / 2, Math.min(VW, VH) * 0.35, VW / 2, VH / 2, Math.max(VW, VH) * 0.75);
-      vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,10,0,0.28)'); g.fillStyle = vg; g.fillRect(0, 0, VW, VH);
+      // removed: no darkening of the screen edges (kept as a no-op for callers)
     }
     // ---------------------------------------------------------------- patterns: border + door wall + obstacle skins
     function pat(w, h, paint) { const c = document.createElement('canvas'); c.width = w; c.height = h; paint(c.getContext('2d'), w, h); return c; }
@@ -192,7 +173,7 @@
     function rectObs(g, o, zone) {
       const x0 = o.x - o.w / 2, y0 = o.y - o.h / 2, long = Math.max(o.w, o.h) > Math.min(o.w, o.h) * 1.8;
       const k = zone === 1 ? (long ? 'fence' : 'stone') : (long ? 'log' : 'mossy');
-      g.shadowColor = 'rgba(0,0,0,0.45)'; g.shadowBlur = 14; g.shadowOffsetY = 6; g.fillStyle = '#555'; g.fillRect(x0, y0, o.w, o.h); g.shadowBlur = 0; g.shadowOffsetY = 0;
+      g.fillStyle = 'rgba(0,0,0,.16)'; g.fillRect(x0 + 3, y0 + 6, o.w, o.h);
       g.save(); g.translate(x0, y0); if ((k === 'fence' && o.w > o.h) || (k === 'log' && o.h > o.w)) { g.rotate(-Math.PI / 2); g.translate(-o.h, 0); g.fillStyle = ptn(g, k); g.fillRect(0, 0, o.h, o.w); } else { g.fillStyle = ptn(g, k); g.fillRect(0, 0, o.w, o.h); } g.restore();
       const sh = g.createLinearGradient(x0, y0, x0 + o.w, y0 + o.h); sh.addColorStop(0, 'rgba(255,255,255,.12)'); sh.addColorStop(1, 'rgba(0,0,0,.22)'); g.fillStyle = sh; g.fillRect(x0, y0, o.w, o.h);
       g.strokeStyle = k === 'stone' ? '#6e6e66' : k === 'mossy' ? '#3a4036' : '#4a2f18'; g.lineWidth = 3; g.strokeRect(x0 + 1.5, y0 + 1.5, o.w - 3, o.h - 3);
@@ -201,7 +182,7 @@
       const path = () => { g.beginPath(); for (let i = 0; i < 11; i++) { const a = i / 11 * Math.PI * 2, rr = o.r * (0.9 + 0.1 * Math.sin(o.id * 7 + i * 2.3)); i ? g.lineTo(o.x + Math.cos(a) * rr, o.y + Math.sin(a) * rr) : g.moveTo(o.x + Math.cos(a) * rr, o.y + Math.sin(a) * rr); } g.closePath(); };
       const gr = g.createRadialGradient(o.x - o.r * 0.35, o.y - o.r * 0.4, o.r * 0.1, o.x, o.y, o.r);
       if (zone === 1) { gr.addColorStop(0, '#e2e1d8'); gr.addColorStop(0.6, '#aeada3'); gr.addColorStop(1, '#7c7b73'); } else { gr.addColorStop(0, '#a3ab9c'); gr.addColorStop(0.6, '#6f776b'); gr.addColorStop(1, '#474d44'); }
-      g.fillStyle = gr; g.shadowColor = 'rgba(0,0,0,0.45)'; g.shadowBlur = 14; g.shadowOffsetY = 6; path(); g.fill(); g.shadowBlur = 0; g.shadowOffsetY = 0;
+      g.save(); g.translate(3, 6); g.fillStyle = 'rgba(0,0,0,.16)'; path(); g.fill(); g.restore(); g.fillStyle = gr; path(); g.fill();
       g.save(); path(); g.clip();
       g.fillStyle = zone === 1 ? 'rgba(110,180,80,.45)' : 'rgba(70,140,55,.8)'; g.beginPath(); g.ellipse(o.x - o.r * 0.2, o.y - o.r * 0.8, o.r * (zone === 1 ? 0.5 : 0.85), o.r * 0.4, -0.2, 0, 6.283); g.fill();
       g.strokeStyle = 'rgba(0,0,0,.22)'; g.lineWidth = 2; g.beginPath(); g.moveTo(o.x + o.r * 0.1, o.y - o.r * 0.1); g.lineTo(o.x + o.r * 0.45, o.y + o.r * 0.3); g.lineTo(o.x + o.r * 0.3, o.y + o.r * 0.6); g.stroke();
@@ -211,12 +192,11 @@
     }
     function pylon(g, o, zone, armed, now) {
       const r = o.r;
-      g.shadowColor = 'rgba(0,0,0,.5)'; g.shadowBlur = 12; g.shadowOffsetY = 5;
-      g.fillStyle = zone === 1 ? '#b9b8ad' : '#6e4a2a'; g.beginPath(); for (let i = 0; i < 8; i++) { const a = i / 8 * 6.283 + 0.39; i ? g.lineTo(o.x + Math.cos(a) * r, o.y + Math.sin(a) * r) : g.moveTo(o.x + Math.cos(a) * r, o.y + Math.sin(a) * r); } g.closePath(); g.fill();
-      g.shadowBlur = 0; g.shadowOffsetY = 0; g.strokeStyle = zone === 1 ? '#c99a4a' : '#3f2a16'; g.lineWidth = 3; g.stroke();
+            g.fillStyle = zone === 1 ? '#b9b8ad' : '#6e4a2a'; g.beginPath(); for (let i = 0; i < 8; i++) { const a = i / 8 * 6.283 + 0.39; i ? g.lineTo(o.x + Math.cos(a) * r, o.y + Math.sin(a) * r) : g.moveTo(o.x + Math.cos(a) * r, o.y + Math.sin(a) * r); } g.closePath(); g.fill();
+      g.strokeStyle = zone === 1 ? '#c99a4a' : '#3f2a16'; g.lineWidth = 3; g.stroke();
       const gr = g.createRadialGradient(o.x - 4, o.y - 4, 1, o.x, o.y, r * 0.62); gr.addColorStop(0, '#ffd0d0'); gr.addColorStop(0.5, '#e01b30'); gr.addColorStop(1, '#4a0610');
-      g.fillStyle = gr; g.shadowColor = '#ff2030'; g.shadowBlur = armed ? 20 : 8 + 6 * Math.sin(now / 70);
-      g.beginPath(); g.arc(o.x, o.y, r * 0.6, 0, 6.283); g.fill(); g.shadowBlur = 0; g.strokeStyle = '#ff8a94'; g.lineWidth = 2; g.stroke();
+      if (armed) { g.fillStyle = 'rgba(255,40,50,.25)'; g.beginPath(); g.arc(o.x, o.y, r * 0.8, 0, 6.283); g.fill(); }
+      g.fillStyle = gr; g.beginPath(); g.arc(o.x, o.y, r * 0.6, 0, 6.283); g.fill(); g.strokeStyle = '#ff8a94'; g.lineWidth = 2; g.stroke();
     }
     function beamFx(g, o, ex, ey, zone, now) { // energy motes running along the (unchanged) red beam
       if (RM) return; g.fillStyle = '#ffe08a';

@@ -359,9 +359,8 @@
     }
     ctx.strokeStyle = 'rgba(255,90,90,0.10)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(o.x, o.y, G.OBSTACLES.robotRange, 0, Math.PI * 2); ctx.stroke(); // range
     const rp = MA.robotPal(G.zoneOf(o.x)), metal = (x0, y0, x1, y1) => { const g = ctx.createLinearGradient(x0, y0, x1, y1); g.addColorStop(0, rp[0]); g.addColorStop(0.35, rp[1]); g.addColorStop(0.6, rp[2]); g.addColorStop(1, rp[3]); return g; };
-    ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 14; ctx.shadowOffsetY = 6;
+    ctx.fillStyle = 'rgba(0,0,0,0.16)'; ctx.beginPath(); ctx.arc(o.x + 3, o.y + 6, r, 0, Math.PI * 2); ctx.fill(); // flat shadow (no shadowBlur: costly at 2.5x size)
     ctx.fillStyle = metal(o.x - r, o.y - r, o.x + r, o.y + r); ctx.beginPath(); ctx.arc(o.x, o.y, r, 0, Math.PI * 2); ctx.fill(); // body (player-like round)
-    ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
     ctx.strokeStyle = '#3a404d'; ctx.lineWidth = 3; ctx.stroke();
     ctx.strokeStyle = 'rgba(40,46,58,0.6)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(o.x - r * 0.8, o.y + r * 0.35); ctx.lineTo(o.x + r * 0.8, o.y + r * 0.35); ctx.stroke(); // panel seam
     for (const [dx, dy] of [[-0.6, 0.55], [0.6, 0.55], [-0.6, -0.55], [0.6, -0.55]]) { ctx.fillStyle = '#4a515f'; ctx.beginPath(); ctx.arc(o.x + dx * r, o.y + dy * r, 2.2, 0, Math.PI * 2); ctx.fill(); } // rivets
@@ -405,10 +404,10 @@
           ctx.font = '800 18px Segoe UI, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = `rgba(255,120,120,${0.6 + 0.4 * fl})`;
           ctx.fillText(`⚠ ЛАЗЕР через ${Math.max(1, Math.ceil((o.armAt - now) / 1000))}`, o.x, o.y - o.r - 18);
         } else { // the beam: wide red glow + white-hot core
-          ctx.lineCap = 'round'; ctx.shadowColor = '#ff2030'; ctx.shadowBlur = 24;
+          ctx.lineCap = 'round'; ctx.strokeStyle = 'rgba(255,40,60,0.18)'; ctx.lineWidth = 34; ctx.beginPath(); ctx.moveTo(o.x, o.y); ctx.lineTo(ex, ey); ctx.stroke(); // glow without shadowBlur
           ctx.strokeStyle = 'rgba(255,40,60,0.45)'; ctx.lineWidth = 16; ctx.beginPath(); ctx.moveTo(o.x, o.y); ctx.lineTo(ex, ey); ctx.stroke();
           ctx.strokeStyle = '#ff3b4e'; ctx.lineWidth = 7; ctx.stroke();
-          ctx.shadowBlur = 0; ctx.strokeStyle = '#fff2f2'; ctx.lineWidth = 2.2; ctx.stroke();
+          ctx.strokeStyle = '#fff2f2'; ctx.lineWidth = 2.2; ctx.stroke();
           MA.beamFx(ctx, o, ex, ey, G.zoneOf(o.x), now);
           ctx.fillStyle = 'rgba(255,80,80,0.9)'; ctx.beginPath(); ctx.arc(ex, ey, 6 + Math.sin(now / 60) * 1.5, 0, Math.PI * 2); ctx.fill();
           ctx.strokeStyle = 'rgba(255,60,60,0.12)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(o.x, o.y, o.len, 0, Math.PI * 2); ctx.stroke();
