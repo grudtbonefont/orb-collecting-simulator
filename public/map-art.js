@@ -12,6 +12,7 @@
         rock: '#838b80', rockHi: '#a7b0a2', rockLo: '#585f55', tuft: ['#2f7d34', '#3f8f3c', '#57a447'], fly: '230,255,160' },
     };
     const zoneOf = x => (x < Z ? 1 : 2);
+    const PAL = P;
     function rng(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
     const hash = (x, y, s = 0) => (Math.imul(x | 0, 73856093) ^ Math.imul(y | 0, 19349663) ^ Math.imul(s + 7, 83492791)) | 0;
     // global winding paths (continuous across chunks): [zone, horizontal?, base, amp1, f1, amp2, f2, phase]
@@ -163,14 +164,15 @@
         for (let i = 0; i < n; i++) { const px = 2 + (L - 4 - pw) * i / (n - 1); g.beginPath(); g.moveTo(px, T * 0.14 + pw * 0.4); g.lineTo(px + pw / 2, T * 0.06); g.lineTo(px + pw, T * 0.14 + pw * 0.4); g.lineTo(px + pw, T * 0.94 - 3); g.arcTo(px + pw, T * 0.94, px, T * 0.94, 3); g.arcTo(px, T * 0.94, px, 0, 3); g.closePath();
           g.fillStyle = '#fbf8f0'; g.fill(); g.fillStyle = 'rgba(0,0,0,.08)'; g.fillRect(px + pw * 0.62, T * 0.2, pw * 0.38 - 1, T * 0.7); g.strokeStyle = '#8a8170'; g.lineWidth = 2; g.stroke(); }
         g.restore(); }
-      else if (k === 'log') { const along = w >= h, L = along ? w : h, T = along ? h : w; g.save(); if (!along) { g.translate(w, 0); g.rotate(Math.PI / 2); }
-        const e = Math.min(T * 0.2, 16); rr(g, 1, 1, L - 2, T - 2, T / 2); g.fillStyle = '#7a4e2a'; g.fill(); rr(g, 1, 1, L - 2, T * 0.55, T * 0.27); g.fillStyle = '#956339'; g.fill();
-        g.strokeStyle = 'rgba(60,35,15,.35)'; g.lineWidth = 2; g.lineCap = 'round'; g.beginPath(); g.moveTo(L * 0.3, T * 0.72); g.lineTo(L * 0.55, T * 0.72); g.stroke();
-        g.fillStyle = 'rgba(110,170,70,.85)'; g.beginPath(); g.ellipse(L * 0.62, T * 0.14, Math.min(L * 0.12, 26), T * 0.12, 0, 0, 6.2832); g.fill();
-        rr(g, 1, 1, L - 2, T - 2, T / 2); g.strokeStyle = '#4a2c14'; g.lineWidth = 2.5; g.stroke();
-        for (const cx of [T / 2, L - T / 2]) { g.fillStyle = '#e0b277'; g.beginPath(); g.ellipse(cx, T / 2, e, Math.max(1, T / 2 - 3), 0, 0, 6.2832); g.fill(); g.strokeStyle = '#9a6a3a'; g.lineWidth = 1.5; g.beginPath(); g.ellipse(cx, T / 2, e * 0.55, Math.max(1, (T / 2 - 3) * 0.55), 0, 0, 6.2832); g.stroke();
-          circ(g, cx, T / 2, 1.6, '#9a6a3a'); g.strokeStyle = '#4a2c14'; g.lineWidth = 2; g.beginPath(); g.ellipse(cx, T / 2, e, Math.max(1, T / 2 - 3), 0, 0, 6.2832); g.stroke(); }
-        g.restore(); }
+      else if (k === 'ridge') { const R = rng(w * 31 + h), pts = [], n = Math.max(12, Math.round((w + h) / 14)), rx = w / 2, ry = h / 2, cx = w / 2, cy = h / 2;
+        for (let i = 0; i < n; i++) { const a = i / n * 6.2832, c = Math.cos(a), s = Math.sin(a), q = 1 / Math.pow(Math.pow(Math.abs(c), 5) + Math.pow(Math.abs(s), 5), 0.2), j = 1 - R() * Math.min(0.12, 6 / Math.min(w, h));
+          pts.push({ x: cx + c * q * (rx - 1) * j, y: cy + s * q * (ry - 1) * j }); }
+        const path = () => { g.beginPath(); smoothPath(g, pts, true); };
+        path(); g.fillStyle = '#7c8274'; g.fill(); g.save(); path(); g.clip();
+        g.fillStyle = '#9ea496'; g.fillRect(0, 0, w, h - Math.min(12, h * 0.25));
+        g.fillStyle = '#5f9e3c'; g.beginPath(); g.moveTo(0, 0); g.lineTo(w, 0); const d = Math.min(12, h * 0.3); for (let i = 0; i <= 10; i++) g.lineTo(w - w * i / 10, d * (0.8 + 0.5 * R())); g.closePath(); g.fill();
+        for (let i = 0; i < Math.max(2, (w * h) / 2500); i++) circ(g, 6 + R() * (w - 12), d + 6 + R() * Math.max(1, h - d - 14), 2 + R() * 3, R() < 0.5 ? '#8a9083' : '#b2b7aa');
+        g.restore(); path(); g.strokeStyle = '#4a5045'; g.lineWidth = 2.5; g.stroke(); }
     }
     const sprites = new Map(); let spriteN = 0; const SS = 2, PAD = 12;
     function sprite(k, w, h) { const key = k + w + 'x' + h; let c = sprites.get(key); if (c) return c;
@@ -179,18 +181,76 @@
       rr(g, 2, 5, w, h, Math.min(w, h) / 2.2); g.fillStyle = 'rgba(20,40,10,.2)'; g.fill(); // soft contact shadow
       skin(g, k, w, h); sprites.set(key, c); spriteN++; return c; }
     const blit = (g, k, x, y, w, h) => g.drawImage(sprite(k, w, h), x - PAD, y - PAD, w + PAD * 2, h + PAD * 2);
-    function drawBorder(g, t) { // zone 1: stone slab wall; zone 2: log wall. Tiles are cached sprites.
-      const B = 46, S = 92, vis = g.getTransform(), inv = vis.inverse(), cw = g.canvas.width, ch = g.canvas.height;
-      const p0 = inv.transformPoint({ x: 0, y: 0 }), p1 = inv.transformPoint({ x: cw, y: ch }), X0 = p0.x - S, X1 = p1.x + S, Y0 = p0.y - S, Y1 = p1.y + S;
-      for (const y of [-B, WH]) { if (y + B < Y0 || y > Y1) continue; for (let x = -B; x < WW + B; x += S) { if (x + S < X0 || x > X1) continue; const z1 = x < Z; blit(g, z1 ? 'stone' : 'log', x, y, Math.min(S, (z1 ? Z : WW + B) - x), B); } }
-      for (const [x, k] of [[-B, 'stone'], [WW, 'log']]) { if (x + B < X0 || x > X1) continue; for (let y = 0; y < WH; y += S) { if (y + S < Y0 || y > Y1) continue; blit(g, k, x, y, B, Math.min(S, WH - y)); } }
+    // ---------------------------------------------------------------- organic walls: one continuous wobbly band, baked into overlapping chunks (no seams)
+    // Visual only: the inner edge sits ON or OUTSIDE the real boundary (wobble goes outward), collision is untouched.
+    const wob = (s, k) => Math.max(0, 11 + 7 * Math.sin(s / 173 + k) + 4 * Math.sin(s / 61 + k * 2.3) + 2 * Math.sin(s / 29 + k * 4.1));
+    function buildLoop() { // inner edge of the border, clockwise, with outward normals; rounded corners
+      const P = [], st = 16; let s = 0;
+      const side = (x0, y0, x1, y1, nx, ny) => { const L = Math.hypot(x1 - x0, y1 - y0), n = Math.ceil(L / st);
+        for (let i = 0; i < n; i++, s += L / n) { const f = i / n, w = wob(s, 1.7); P.push({ x: x0 + (x1 - x0) * f + nx * w, y: y0 + (y1 - y0) * f + ny * w, nx, ny, s }); } };
+      const corner = (cx, cy, a0) => { for (let i = 0; i < 6; i++, s += 6) { const a = a0 + i / 6 * Math.PI / 2, w = wob(s, 1.7); P.push({ x: cx + Math.cos(a) * w, y: cy + Math.sin(a) * w, nx: Math.cos(a), ny: Math.sin(a), s }); } };
+      corner(0, 0, Math.PI); side(0, 0, WW, 0, 0, -1); corner(WW, 0, -Math.PI / 2); side(WW, 0, WW, WH, 1, 0); corner(WW, WH, 0); side(WW, WH, 0, WH, 0, 1); corner(0, WH, Math.PI / 2); side(0, WH, 0, 0, -1, 0);
+      return P; }
+    function smoothPath(g, P, closed) { // quadratic curves through midpoints
+      const n = P.length, m = (a, b) => [(a.x + b.x) / 2, (a.y + b.y) / 2];
+      if (closed) { let q = m(P[n - 1], P[0]); g.moveTo(q[0], q[1]); for (let i = 0; i < n; i++) { q = m(P[i], P[(i + 1) % n]); g.quadraticCurveTo(P[i].x, P[i].y, q[0], q[1]); } g.closePath(); }
+      else { g.moveTo(P[0].x, P[0].y); for (let i = 1; i < n - 1; i++) { const q = m(P[i], P[i + 1]); g.quadraticCurveTo(P[i].x, P[i].y, q[0], q[1]); } g.lineTo(P[n - 1].x, P[n - 1].y); } }
+    function bumpsAlong(P, step, seed, rMin, rMax) { // blobs tangent to the edge (never cross it)
+      const R = rng(seed), out = []; let acc = 0;
+      for (let i = 1; i < P.length; i++) { const a = P[i - 1], b = P[i]; acc += Math.hypot(b.x - a.x, b.y - a.y); if (acc < step) continue; acc = R() * step * 0.35;
+        const r = rMin + R() * (rMax - rMin); out.push({ x: b.x + b.nx * r, y: b.y + b.ny * r, r, v: R(), z: b.x < Z ? 1 : 2 }); }
+      return out; }
+    const OUT = 900; // band reaches this far outside the world
+    let LOOP = null, LOOP_P = null, BB = null, DL = null, DR = null, DB = null, DOOR_P = null;
+    function initWalls() { if (LOOP) return; LOOP = buildLoop(); LOOP_P = new Path2D(); LOOP_P.rect(-OUT, -OUT, WW + OUT * 2, WH + OUT * 2); smoothPath(LOOP_P, LOOP, true);
+      BB = bumpsAlong(LOOP, 24, 991, 15, 25);
+      const R2 = rng(4242); for (let k = 0; k < 2; k++) for (const p of LOOP) if (R2() < 0.3) { const d = 40 + Math.pow(R2(), 1.6) * (OUT - 80), r = 14 + R2() * 22; BB.push({ x: p.x + p.nx * d, y: p.y + p.ny * d, r, v: R2(), z: p.x < Z ? 1 : 2, deep: 1 }); }
+      DL = []; DR = []; for (let y = -40; y <= WH + 40; y += 16) { DL.push({ x: Z - 22 + Math.min(8, wob(y, 5.3) * 0.4), y, nx: 1, ny: 0 }); DR.push({ x: Z + 22 - Math.min(8, wob(y + 900, 2.9) * 0.4), y, nx: -1, ny: 0 }); }
+      DOOR_P = new Path2D(); smoothPath(DOOR_P, DL, false); const rv = DR.slice().reverse(); for (const p of rv) DOOR_P.lineTo(p.x, p.y); DOOR_P.closePath();
+      DB = bumpsAlong(DL, 18, 77, 9, 13).concat(bumpsAlong(DR, 18, 78, 9, 13)); }
+    function blob(g, b, kind) { // kind: 'stone' | 'hedge' | 'rock'
+      const r = b.r, x = b.x, y = b.y;
+      if (kind === 'hedge') { g.fillStyle = b.v < 0.5 ? '#2c6a2e' : '#33772f'; g.beginPath(); g.arc(x, y, r, 0, 6.2832); g.fill();
+        g.fillStyle = 'rgba(120,190,90,.35)'; g.beginPath(); g.arc(x - r * 0.3, y - r * 0.35, r * 0.45, 0, 6.2832); g.fill(); return; }
+      const lite = kind === 'stone' ? (b.v < 0.5 ? '#e6dbc4' : '#d9cfb8') : '#9ea496', dark = kind === 'stone' ? '#c4b496' : '#7b8174';
+      g.fillStyle = dark; g.beginPath(); g.ellipse(x, y, r, r * 0.86, b.v * 3, 0, 6.2832); g.fill();
+      g.fillStyle = lite; g.beginPath(); g.ellipse(x - r * 0.08, y - r * 0.12, r * 0.84, r * 0.68, b.v * 3, 0, 6.2832); g.fill();
+      g.fillStyle = kind === 'stone' ? 'rgba(120,190,80,.75)' : 'rgba(80,150,60,.85)'; g.beginPath(); g.ellipse(x - r * 0.15, y - r * 0.55, r * 0.6, r * 0.28, -0.2, 0, 6.2832); g.fill(); }
+    const kindOf = (b, door) => door ? (b.x < Z ? 'stone' : 'rock') : (b.z === 1 ? (b.v < 0.62 ? 'stone' : 'hedge') : (b.v < 0.16 ? 'rock' : 'hedge'));
+    function paintWalls(g, x0, y0, x1, y1, door) {
+      const P0 = PAL, P = door ? DOOR_P : LOOP_P, B = door ? DB : BB, line = (z) => z === 1 ? '#3f6b2c' : '#173a1a';
+      if (!door) { // ground strip between the real boundary and the wobbly edge (outside the world, so ground never painted it) + soft contact shadow
+        const inner = new Path2D(); smoothPath(inner, LOOP, true);
+        g.save(); g.clip(inner); for (const z of [1, 2]) { g.fillStyle = P0[z].base; z === 1 ? g.fillRect(x0 - 50, y0 - 50, Math.max(0, Z - x0 + 50), y1 - y0 + 100) : g.fillRect(Math.max(Z, x0 - 50), y0 - 50, x1 - Math.max(Z, x0 - 50) + 50, y1 - y0 + 100); }
+        g.lineWidth = 26; g.strokeStyle = 'rgba(10,30,8,.13)'; g.stroke(inner); g.lineWidth = 12; g.strokeStyle = 'rgba(10,30,8,.14)'; g.stroke(inner); g.restore(); }
+      else { g.save(); g.lineWidth = 10; g.strokeStyle = 'rgba(10,30,8,.18)'; g.stroke(DOOR_P); g.restore(); }
+      g.save(); g.clip(P, 'evenodd'); // nothing outside the band
+      for (const z of [1, 2]) { g.save(); g.beginPath(); z === 1 ? g.rect(x0 - 50, y0 - 50, Math.max(0, Z - x0 + 50), y1 - y0 + 100) : g.rect(Z, y0 - 50, x1 - Z + 50, y1 - y0 + 100); g.clip();
+        g.fillStyle = door ? (z === 1 ? '#8f9a6e' : '#4c5f40') : (z === 1 ? '#3f7f33' : '#1f5223'); g.fillRect(x0 - 50, y0 - 50, x1 - x0 + 100, y1 - y0 + 100); g.restore(); }
+      g.restore();
+      const near = B.filter(b => b.x + b.r + 4 > x0 && b.x - b.r - 4 < x1 && b.y + b.r + 4 > y0 && b.y - b.r - 4 < y1);
+      // outline pass (union look), then fills
+      for (const b of near) { const k = kindOf(b, door); g.fillStyle = k === 'hedge' ? line(2) : (k === 'stone' ? '#8f7d5e' : '#4a5045'); g.beginPath(); g.arc(b.x, b.y, b.r + 2.2, 0, 6.2832); g.fill(); }
+      g.save(); g.clip(P, 'evenodd'); g.globalAlpha = 1; for (const b of near) if (b.deep) blob(g, b, kindOf(b, door)); g.restore();
+      for (const b of near) if (!b.deep) blob(g, b, kindOf(b, door));
     }
-    function drawDoorWall(g, y0, y1) {
-      const S = 88; for (let y = Math.floor(y0 / S) * S; y < y1; y += S) { const a = Math.max(y, y0), b = Math.min(y + S, y1); if (b - a < 4) continue; blit(g, 'stone', Z - 22, a, 22, b - a); blit(g, 'log', Z, a, 22, b - a); }
-    }
+    const WC = 512, WOV = 3, wallCache = new Map();
+    function wallChunk(cx, cy, door) { const key = (door ? 'd' : 'b') + cx + ',' + cy; let c = wallCache.get(key); if (c) return c;
+      if (wallCache.size > 90) wallCache.delete(wallCache.keys().next().value);
+      const x0 = cx * WC - WOV, y0 = cy * WC - WOV, S = WC + WOV * 2; c = document.createElement('canvas'); c.width = S; c.height = S; const g = c.getContext('2d');
+      g.translate(-x0, -y0); paintWalls(g, x0, y0, x0 + S, y0 + S, door); wallCache.set(key, c); return c; }
+    function viewRect(g) { const inv = g.getTransform().inverse(), a = inv.transformPoint({ x: 0, y: 0 }), b = inv.transformPoint({ x: g.canvas.width, y: g.canvas.height }); return [a.x, a.y, b.x, b.y]; }
+    function drawChunks(g, door, X0, Y0, X1, Y1, need) { initWalls();
+      for (let cy = Math.floor(Y0 / WC); cy <= Math.floor(Y1 / WC); cy++) for (let cx = Math.floor(X0 / WC); cx <= Math.floor(X1 / WC); cx++) {
+        if (!need(cx * WC, cy * WC, cx * WC + WC, cy * WC + WC)) continue;
+        g.drawImage(wallChunk(cx, cy, door), cx * WC - WOV, cy * WC - WOV, WC + WOV * 2, WC + WOV * 2); } }
+    function drawBorder(g, t) { const [X0, Y0, X1, Y1] = viewRect(g), M = 60; // band covers [-OUT, 0+wobble] etc.
+      drawChunks(g, false, Math.max(X0, -OUT), Math.max(Y0, -OUT), Math.min(X1, WW + OUT), Math.min(Y1, WH + OUT),
+        (a, b, c, d) => a < M || b < M || c > WW - M || d > WH - M); }
+    function drawDoorWall(g, y0, y1) { drawChunks(g, true, Z - 40, Math.max(-40, y0), Z + 40, Math.min(WH + 40, y1), (a, b, c) => a < Z + 30 && c > Z - 30); }
     function rectObs(g, o, zone) {
       const long = Math.max(o.w, o.h) > Math.min(o.w, o.h) * 1.8;
-      const k = zone === 1 ? (long ? 'fence' : 'stone') : (long ? 'log' : 'mossy');
+      const k = zone === 1 ? (long ? 'fence' : 'stone') : (long ? 'ridge' : 'mossy');
       blit(g, k, Math.round(o.x - o.w / 2), Math.round(o.y - o.h / 2), Math.round(o.w), Math.round(o.h));
     }
     function rockObs(g, o, zone) {
