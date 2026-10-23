@@ -1206,15 +1206,32 @@ io.on('connection', socket => {
     if (pl.acc.stats.muteUntil > now) return ack({ ok: false, error: `Вы не можете писать в чат ещё ${Math.ceil((pl.acc.stats.muteUntil - now) / 60000)} мин.` });
     const clean = R.sanitizeChat(text);
     if (clean.error) return ack({ ok: false, error: clean.error });
+    // inline emote tokens :name: (e.g. :fire:, :100:) → the emoji, only for emotes the player owns
+    const txt = clean.text.replace(/:([a-z0-9]{2,12}):/gi, (m0, k) => { const d = INV.itemDef('e_' + k.toLowerCase()); return d && d.type === 'emote' && (d.free || INV.hasItem(pl.acc, d.id)) ? d.value : m0; });
+    const gate = chatGate(pl, now, txt.toLowerCase()); if (gate) return ack({ ok: false, error: gate });
+    pushChat({ n: pl.acc.name, c: nameColorOf(pl.acc), t: txt }, true);
+    ack({ ok: true, masked: clean.masked });
+  });
+  function chatGate(pl, now, key) { // shared chat rate limits (text + emote messages)
     pl.chatTimes = pl.chatTimes.filter(t => now - t < CHAT_WINDOW_MS);
     const last = pl.chatTimes[pl.chatTimes.length - 1] || 0;
-    if (now - last < CHAT_MIN_GAP_MS) return ack({ ok: false, error: 'Не так быстро! Подождите немного.' });
-    if (pl.chatTimes.length >= CHAT_WINDOW_MAX) return ack({ ok: false, error: 'Слишком много сообщений. Подождите несколько секунд.' });
-    if (clean.text.toLowerCase() === pl.lastChat && now - last < 15000) return ack({ ok: false, error: 'Не повторяйте одно и то же сообщение.' });
-    pl.chatTimes.push(now);
-    pl.lastChat = clean.text.toLowerCase();
-    pushChat({ n: pl.acc.name, c: nameColorOf(pl.acc), t: clean.text }, true);
-    ack({ ok: true, masked: clean.masked });
+    if (now - last < CHAT_MIN_GAP_MS) return 'Не так быстро! Подождите немного.';
+    if (pl.chatTimes.length >= CHAT_WINDOW_MAX) return 'Слишком много сообщений. Подождите несколько секунд.';
+    if (key === pl.lastChat && now - last < 15000) return 'Не повторяйте одно и то же сообщение.';
+    pl.chatTimes.push(now); pl.lastChat = key; return null;
+  }
+  // ---- emote as a chat message (owned emotes only, chat mute + rate limits); also shows the head bubble when the emote gap allows
+  socket.on('chat:emote', (itemId, ack) => {
+    ack = safeAck(ack);
+    if (!pl) return ack({ ok: false, error: 'Войдите в игру, чтобы писать в чат' });
+    const now = Date.now();
+    if (pl.acc.stats.muteUntil > now) return ack({ ok: false, error: `Вы не можете писать в чат ещё ${Math.ceil((pl.acc.stats.muteUntil - now) / 60000)} мин.` });
+    const def = INV.itemDef(itemId); if (!def || def.type !== 'emote') return ack({ ok: false, error: 'Нет такой эмоции' });
+    if (!def.free && !INV.hasItem(pl.acc, def.id)) return ack({ ok: false, error: 'Эта эмоция не куплена' });
+    const gate = chatGate(pl, now, 'emote:' + def.id); if (gate) return ack({ ok: false, error: gate });
+    pushChat({ n: pl.acc.name, c: nameColorOf(pl.acc), t: def.value, em: def.id }, true);
+    if (now - (pl.emoteAt || 0) >= G.EMOTE_GAP_MS) { pl.emoteAt = now; if (!pl.invis) io.to('arena').emit('emote', { id: pl.id, e: def.id }); else pl.socket.emit('emote', { id: pl.id, e: def.id }); }
+    ack({ ok: true });
   });
 
   socket.on('input', m => {

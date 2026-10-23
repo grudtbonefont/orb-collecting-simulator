@@ -236,9 +236,10 @@
   <div class="chat-tabs" role="tablist"><button type="button" role="tab" class="chat-tab active" data-tab="chat" id="tabChat">Чат<span class="tab-badge hidden" id="tabChatBadge">0</span></button><button type="button" role="tab" class="chat-tab" data-tab="sys" id="tabSys">Система<span class="tab-badge hidden" id="tabSysBadge">0</span></button></div>
   <div id="chatLog" class="chat-log" aria-live="polite"></div>
   <div id="sysLog" class="chat-log sys-log hidden" aria-live="polite"></div>
+  <div id="chatEmotePicker" class="emote-picker chat-emote-picker hidden" role="menu" aria-label="Эмоции в чат"></div>
   <form id="chatForm" class="chat-form" autocomplete="off">
     <input id="chatInput" maxlength="120" placeholder="Enter — написать в чат" enterkeyhint="send" autocomplete="off" autocorrect="off">
-    <button type="submit" class="btn chat-send" aria-label="Отправить">➤</button>
+    <button type="button" id="chatEmoBtn" class="btn chat-emo" aria-label="Эмоции в чат" title="Эмоции (можно писать :fire:)">😀</button><button type="submit" class="btn chat-send" aria-label="Отправить">➤</button>
   </form>
 </div>
 <button type="button" id="chatBtn" class="chat-btn hidden" aria-label="Открыть чат">💬<span id="chatBadge" class="badge hidden">0</span></button>

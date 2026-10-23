@@ -722,6 +722,23 @@
       box.appendChild(b);
     }
   }
+  // emotes in chat: picker next to the chat input; owned ones send a chat emote message, locked ones point to the shop
+  function renderChatEmotes() {
+    const box = $('chatEmotePicker'); box.innerHTML = '';
+    for (const def of G.ITEMS.filter(i => i.type === 'emote')) {
+      const own = emoteOwned(def), b = document.createElement('button'); b.type = 'button'; b.className = 'emo' + (own ? '' : ' locked'); b.dataset.emote = def.id;
+      b.title = def.name + ' :' + def.id.slice(2) + ':' + (own ? '' : ` — в магазине за ${def.price} сфер`); b.setAttribute('aria-label', def.name); b.textContent = def.value;
+      b.onclick = e => {
+        e.preventDefault();
+        if (!own) { toast(`«${def.name}» продаётся в магазине (раздел «Эмоции») за ${fmt(def.price)} сфер`, 'err'); return; }
+        socket.emit('chat:emote', def.id, r => { if (r && !r.ok) toast(r.error, 'err'); });
+        box.classList.add('hidden');
+      };
+      box.appendChild(b);
+    }
+  }
+  $('chatEmoBtn').addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); const box = $('chatEmotePicker'); if (box.classList.contains('hidden')) renderChatEmotes(); box.classList.toggle('hidden'); });
+  document.addEventListener('pointerdown', e => { const box = $('chatEmotePicker'); if (!box.classList.contains('hidden') && !box.contains(e.target) && !$('chatEmoBtn').contains(e.target)) box.classList.add('hidden'); });
   $('emoteBtn').addEventListener('click', e => { e.stopPropagation(); const box = $('emotePicker'); if (box.classList.contains('hidden')) renderEmotePicker(); box.classList.toggle('hidden'); });
   document.addEventListener('pointerdown', e => { const box = $('emotePicker'); if (!box.classList.contains('hidden') && !box.contains(e.target) && e.target !== $('emoteBtn')) box.classList.add('hidden'); });
   // potion HUD: active potion icons with timers
@@ -3172,6 +3189,8 @@
     el.className = 'chat-msg' + (m.sys ? ' sys' : '') + (m.notice ? ' notice' : '') + (m.n && m.n === myName ? ' mine' : '');
     if (m.n) { const n = document.createElement('span'); n.className = 'n'; n.textContent = String(m.n); nameColorize(n, m.c); el.append(n, ': '); }
     const t = document.createElement('span'); t.className = 't'; t.textContent = String(m.t == null ? '' : m.t); el.appendChild(t);
+    if (m.em && G.ITEM_BY_ID[m.em]) { el.classList.add('emo-msg'); t.className = 't emo-big'; t.title = G.ITEM_BY_ID[m.em].name; }
+    else if (/^(\p{Extended_Pictographic}|\uFE0F|\u200D|\s)+$/u.test(t.textContent) && t.textContent.trim()) t.classList.add('emo-only');
     return el;
   }
   // two tabs: 'chat' (players, input) and 'sys' (system messages, read-only); choice kept in localStorage
