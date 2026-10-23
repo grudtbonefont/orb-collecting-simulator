@@ -28,9 +28,10 @@ const fps = p => p.evaluate(() => new Promise(res => { let n = 0; const t0 = per
     if (SHOTS) await p.screenshot({ path: 'screenshot-map-zone2.png' });
     // obstacles in both zones near the wall (themes side by side)
     await tp(p, 5800, 3000); await sleep(400);
-    for (const [k, x, y, e] of [['block', 5420, 2830], ['rock', 5480, 3200], ['laser', 5650, 2700, { a0: 0.4, armNow: true }], ['robot', 5560, 3050],
-      ['block', 6380, 2830], ['rock', 6350, 3230], ['laser', 6250, 2700, { a0: 2.6, armNow: true }], ['robot', 6460, 3060]]) ok((await obs(p, k, x, y, e)).ok, `spawn ${k} @${x}`);
-    await tp(p, 6000, 3000); await sleep(1200);
+    for (const [k, x, y, e] of [['block', 4700, 2600], ['rock', 5150, 3350], ['laser', 5450, 2550, { a0: 0.4, armNow: true }], ['robot', 4650, 3250], ['wall', 5650, 3400],
+      ['block', 7250, 2650], ['rock', 6850, 3350], ['laser', 6550, 2550, { a0: 2.6, armNow: true }], ['robot', 7350, 3300], ['wall', 6350, 3400]]) ok((await obs(p, k, x, y, e)).ok, `spawn ${k} @${x}`);
+    await tp(p, 6000, 3000); for (let i = 0; i < 8; i++) await p.evaluate(() => document.getElementById('zoomOut').click()); await sleep(1500);
+    const big = await p.evaluate(() => [window.G ? 1 : 1, (window.OCSShared || {}).OBSTACLES]); void big;
     if (SHOTS) await p.screenshot({ path: 'screenshot-obstacles.png' });
     ok(errs.length === 0, 'desktop: no page errors ' + errs.join(' | '));
     // phone, min zoom

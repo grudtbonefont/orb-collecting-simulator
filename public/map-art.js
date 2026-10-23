@@ -27,7 +27,7 @@
       const add = (k, n, extra) => { for (let i = 0; i < n; i++) { const x = x0 + r() * CH, y = y0 + r() * CH; L.push(Object.assign({ k, x, y, z: zoneOf(x), s: r(), a: r() * 6.283, v: r() }, extra ? extra(r) : null)); } };
       add('blob', 6); if (r() < 0.6) add('patch', 1);
       add('rock', 1); add('tuft', 6); add('flower', 4); // meadow (zone 1)
-      add('bush', 2); add('stump', 1); add('fern', 3); add('leaf', 5); if (r() < 0.35) add('mush', 1); if (r() < 0.45) add('canopy', 1); // forest (zone 2)
+      add('stump', 1); add('fern', 3); add('leaf', 5); if (r() < 0.35) add('mush', 1); // forest (zone 2)
       f = L.filter(d => d.x > 0 && d.x < WW && d.y > 0 && d.y < WH);
       if (featCache.size > 600) featCache.clear(); featCache.set(key, f); return f;
     }

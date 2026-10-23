@@ -312,9 +312,9 @@ function spawnObstacle(now, f = {}) {
   else if (laser) o = { k: 'laser', r: OB.pylonR, len: Math.round(rand(OB.beamMin, OB.beamMax)), w: (Math.random() < 0.5 ? -1 : 1) * rand(OB.spinMin, OB.spinMax), a0: rand(0, Math.PI * 2), t0: now, armAt: now + OB.warnMs };
   else {
     const kind = f.kind || ['wall', 'block', 'rock'][Math.floor(Math.random() * 3)];
-    if (kind === 'rock') o = { k: 'circle', r: Math.round(rand(45, 95)) };
-    else if (kind === 'block') o = { k: 'rect', w: Math.round(rand(90, 170)), h: Math.round(rand(90, 170)) };
-    else { const L = Math.round(rand(260, 480)), T = Math.round(rand(34, 50)); o = Math.random() < 0.5 ? { k: 'rect', w: L, h: T } : { k: 'rect', w: T, h: L }; }
+    if (kind === 'rock') o = { k: 'circle', r: Math.round(rand(112, 238)) };
+    else if (kind === 'block') o = { k: 'rect', w: Math.round(rand(225, 425)), h: Math.round(rand(225, 425)) };
+    else { const L = Math.round(rand(650, 1200)), T = Math.round(rand(85, 125)); o = Math.random() < 0.5 ? { k: 'rect', w: L, h: T } : { k: 'rect', w: T, h: L }; }
   }
   const reach = obsReach(o) + 30;
   let at = null;

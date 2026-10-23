@@ -379,11 +379,12 @@
 
   // ---------------------------------------------------------------- temporary obstacles (server spawns, everyone collides)
   // kinds: 'wall' (long thin rect), 'block' (square-ish rect), 'rock' (circle), 'laser' (solid pylon + spinning beam)
-  const OBSTACLES = { maxAlive: 30, everyMinMs: 6000, everyMaxMs: 15000, lifeMinMs: 45000, lifeMaxMs: 90000, laserChance: 0.25,
-    warnMs: 3000, playerClear: 380, doorClear: 300, gap: 450, pylonR: 26, beamMin: 240, beamMax: 340, spinMin: 0.8, spinMax: 1.3,
+  // sizes/count ×2.5 (Oct 2026): 75 alive, spawn every 2.4–6 s, pylon/beam/robot ×2.5
+  const OBSTACLES = { maxAlive: 75, everyMinMs: 2400, everyMaxMs: 6000, lifeMinMs: 45000, lifeMaxMs: 90000, laserChance: 0.25,
+    warnMs: 3000, playerClear: 380, doorClear: 300, gap: 450, pylonR: 65, beamMin: 600, beamMax: 850, spinMin: 0.8, spinMax: 1.3,
     penaltyPct: 0.07, penaltyMax: 150, invulnMs: 3000, dropMax: 10, dropLifeMs: 30000,
     // iron robot (own timer, separate from obstacles: 30 % roll every 45–90 s): rare solid player-shaped obstacle that shoots slow shots at players in range (shared immunity with lasers)
-    robotChance: 0.3, robotEveryMinMs: 45000, robotEveryMaxMs: 90000, robotMax: 2, robotR: 30, robotRange: 500, aimMs: 700, shotEveryMin: 1500, shotEveryMax: 2000,
+    robotChance: 0.3, robotEveryMinMs: 45000, robotEveryMaxMs: 90000, robotMax: 2, robotR: 75, robotRange: 500, aimMs: 700, shotEveryMin: 1500, shotEveryMax: 2000,
     shotSpeed: 260, shotR: 9, shotLifeMs: 2600, robotPct: 0.05, robotCap: 100 };
   const robotPenalty = balance => (balance >= 1 ? Math.min(OBSTACLES.robotCap, Math.max(1, Math.round(balance * OBSTACLES.robotPct))) : 0);
   // weekend bonus: Saturday + Sunday in Europe/Moscow (UTC+3, no DST) → orbs from collecting ×1.5

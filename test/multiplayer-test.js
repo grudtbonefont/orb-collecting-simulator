@@ -407,7 +407,7 @@ function tierEventRules() {
     E.treasure.reward.orbs * E.treasure.maxCount <= 4 * RATE * 1.5, `5 events (auto: treasure ×5, runner ×3, lucky ×1.25 orbs / ×2 rare+ for ${E.lucky.durationMs / 1000} s); every reward (orbs + shards at the exchange rate) ≤ 4 min of farming (top: ${E.koth.rewards[0].orbs} ◉ + ${E.koth.rewards[0].shards} 💎)`);
   const S = G.EVENT_SCHEDULE;
   ok(S.minMs === 120000 && S.maxMs === 360000 && S.announceMs >= 20000 && S.announceMs <= 30000, 'schedule: an event every 2–6 min of online time, announced 25 s ahead');
-  ok(OB0().maxAlive === 30 && OB0().everyMinMs === 6000 && OB0().everyMaxMs === 15000 && OB0().laserChance === 0.25, 'obstacles: a spawn every 6–15 s, up to 30 at once, 25 % lasers');
+  ok(OB0().maxAlive === 75 && OB0().everyMinMs === 2400 && OB0().everyMaxMs === 6000 && OB0().laserChance === 0.25, 'obstacles: a spawn every 2.4–6 s, up to 75 at once, 25 % lasers');
   const lw = G.luckyWeights(G.POOL_WEIGHTS), pw = G.POOL_WEIGHTS;
   ok(lw.c === pw.c && lw.u === pw.u && ['r', 'e', 'l', 'm'].every(t => lw[t] === pw[t] * 2), 'lucky weights: rare/epic/legendary/mythic ×2, common/uncommon unchanged');
   // obstacles: collision push-out + laser beam geometry + penalty
