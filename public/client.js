@@ -1517,12 +1517,13 @@
         g.globalAlpha = 0.85; g.stroke();
       }
     },
-    galaxy(g, pts, n, t, now, pl, cap, st) { // swirling cosmic dust in a faint nebula, with twinkling stars
-      const pal = ['#8a3cff', '#ff4fd8', '#3ee0ff', '#ffd6ff']; g.globalCompositeOperation = 'lighter';
-      each(pts, n, cap >> 2, st * 4, p => { const k = ageK(p, now, 1000); if (k <= 0) return; blit(g, S.nebula(p.seed < 0.5 ? 'rgba(138,60,255,0.5)' : 'rgba(255,79,216,0.4)'), p.x, p.y, 30 + (1 - k) * 20, k * 0.45); });
-      each(pts, n, cap, st, (p, i) => { const k = ageK(p, now, 1000); if (k <= 0) return; const sd = p.seed, d = (1 - k) * 22 + 3, a = sd * 20 + (1 - k) * 3;
-        blit(g, glowSpr(pal[Math.floor(sd * 4) % 4]), p.x + Math.cos(a) * d, p.y + Math.sin(a) * d, 4 + k * 6, k * (0.6 + 0.4 * Math.sin(t * 6 + sd * 9)));
-        if (p.id % 6 === 0) blit(g, S.spark4('#f6ecff'), p.x, p.y, (4 + k * 7) * (0.6 + 0.4 * Math.sin(t * 8 + sd * 20)), k); });
+    galaxy(g, pts, n, t, now, pl, cap, st) { // matches its cover: bright violet/magenta nebula core, big white 4-point stars, coloured dust + a wide halo of cyan motes
+      const pal = ['#8a3cff', '#ff4fd8', '#3ee0ff', '#ffd6ff'], s1 = Math.min(st, 2); g.globalCompositeOperation = 'lighter';
+      each(pts, n, cap >> 1, s1 * 2, p => { const k = ageK(p, now, 1100); if (k <= 0) return; blit(g, S.nebula(p.seed < 0.5 ? 'rgba(138,60,255,0.75)' : 'rgba(255,79,216,0.65)'), p.x, p.y, 34 + (1 - k) * 22, k * 0.7); });
+      each(pts, n, cap, s1, p => { const k = ageK(p, now, 1100); if (k <= 0) return; const sd = p.seed, d = (1 - k) * 22 + 4, a = sd * 20 + (1 - k) * 3 + t * 1.2;
+        blit(g, glowSpr(pal[Math.floor(sd * 4) % 4]), p.x + Math.cos(a) * d, p.y + Math.sin(a) * d, 5 + k * 7, k * (0.7 + 0.3 * Math.sin(t * 6 + sd * 9)));
+        if (p.id % 3 === 0) { const r = 26 + hash(sd, 5) * 22, b = hash(sd, 7) * 6.28 + (1 - k) * 1.5; blit(g, glowSpr('#3ee0ff'), p.x + Math.cos(b) * r, p.y + Math.sin(b) * r, 8 + k * 6, k * 0.55); }
+        if (p.id % 4 === 0) blit(g, S.spark4(sd < 0.7 ? '#f6ecff' : '#bfe6ff'), p.x + (hash(sd, 9) - 0.5) * 16, p.y + (hash(sd, 11) - 0.5) * 16, (10 + k * 12) * (0.7 + 0.3 * Math.sin(t * 8 + sd * 20)), k); });
     },
     comet(g, pts, n, t, now, pl, cap, st) { // exclusive: tapered fiery tail (red → orange → golden core), blue ion streak, debris
       const s2 = 1;
@@ -2149,7 +2150,7 @@
   }
   // ---- achievements
   const achProfile = p => ({ total: p.total, stats: p.stats || {}, codesUsed: p.codesUsed || 0, items: C.itemsOwned(p.inventory), liveMs: 0 });
-  socket.on('trophy', () => { toast('🏆 Все достижения выполнены! Награда: «Кубок» — он в инвентаре (шапка).', 'ok'); floaters.push({ x: me.x, y: me.y - 50, text: '🏆 Кубок!', color: '#ffcc33', start: performance.now(), big: true }); });
+  socket.on('trophy', () => { toast('🏆 50 достижений выполнено! Награда: «Кубок» — он в инвентаре (шапка).', 'ok'); floaters.push({ x: me.x, y: me.y - 50, text: '🏆 Кубок!', color: '#ffcc33', start: performance.now(), big: true }); });
   socket.on('ach', d => {
     if (!d) return;
     if (d.ids) { toastC('ach', `🏆 Достижения: ${d.ids.length ? d.ids.length + ' ступеней получено' : 'пересчитаны'} · ${C.rewardText(d.reward)}`, 'ok'); return; }
@@ -2191,8 +2192,8 @@
     const nDone = C.ACH.filter(a => got[a.id]).length, fresh = achSeen ? C.ACH.filter(a => got[a.id] && !achSeen.has(a.id)) : [];
     achSeen = new Set(C.ACH.filter(a => got[a.id]).map(a => a.id));
     $('achCount').textContent = `${nDone} / ${C.ACH.length}`;
-    const pct = Math.round(nDone / C.ACH.length * 100);
-    const tr = $('achTrophy'); if (tr) { tr.classList.toggle('done', nDone >= C.ACH.length); $('achTrophyTxt').textContent = nDone >= C.ACH.length ? 'Получено!' : `${nDone} / ${C.ACH.length} · ${pct}%`; $('achTrophyBar').style.width = pct + '%'; }
+    const TN = G.TROPHY_ACH, pct = Math.min(100, Math.round(nDone / TN * 100)), trOk = nDone >= TN || (profile.inventory || []).some(s => s.id === 'h_trophy');
+    const tr = $('achTrophy'); if (tr) { tr.classList.toggle('done', trOk); $('achTrophyTxt').textContent = trOk ? 'Получено!' : `${nDone} / ${TN} · ${pct}%`; $('achTrophyBar').style.width = pct + '%'; }
     const card = $('ach').querySelector('.modal-card'); card.classList.add('ach-v2'); card.style.setProperty('--ac', CAT_COL[achCat] || '#4fc3ff');
     const tabs = $('achTabs'); tabs.textContent = '';
     for (const c of C.ACH_CATS) {
@@ -2474,7 +2475,7 @@
         g.save(); g.strokeStyle = 'rgba(255,120,140,0.8)'; g.lineWidth = 2.5; g.beginPath(); g.arc(22, 52, 8, 0, Math.PI * 2); g.moveTo(16, 58); g.lineTo(28, 46); g.stroke(); g.restore();
       } else {
         const fake = { eq, trail: [] };
-        for (let i = 0; i < 16; i++) fake.trail.push({ x: 6 + i * 3.6, y: 52 + Math.sin(i * 0.55) * 5, time: ICON_NOW - (16 - i) * 38, seed: (i * 0.37) % 1 });
+        for (let i = 0; i < 16; i++) fake.trail.push({ x: 6 + i * 3.6, y: 52 + Math.sin(i * 0.55) * 5, time: ICON_NOW - (16 - i) * 38, seed: (i * 0.37) % 1, id: i + 1 });
         drawTrail(g, fake, ICON_T, ICON_NOW);
       }
       avatarAt(g, 66, 52, 0.95, eq);
@@ -2605,7 +2606,7 @@
         const x0 = (idx % cols) * cw, y0 = Math.floor(idx / cols) * ch, tier = trailTier(d.id), N = TRAIL_PTS[tier], life = TRAIL_LIFE[tier], f = fakes[idx];
         const hx = x0 + cw - 70, hy = y0 + ch * 0.55;
         f.trail.length = 0;
-        for (let i = 0; i < N; i++) { const tm = now - (N - 1 - i) * (life / N), back = (N - 1 - i) * (cw * 0.62 / N); f.trail.push({ x: hx - back, y: hy + Math.sin(tm / 160) * 14 * (back / cw + 0.15), time: tm, seed: (i * 0.618 + idx * 0.13) % 1 }); }
+        for (let i = 0; i < N; i++) { const tm = now - (N - 1 - i) * (life / N), back = (N - 1 - i) * (cw * 0.62 / N); f.trail.push({ x: hx - back, y: hy + Math.sin(tm / 160) * 14 * (back / cw + 0.15), time: tm, seed: (i * 0.618 + idx * 0.13) % 1, id: i + 1 }); }
         drawTrail(g, f, t, now);
         drawAvatar(g, hx, hy, G.PLAYER_R, f.eq, t, { dir: { x: 1, y: 0 }, phase: idx });
         const r = rarityOf(d);
@@ -2631,7 +2632,7 @@
       const cx = S / 2 + (trail ? S * 0.14 : 0), cy = S * (p.name ? 0.64 : 0.6);
       if (trail) {
         const fake = { eq: p.eq, trail: [] }, k = S / 96;
-        for (let i = 0; i < 14; i++) fake.trail.push({ x: cx - 60 * k + i * 4.2 * k, y: cy + Math.sin(t * 4 + i * 0.5) * 6 * k, time: now - (14 - i) * 40, seed: (i * 0.37) % 1 });
+        for (let i = 0; i < 14; i++) fake.trail.push({ x: cx - 60 * k + i * 4.2 * k, y: cy + Math.sin(t * 4 + i * 0.5) * 6 * k, time: now - (14 - i) * 40, seed: (i * 0.37) % 1, id: i + 1 });
         drawTrail(g, fake, t, now);
       }
       drawAvatar(g, cx, cy, p.r, p.eq, t, { dir: { x: 1, y: 0 }, name: p.name, isMe: !!p.name });

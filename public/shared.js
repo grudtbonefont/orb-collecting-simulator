@@ -213,7 +213,7 @@
     { id: 'e_moai', type: 'emote', cat: 'emote', name: 'Моаи', rarity: 'legendary', icon: '🗿', value: '🗿', price: 570, stackable: false, maxStack: 1, base: false, sources: ['shop', 'admin'] },
     // final achievement reward: only granted by the server when ALL achievement tiers are done (never sold)
     { id: 'h_trophy', type: 'cosmetic', cat: 'hat', name: 'Кубок', price: null, rarity: 'legendary', value: 'trophy', stackable: false, maxStack: 1, base: false, award: true,
-      desc: 'Награда за все достижения. Не продаётся.', sources: ['achievement', 'admin'] },
+      desc: 'Награда за 50 выполненных достижений. Не продаётся.', sources: ['achievement', 'admin'] },
     // daily rewards calendar (never sold; source «Ежедневные награды»)
     { id: 'c_calendar', type: 'cosmetic', cat: 'color', name: 'Календарный', price: null, rarity: 'rare', value: 'calendar', stackable: false, maxStack: 1, base: false, award: true, desc: 'Награда календаря ежедневных наград. Не продаётся.', sources: ['daily', 'admin'] },
     { id: 't_pages', type: 'cosmetic', cat: 'trail', name: 'Листки календаря', price: null, rarity: 'legendary', value: 'pages', stackable: false, maxStack: 1, base: false, award: true, desc: 'Падающие листки календаря. Награда за 14-й день. Не продаётся.', sources: ['daily', 'admin'] },
@@ -230,6 +230,7 @@
   const potionMult = (stats, k, now = Date.now()) => (potionOn(stats, k, now) && POTIONS[k].mult ? POTIONS[k].mult : 1);
   const EMOTE_MS = 3000, EMOTE_GAP_MS = 2500;
   const SHARD_ID = 'x_legend_shard';
+  const TROPHY_ACH = 50; // «Кубок»: completed achievement tiers needed
   const SHARD_EXCHANGE = { orbs: 25, maxPerTrade: 99 }; // «Лавка осколков»: 1 shard → 25 orbs (was 40) (balance only, not the all-time total)
   const ITEM_BY_ID = {};
   for (const it of ITEMS) ITEM_BY_ID[it.id] = it;
@@ -499,7 +500,7 @@
   const api = {
     BETA_CAP_GRANT, BETA_CAP_ID, WORLD, ZONE_W, ZONE_H, DOOR, doorDist, DOOR_COST, ZONE2_WEIGHTS, zoneOf, zoneGate, PLAYER_R, BASE_SPEED, TICK_MS, STEP_DT, ORB_TYPES, ORB_RANK, ORB_LEGEND, POOL_WEIGHTS, RAIN_WEIGHTS, rollOrbType, expectedOrbValue, CATEGORIES, INV_CATEGORIES, RARITIES, ITEMS, ITEM_BY_ID, INV_SLOTS, INV_CAP, BUY_MAX_QTY, PAINTS,
     DEFAULT_EQUIPPED, DEFAULT_OWNED, UPGRADES, UPGRADE_KEYS, UPGRADE_REFUND_PRICES, upLevel, upValue, jackpotChance, upgradeText, orbReward, skillPrize, compassTargets, SENSE_EPIC_RANGE, RADAR, radarBlips, PUSH, separatePlayers,
-    EVENTS, EVENT_KEYS, AUTO_EVENT_KEYS, EVENT_SCHEDULE, luckyWeights, OBSTACLES, laserAngle, resolveObstacles, laserHits, laserPenalty, robotPenalty, WEEKEND, weekendInfo, SHARD_ID, SHARD_EXCHANGE, POTIONS, POTION_CAP_MS, POTION_MAP, potionOn, potionMult, EMOTE_MS, EMOTE_GAP_MS, MG_PRIZE_MULT,
+    EVENTS, EVENT_KEYS, AUTO_EVENT_KEYS, EVENT_SCHEDULE, luckyWeights, OBSTACLES, laserAngle, resolveObstacles, laserHits, laserPenalty, robotPenalty, WEEKEND, weekendInfo, SHARD_ID, SHARD_EXCHANGE, TROPHY_ACH, POTIONS, POTION_CAP_MS, POTION_MAP, potionOn, potionMult, EMOTE_MS, EMOTE_GAP_MS, MG_PRIZE_MULT,
     MINIGAMES, REACTION_PRIZES, rushPrize, memoryPrize, memoryShowMs, shellFinal, shellShuffleMs, throwPos, throwPoints, throwPrize, chainPrize, minigameMinMs, speedFor, pickupFor, applyInput, BONUS_ROOM, inBonusRoom,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
