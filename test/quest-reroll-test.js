@@ -17,7 +17,7 @@ const up = async () => { for (let i = 0; i < 100; i++) { try { if ((await fetch(
   let pr = await prof(); ok(pr.shards === 0, 'starts with 0 shards');
   // not enough shards → error toast (client), server refuses too
   await p.click('[data-open=quests]'); await sleep(300);
-  ok(/Сбросить за 15 💎/.test(await p.textContent('#qRerollBtn')), 'daily button «Сбросить за 15 💎»');
+  ok(/Сбросить за 15/.test(await p.textContent('#qRerollBtn')) && (await p.$eval('#qRerollBtn .cur-shard', e => { const r = e.getBoundingClientRect(), b = e.parentElement.getBoundingClientRect(), cs = getComputedStyle(e); return r.width >= 8 && r.height >= 10 && r.top >= b.top && r.bottom <= b.bottom && (cs.backgroundImage !== 'none' || cs.maskImage !== 'none' || cs.webkitMaskImage !== 'none'); })), 'daily button «Сбросить за 15 [shard icon]», icon visible inside the button');
   await p.evaluate(() => { document.getElementById('toasts').textContent = ''; }); await p.tap('#qRerollBtn'); await sleep(300);
   ok(/Не хватает осколков/.test(await p.textContent('#toasts')) && await p.isHidden('#qRrDlg'), 'not enough shards → error toast, no dialog');
   const srv = await em('quest:reroll', 'daily'); ok(!srv.ok && srv.code === 'shards', 'server refuses without shards');
@@ -45,7 +45,7 @@ const up = async () => { for (let i = 0; i < 100; i++) { try { if ((await fetch(
   pr = await prof(); ok(pr.stats.streak === streak && pr.stats.questsDone === doneBefore + 3 && !/Бонус за все/.test(await p.textContent('#toasts')), 'new set completable; no second daily bonus / streak');
   // weekly
   await p.click('#qTabs [data-qtab=weekly]'); await sleep(200);
-  ok(/Сбросить за 105 💎/.test(await p.textContent('#qRerollBtn')), 'weekly button «Сбросить за 105 💎»');
+  ok(/Сбросить за 105/.test(await p.textContent('#qRerollBtn')) && (await p.$eval('#qRerollBtn .cur-shard', e => { const r = e.getBoundingClientRect(), b = e.parentElement.getBoundingClientRect(), cs = getComputedStyle(e); return r.width >= 8 && r.height >= 10 && r.top >= b.top && r.bottom <= b.bottom && (cs.backgroundImage !== 'none' || cs.maskImage !== 'none' || cs.webkitMaskImage !== 'none'); })), 'weekly button «Сбросить за 105 [shard icon]»');
   await em('test:quest', { kind: 'orbs', n: 50 }); await sleep(300); pr = await prof(); if (pr.shards < 105) await em('test:grant', { id: SH, qty: 105 - pr.shards });
   pr = await prof(); const sw = pr.shards, w0 = pr.stats.weekly.q.map(q => q.id);
   await p.tap('#qRerollBtn'); await sleep(200); await p.tap('#qRrYes'); await sleep(700);

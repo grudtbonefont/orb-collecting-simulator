@@ -2138,7 +2138,7 @@
     const add = (cls, t) => { const s = document.createElement('span'); s.className = 'rw-chip ' + cls; s.textContent = t; box.appendChild(s); };
     if (!rw) return box;
     if (rw.orbs) add('orb', `🔮 +${fmt(rw.orbs)} сфер`);
-    if (rw.shards) add('shard', `💎 +${rw.shards} оск.`);
+    if (rw.shards) add('shard', `✦ +${rw.shards} оск.`);
     if (rw.boost) add('boost', `${C.BOOSTS[rw.boost].icon} ${C.BOOSTS[rw.boost].name} · ${rw.min} мин`);
     if (rw.item) { const it = G.ITEM_BY_ID[rw.item]; add('item', `🎁 «${it ? it.name : rw.item}»`); }
     if (rw.potion) add('potion', '+ 🧪 зелье');
@@ -2265,13 +2265,13 @@
   }
   function renderReroll() {
     const cost = C.REROLL_COST[questTab], have = (profile && profile.shards) || 0;
-    $('qRerollBtn').textContent = `🎲 Сбросить за ${fmt(cost)} 💎`; $('qRerollBtn').classList.toggle('poor', have < cost);
+    $('qRerollBtn').innerHTML = `🎲 Сбросить за ${fmt(cost)} <i class="cur-shard" aria-hidden="true"></i>`; $('qRerollBtn').classList.toggle('poor', have < cost);
     $('qRerollHint').textContent = questTab === 'weekly' ? 'Новые 5 заданий недели, прогресс обнулится' : 'Новые 3 задания, прогресс обнулится; бонус дня не повторяется';
   }
   $('qRerollBtn').addEventListener('click', () => {
     const cost = C.REROLL_COST[questTab], have = (profile && profile.shards) || 0;
-    if (have < cost) return toast(`Не хватает осколков: нужно ${fmt(cost)} 💎, у вас ${fmt(have)}`, 'err');
-    $('qRrText').textContent = `Сбросить ${questTab === 'weekly' ? 'еженедельные' : 'ежедневные'} задания за ${fmt(cost)} 💎? Текущий прогресс по ним пропадёт.`;
+    if (have < cost) return toast(`Не хватает осколков: нужно ${fmt(cost)} ✦, у вас ${fmt(have)}`, 'err');
+    $('qRrText').textContent = `Сбросить ${questTab === 'weekly' ? 'еженедельные' : 'ежедневные'} задания за ${fmt(cost)} ✦? Текущий прогресс по ним пропадёт.`;
     $('qRrDlg').dataset.which = questTab; $('qRrDlg').classList.remove('hidden');
   });
   $('qRrNo').addEventListener('click', () => $('qRrDlg').classList.add('hidden'));
@@ -2281,7 +2281,7 @@
       $('qRrYes').disabled = false;
       if (!r || !r.ok) return toast((r && r.error) || 'Не удалось сбросить задания', 'err');
       if (r.profile) setProfile(r.profile);
-      toast(`🎲 Задания обновлены (−${fmt(r.spent)} 💎)`, 'ok'); renderQuests();
+      toast(`🎲 Задания обновлены (−${fmt(r.spent)} ✦)`, 'ok'); renderQuests();
     });
   });
   function renderQuests() {
