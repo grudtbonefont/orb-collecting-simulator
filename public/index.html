@@ -491,6 +491,51 @@
   <div class="pc-head"><canvas id="pcAvatar" width="84" height="84"></canvas><div><h3 id="pcName"></h3><span id="pcAdmin" class="pill hidden">👑 Админ</span> <span id="pcTrophy" class="pill gold hidden">🏆 Кубок</span></div><button id="pcClose" class="close" type="button" aria-label="Закрыть">✕</button></div>
   <div id="pcStats" class="pc-stats"></div>
   <div class="pc-sub">Надето</div><div id="pcEq" class="pc-eqs"></div>
+  <div class="pc-actions"><button type="button" id="pcTrade" class="btn primary hidden">🤝 Предложить обмен</button></div>
+</div>
+
+<!-- Incoming trade request toast (interactive) -->
+<div id="tradeReq" class="trade-req hidden" role="alertdialog" aria-label="Запрос на обмен">
+  <div class="trade-req-body">
+    <div class="trade-req-title">Запрос на обмен</div>
+    <div id="tradeReqText" class="trade-req-text"></div>
+    <div class="trade-req-actions">
+      <button type="button" id="tradeReqAccept" class="btn primary">Принять</button>
+      <button type="button" id="tradeReqDecline" class="btn">Отклонить</button>
+    </div>
+    <div class="trade-req-bar"><div id="tradeReqBar"></div></div>
+  </div>
+</div>
+
+<!-- Trade window -->
+<div id="trade" class="modal hidden">
+  <div class="modal-card trade-card">
+    <div class="modal-head"><h2>🤝 Обмен</h2><div class="pill" id="tradePartner"></div><button type="button" id="tradeClose" class="close" aria-label="Отменить обмен">✕</button></div>
+    <div class="trade-cols">
+      <div class="trade-side" id="tradeMine">
+        <div class="trade-side-h">Ваше предложение <span id="tradeMyFlags" class="trade-flags"></span></div>
+        <div id="tradeMyOffer" class="trade-offer"></div>
+        <div class="trade-currency">
+          <label>Сферы <input type="number" id="tradeMyOrbs" min="0" step="1" value="0"></label>
+          <label>Осколки <input type="number" id="tradeMyShards" min="0" step="1" value="0"></label>
+        </div>
+        <div class="trade-inv-h">Ваш инвентарь <small class="muted">(нажмите, чтобы добавить)</small></div>
+        <div id="tradeMyInv" class="trade-inv"></div>
+      </div>
+      <div class="trade-side" id="tradeTheirs">
+        <div class="trade-side-h">Предложение <span id="tradeTheirName"></span> <span id="tradeTheirFlags" class="trade-flags"></span></div>
+        <div id="tradeTheirOffer" class="trade-offer"></div>
+        <div class="trade-currency muted" id="tradeTheirCur"></div>
+      </div>
+    </div>
+    <div id="tradeCd" class="trade-cd hidden">Обмен через <b id="tradeCdN">4</b>…</div>
+    <div id="tradeErr" class="trade-err"></div>
+    <div class="trade-actions">
+      <button type="button" id="tradeReady" class="btn">Готов</button>
+      <button type="button" id="tradeConfirm" class="btn primary" disabled>Подтвердить</button>
+      <button type="button" id="tradeCancel" class="btn">Отмена</button>
+    </div>
+  </div>
 </div>
 
 <!-- Leaderboard -->

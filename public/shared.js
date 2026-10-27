@@ -239,6 +239,32 @@
   const BUY_MAX_QTY = 99;
   const INV_CATEGORIES = CATEGORIES.concat([{ key: 'misc', name: 'Прочее' }]);
 
+  // Trading: admin can flip TRADING_ENABLED to false to disable all player-to-player trades.
+  // Non-tradeable: base defaults, award-only (Кубок / beta / calendar), free emotes, and the shard currency item id.
+  const TRADING_ENABLED = true;
+  const TRADE = {
+    requestMs: 30000,      // trade request expires
+    countdownMs: 4000,     // both-confirmed countdown before swap
+    maxItems: 20,          // max distinct item lines per offer
+    maxOrbs: 1e9,          // hard cap (also capped by balance)
+    maxShards: 99999,
+    reqGapMs: 800,        // min gap between outgoing requests
+    reqWindowMs: 30000,    // rate-limit window
+    reqWindowMax: 8,       // max requests per window
+  };
+  // Explicit non-tradeable award list (also covered by award:true on the item defs)
+  const NON_TRADEABLE_IDS = ['h_beta', 'h_trophy', 'c_calendar', 't_pages', 'e_calendar', 'e_check'];
+
+  function isTradeable(def) {
+    if (!def || typeof def !== 'object') return false;
+    if (NON_TRADEABLE_IDS.includes(def.id)) return false;
+    if (def.base || def.award || def.free) return false;
+    if (def.id === SHARD_ID) return false;
+    if (def.tradeable === false) return false;
+    if (def.tradeable === true) return true;
+    // owned cosmetics / potions / stackables that are not award/base/free
+    return def.type === 'cosmetic' || def.type === 'potion' || def.type === 'emote' || def.type === 'collectible';
+  }
   // Beta-test cap: granted once to every account on load/creation (lib/inventory.js migrateAccount). Set false to stop granting.
   const BETA_CAP_GRANT = true, BETA_CAP_ID = 'h_beta';
   const DEFAULT_EQUIPPED = { color: 'c_cyan', shape: 's_circle', trail: 't_none', nameColor: 'n_white', hat: 'h_none' };
@@ -498,7 +524,7 @@
   }
 
   const api = {
-    BETA_CAP_GRANT, BETA_CAP_ID, WORLD, ZONE_W, ZONE_H, DOOR, doorDist, DOOR_COST, ZONE2_WEIGHTS, zoneOf, zoneGate, PLAYER_R, BASE_SPEED, TICK_MS, STEP_DT, ORB_TYPES, ORB_RANK, ORB_LEGEND, POOL_WEIGHTS, RAIN_WEIGHTS, rollOrbType, expectedOrbValue, CATEGORIES, INV_CATEGORIES, RARITIES, ITEMS, ITEM_BY_ID, INV_SLOTS, INV_CAP, BUY_MAX_QTY, PAINTS,
+    BETA_CAP_GRANT, BETA_CAP_ID, TRADING_ENABLED, TRADE, isTradeable, NON_TRADEABLE_IDS, WORLD, ZONE_W, ZONE_H, DOOR, doorDist, DOOR_COST, ZONE2_WEIGHTS, zoneOf, zoneGate, PLAYER_R, BASE_SPEED, TICK_MS, STEP_DT, ORB_TYPES, ORB_RANK, ORB_LEGEND, POOL_WEIGHTS, RAIN_WEIGHTS, rollOrbType, expectedOrbValue, CATEGORIES, INV_CATEGORIES, RARITIES, ITEMS, ITEM_BY_ID, INV_SLOTS, INV_CAP, BUY_MAX_QTY, PAINTS,
     DEFAULT_EQUIPPED, DEFAULT_OWNED, UPGRADES, UPGRADE_KEYS, UPGRADE_REFUND_PRICES, upLevel, upValue, jackpotChance, upgradeText, orbReward, skillPrize, compassTargets, SENSE_EPIC_RANGE, RADAR, radarBlips, PUSH, separatePlayers,
     EVENTS, EVENT_KEYS, AUTO_EVENT_KEYS, EVENT_SCHEDULE, luckyWeights, OBSTACLES, laserAngle, resolveObstacles, laserHits, laserPenalty, robotPenalty, WEEKEND, weekendInfo, SHARD_ID, SHARD_EXCHANGE, TROPHY_ACH, POTIONS, POTION_CAP_MS, POTION_MAP, potionOn, potionMult, EMOTE_MS, EMOTE_GAP_MS, MG_PRIZE_MULT,
     MINIGAMES, REACTION_PRIZES, rushPrize, memoryPrize, memoryShowMs, shellFinal, shellShuffleMs, throwPos, throwPoints, throwPrize, chainPrize, minigameMinMs, speedFor, pickupFor, applyInput, BONUS_ROOM, inBonusRoom,

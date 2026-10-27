@@ -13,6 +13,7 @@ const DAILY = require('./lib/daily');
 const CODES = require('./lib/codes');
 const C = require('./public/content.js');
 const createFeatures = require('./lib/features');
+const { createTradeSystem } = require('./lib/trade');
 
 const PORT = parseInt(process.env.PORT, 10) || 3000;
 const SESSION_TTL_MS = 30 * 24 * 3600 * 1000;
@@ -347,6 +348,13 @@ function laserHit(pl, o, now, src = 'laser') {
   const loss = src === 'boss' ? C.bossPenalty(pl.acc.balance) : src === 'robot' ? G.robotPenalty(pl.acc.balance) : G.laserPenalty(pl.acc.balance);
   FX.onZap(pl);
   if (!loss) return;
+  if (TRADE) {
+    const g2 = TRADE.mutationGuard(pl.acc, 'orbs', null, loss);
+    if (g2) {
+      // Prefer cancelling the trade over leaving offered orbs unreserved after a hit
+      TRADE.onLeave(pl);
+    }
+  }
   pl.acc.balance -= loss; markDirty(pl.acc);
   const drops = Math.min(OB.dropMax, src !== 'laser' ? Math.ceil(loss / 2) : loss); // robot: about half of the loss drops
   for (let i = 0; i < drops; i++) {
@@ -730,6 +738,13 @@ FX = createFeatures({ io: () => io, players, orbs, addOrb, removeOrb, pickSpot, 
   penalize: (pl, now, src) => laserHit(pl, null, now, src), mainEventBusy: () => !!ev, testHooks: TEST_HOOKS,
   nearLaser: (pl, now) => obstacles.some(o => o.k === 'laser' && G.laserHits(o, pl.x, pl.y, now, 150)) }); // «По краю»: within 150 px of an armed beam
 
+let TRADE = null;
+function initTrade() {
+  TRADE = createTradeSystem({
+    store, profiles, byKey, players, markDirty, flush, flushSoon, emitProfile, accountChanged, systemChat,
+  });
+}
+
 // ---------------------------------------------------------------- auth helpers
 // Cyrillic letters that look like Latin ones (typed on a Russian phone keyboard)
 const HOMO = { 'А': 'A', 'В': 'B', 'Е': 'E', 'К': 'K', 'М': 'M', 'Н': 'H', 'О': 'O', 'Р': 'P', 'С': 'C', 'Т': 'T', 'Х': 'X', 'У': 'Y', 'а': 'a', 'е': 'e', 'о': 'o', 'р': 'p', 'с': 'c', 'у': 'y', 'х': 'x', 'к': 'k', 'м': 'm', 'т': 't', 'в': 'b', 'н': 'h', 'і': 'i', 'І': 'I', 'ј': 'j', 'Ј': 'J' };
@@ -767,6 +782,7 @@ async function newSession(key) {
 function removePlayer(pl, opts = {}) {
   if (!pl || !players.has(pl.id)) return;
   if (pl.mg) finishMinigame(pl, { aborted: true });
+  if (TRADE) TRADE.onLeave(pl);
   FX.onLeave(pl);
   players.delete(pl.id);
   if (byKey.get(pl.acc.key) === pl) byKey.delete(pl.acc.key);
@@ -1272,6 +1288,7 @@ io.on('connection', socket => {
     if (!def.stackable && (q > 1 || INV.hasItem(a, def.id))) return ack({ ok: false, error: 'Уже есть в инвентаре', code: 'owned' });
     const cost = def.price * q;
     if (a.balance < cost) return ack({ ok: false, error: `Не хватает сфер: нужно ${cost}`, code: 'funds' });
+    { const g2 = TRADE && TRADE.mutationGuard(a, 'orbs', null, cost); if (g2) return ack(g2); }
     const g = INV.grantItem(a, def.id, q, 'shop'); // all-or-nothing (space checked inside)
     if (!g.ok) return ack({ ok: false, error: g.error, code: g.code });
     a.stats.buys = (a.stats.buys || 0) + 1;
@@ -1313,6 +1330,7 @@ io.on('connection', socket => {
     trashTimes.push(now);
     if (!isObj(d) || typeof d.id !== 'string') return ack({ ok: false, error: 'Неверный запрос' });
     const a = acct.acc;
+    { const g2 = TRADE && TRADE.mutationGuard(a, 'item', d.id, d.qty); if (g2) return ack(g2); }
     const r = INV.removeItem(a, d.id, d.qty, 'trash', d.slot);
     if (!r.ok) return ack({ ok: false, error: r.error, code: r.code });
     accountChanged(a, { looks: r.unequipped });
@@ -1335,6 +1353,7 @@ io.on('connection', socket => {
     const a = acct.acc;
     const have = INV.countItem(a, G.SHARD_ID), cost = def.shardPrice * q;
     if (have < cost) return ack({ ok: false, error: `Не хватает осколков: нужно ${cost}, у вас ${have}`, code: 'shards' });
+    { const g2 = TRADE && TRADE.mutationGuard(a, 'shards', null, cost); if (g2) return ack(g2); }
     // all-or-nothing: spend the shards, grant the item; if the item does not fit, the shards are put back exactly as they were
     const snap = { inv: JSON.stringify(a.inventory), owned: a.owned.slice(), eq: Object.assign({}, a.equipped), shards: a.stats.shards };
     const r = INV.removeItem(a, G.SHARD_ID, cost, 'shard_shop');
@@ -1353,6 +1372,7 @@ io.on('connection', socket => {
     if (!shardRateOk(Date.now())) return ack({ ok: false, error: 'Не так быстро! Подождите пару секунд.', code: 'rate' });
     const a = acct.acc, cost = C.REROLL_COST[which], have = INV.countItem(a, G.SHARD_ID);
     if (have < cost) return ack({ ok: false, error: `Не хватает осколков: нужно ${cost}, у вас ${have}`, code: 'shards' });
+    { const g2 = TRADE && TRADE.mutationGuard(a, 'shards', null, cost); if (g2) return ack(g2); }
     const r = INV.removeItem(a, G.SHARD_ID, cost, 'quest_reroll');
     if (!r.ok) return ack({ ok: false, error: r.error || 'Не удалось списать осколки', code: 'shards' });
     FX.rerollQuests(a, which);
@@ -1443,6 +1463,7 @@ io.on('connection', socket => {
     const a = acct.acc;
     if (a.stats.unlockedDoor2 === true) return ack({ ok: false, error: 'Дверь уже открыта', code: 'owned' });
     if (a.balance < G.DOOR_COST) return ack({ ok: false, error: `Нужно ${G.DOOR_COST} сфер, у вас ${a.balance}`, code: 'funds' });
+    { const g2 = TRADE && TRADE.mutationGuard(a, 'orbs', null, G.DOOR_COST); if (g2) return ack(g2); }
     a.balance -= G.DOOR_COST;
     a.stats.unlockedDoor2 = true;
     accountChanged(a);
@@ -1456,6 +1477,7 @@ io.on('connection', socket => {
     if (!Number.isInteger(qty) || qty < 1 || qty > G.SHARD_EXCHANGE.maxPerTrade) return ack({ ok: false, error: `Можно обменять от 1 до ${G.SHARD_EXCHANGE.maxPerTrade} осколков за раз`, code: 'qty' });
     if (!shardRateOk(Date.now())) return ack({ ok: false, error: 'Не так быстро! Подождите пару секунд.', code: 'rate' });
     const a = acct.acc;
+    { const g2 = TRADE && TRADE.mutationGuard(a, 'shards', null, qty); if (g2) return ack(g2); }
     const r = INV.removeItem(a, G.SHARD_ID, qty, 'shard_shop');
     if (!r.ok) return ack({ ok: false, error: r.error, code: r.code });
     const got = qty * G.SHARD_EXCHANGE.orbs;
@@ -1465,6 +1487,15 @@ io.on('connection', socket => {
     ack({ ok: true, orbs: got, profile: ownProfile(a) });
   });
 
+
+  // ---- player-to-player trade (server-authoritative; see lib/trade.js)
+  socket.on('trade:request', (toPid, ack) => { ack = safeAck(ack); if (!acct || !pl) return ack({ ok: false, error: 'Сначала войдите в игру' }); if (!TRADE) return ack({ ok: false, error: 'Обмен недоступен' }); ack(TRADE.request(pl, toPid)); });
+  socket.on('trade:respond', (d, ack) => { ack = safeAck(ack); if (!acct || !pl) return ack({ ok: false, error: 'Сначала войдите в игру' }); if (!TRADE) return ack({ ok: false, error: 'Обмен недоступен' }); const tradeId = d && d.tradeId, accept = !!(d && d.accept); ack(TRADE.respond(pl, tradeId, accept)); });
+  socket.on('trade:offer', (d, ack) => { ack = safeAck(ack); if (!acct || !pl) return ack({ ok: false, error: 'Сначала войдите в игру' }); if (!TRADE) return ack({ ok: false, error: 'Обмен недоступен' }); ack(TRADE.setOffer(pl, d && d.tradeId, d && d.offer)); });
+  socket.on('trade:ready', (d, ack) => { ack = safeAck(ack); if (!acct || !pl) return ack({ ok: false, error: 'Сначала войдите в игру' }); if (!TRADE) return ack({ ok: false, error: 'Обмен недоступен' }); ack(TRADE.setReady(pl, d && d.tradeId, !!(d && d.ready))); });
+  socket.on('trade:confirm', (d, ack) => { ack = safeAck(ack); if (!acct || !pl) return ack({ ok: false, error: 'Сначала войдите в игру' }); if (!TRADE) return ack({ ok: false, error: 'Обмен недоступен' }); ack(TRADE.setConfirm(pl, d && d.tradeId, !!(d && d.confirm))); });
+  socket.on('trade:cancel', (d, ack) => { ack = safeAck(ack); if (!acct || !pl) return ack({ ok: false, error: 'Сначала войдите в игру' }); if (!TRADE) return ack({ ok: false, error: 'Обмен недоступен' }); ack(TRADE.cancel(pl, d && d.tradeId)); });
+
   socket.on('upgrade', (key, ack) => {
     ack = safeAck(ack);
     if (!acct) return ack({ ok: false, error: 'Сначала войдите в аккаунт' });
@@ -1473,6 +1504,7 @@ io.on('connection', socket => {
     if (lvl >= up.max) return ack({ ok: false, error: 'Максимальный уровень' });
     const price = up.prices[lvl];
     if (a.balance < price) return ack({ ok: false, error: `Не хватает сфер: нужно ${price}` });
+    { const g2 = TRADE && TRADE.mutationGuard(a, 'orbs', null, price); if (g2) return ack(g2); }
     a.balance -= price;
     a.upgrades[key] = lvl + 1;
     accountChanged(a);
@@ -1652,6 +1684,7 @@ io.on('connection', socket => {
     if (!acct) return ack({ ok: false, error: 'Сначала войдите в аккаунт' });
     const def = INV.itemDef(itemId); if (!def || def.type !== 'potion' || !has(G.POTIONS, def.potion)) return ack({ ok: false, error: 'Это не зелье' });
     if (!INV.hasItem(acct.acc, def.id)) return ack({ ok: false, error: 'Нет такого зелья' });
+    { const g2 = TRADE && TRADE.mutationGuard(acct.acc, 'item', def.id, 1); if (g2) return ack(g2); }
     const st = acct.acc.stats; st.potions = st.potions || {}; const now = Date.now();
     for (const k of Object.keys(st.potions)) if (!(st.potions[k] > now)) delete st.potions[k];
     const cur = Math.max(now, st.potions[def.potion] || 0), cap = now + G.POTION_CAP_MS;
@@ -1678,7 +1711,7 @@ io.on('connection', socket => {
     const q = players.get(id); if (!q || (q.invis && q !== pl)) return ack({ ok: false, error: 'Игрок не найден' });
     const now = Date.now(); if (now - (pl.cardAt || 0) < 300) return ack({ ok: false, error: 'Подождите…' }); pl.cardAt = now;
     const a = q.acc, st = a.stats || {};
-    ack({ ok: true, card: { name: a.name, me: q === pl, total: a.total, balance: a.balance, shards: st.shards || 0, ach: C.ACH.filter(x => st.ach && st.ach[x.id]).length, achMax: C.ACH.length,
+    ack({ ok: true, card: { id: q.id, name: a.name, me: q === pl, total: a.total, balance: a.balance, shards: st.shards || 0, ach: C.ACH.filter(x => st.ach && st.ach[x.id]).length, achMax: C.ACH.length,
       trophy: INV.hasItem(a, 'h_trophy'), equipped: a.equipped, playMin: Math.round(((st.playMs || 0) + (now - q.joinedAt)) / 60000), bossKills: st.bossKills || 0, mgWins: st.mgWins || 0,
       eventWins: st.eventWins || 0, questsDone: st.questsDone || 0, bestStreak: st.bestStreak || 0, createdAt: a.createdAt, admin: isAdmin(a) } });
   });
@@ -2188,6 +2221,7 @@ process.on('unhandledRejection', e => console.error('Unhandled rejection:', e &&
 
 (async () => {
   await store.init();
+  initTrade();
   try { for (const c of await store.listAdminCodes()) adminCodes.set(c.code, c); } catch (e) { console.error('admin codes load failed:', e.message); }
   try { // one summary line of active panel codes (code text + reward + limits only) for ops
     const act = []; for (const c of adminCodes.values()) if (!c.builtin && !c.deleted && !c.disabled) act.push({ code: c.code, rewards: c.rewards, maxUses: c.maxUses, used: await store.codeUses(c.code), expiresAt: c.expiresAt ? new Date(c.expiresAt).toISOString() : null });
