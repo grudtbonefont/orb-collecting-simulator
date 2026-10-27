@@ -1108,38 +1108,84 @@ input[type=checkbox] { accent-color: var(--ui-cyan); }
 .trade-card { width: min(980px, 96vw); max-height: 92vh; overflow: auto; }
 .trade-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 @media (max-width: 720px) { .trade-cols { grid-template-columns: 1fr; } }
-.trade-side { background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08); border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 8px; min-height: 260px; }
+.trade-side { background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08); border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
 .trade-side-h { font-weight: 700; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .trade-flags { font-size: 12px; font-weight: 600; }
 .trade-flags .ok { color: #6dff9a; }
 .trade-flags .wait { color: #ffcc66; }
 
-/* 4-per-row inventory-style slots */
-.trade-slots { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; align-content: start;
-  background: rgba(0,0,0,.22); border: 1px solid rgba(255,255,255,.08); border-radius: 10px; padding: 8px; min-height: 88px; }
-.trade-offer { max-height: 220px; overflow: auto; }
-.trade-inv { max-height: 240px; overflow: auto; }
-.trade-slots .trade-empty { grid-column: 1 / -1; text-align: center; padding: 18px 6px; color: #8a93b8; font-size: 13px; }
-.trade-slot { --rc: var(--r-common); position: relative; aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 2px; padding: 4px 3px 3px; border-radius: 12px; cursor: pointer; user-select: none;
+/* 4-per-row inventory-style slots
+   Scroll wrapper is the size container; the inner grid uses 100cqw so
+   grid-auto-rows stay square. (An element cannot query its own cqw.) */
+.trade-scroll {
+  --trade-gap: 6px;
+  container-type: inline-size;
+  container-name: trade-scroll;
+  background: rgba(0,0,0,.22);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 10px;
+  padding: 8px;
+  box-sizing: border-box;
+  overflow: auto;
+  overscroll-behavior: contain;
+  min-height: 96px;
+}
+.trade-offer-scroll { max-height: min(240px, 32vh); }
+.trade-inv-scroll { max-height: min(300px, 40vh); min-height: 140px; flex: 1 1 auto; }
+.trade-side { min-height: 0; }
+.trade-slots {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* fallback fixed row, then square via parent cqw */
+  grid-auto-rows: 88px;
+  grid-auto-rows: calc((100cqw - 3 * var(--trade-gap)) / 4);
+  gap: var(--trade-gap);
+  align-content: start;
+  align-items: stretch;
+  justify-items: stretch;
+  box-sizing: border-box;
+  min-width: 0;
+}
+.trade-slots .trade-empty {
+  grid-column: 1 / -1; text-align: center; padding: 18px 6px; color: #8a93b8; font-size: 13px; min-height: 72px;
+}
+.trade-slot {
+  --rc: var(--r-common);
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 4px 3px 3px;
+  border-radius: 12px;
+  cursor: pointer;
+  user-select: none;
+  box-sizing: border-box;
   background: linear-gradient(170deg, color-mix(in srgb, var(--rc) 16%, rgba(20, 24, 52, .95)), rgba(12, 15, 34, .95) 70%);
-  border: 1px solid color-mix(in srgb, var(--rc) 50%, transparent); overflow: hidden; transition: transform .12s, box-shadow .15s; }
+  border: 1px solid color-mix(in srgb, var(--rc) 50%, transparent);
+  overflow: hidden;
+  transition: transform .12s, box-shadow .15s;
+}
 .trade-slot:hover { transform: translateY(-2px); box-shadow: 0 6px 16px color-mix(in srgb, var(--rc) 28%, transparent); }
 .trade-slot.rar-rare { --rc: var(--r-rare); }
 .trade-slot.rar-epic { --rc: var(--r-epic); }
 .trade-slot.rar-legendary { --rc: var(--r-legendary); }
 .trade-slot.rar-exclusive { --rc: #ff9de2; }
 .trade-slot::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: linear-gradient(90deg, transparent, var(--rc), transparent); }
-.trade-slot .ico { width: 44px; height: 44px; border-radius: 12px; }
-.trade-slot .name { font-size: 10px; font-weight: 700; line-height: 1.15; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 2px; }
-.trade-slot .rar { font-size: 9px; font-weight: 800; letter-spacing: .3px; padding: 0 5px; border-radius: 7px; text-transform: uppercase;
+.trade-slot .ico { width: 42%; height: 42%; max-width: 48px; max-height: 48px; min-width: 28px; min-height: 28px; border-radius: 12px; flex: none; }
+.trade-slot .name { font-size: 10px; font-weight: 700; line-height: 1.15; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 2px; flex: none; }
+.trade-slot .rar { font-size: 9px; font-weight: 800; letter-spacing: .3px; padding: 0 5px; border-radius: 7px; text-transform: uppercase; flex: none;
   background: color-mix(in srgb, var(--rc) 16%, transparent); border: 1px solid color-mix(in srgb, var(--rc) 40%, transparent); margin: 0; }
-.trade-slot .qty { top: 4px; right: 4px; font-size: 11px; padding: 0 5px; border-radius: 8px; }
+.trade-slot .qty { position: absolute; top: 4px; right: 4px; font-size: 11px; padding: 0 5px; border-radius: 8px; z-index: 1; }
 .trade-slot.in-offer { box-shadow: 0 0 0 2px #3ee0ff, 0 0 12px rgba(62, 224, 255, .35); }
-.trade-slot.in-offer::after { content: '✓'; position: absolute; top: 4px; left: 5px; font-size: 11px; font-weight: 800; color: #3ee0ff; text-shadow: 0 0 6px #000; }
-.trade-offer .trade-slot { cursor: pointer; }
-.trade-inv .trade-slot { cursor: pointer; }
-.trade-inv-h { font-size: 12px; color: #aab; }
+.trade-slot.in-offer::after { content: '✓'; position: absolute; top: 4px; left: 5px; font-size: 11px; font-weight: 800; color: #3ee0ff; text-shadow: 0 0 6px #000; z-index: 1; }
+.trade-slots .trade-slot { cursor: pointer; }
+.trade-inv-h { font-size: 12px; color: #aab; flex: none; }
 
 /* Pet Sim–style currency bar under each offer */
 .trade-cur-bar { display: flex; gap: 8px; flex-wrap: wrap; padding: 8px 10px; border-radius: 10px;
@@ -1161,8 +1207,8 @@ input[type=checkbox] { accent-color: var(--ui-cyan); }
 .trade-cd { text-align: center; font-size: 18px; color: #ffcc66; margin: 8px 0; }
 .trade-err { color: #ff6b7a; min-height: 1.2em; text-align: center; font-size: 13px; }
 @media (max-width: 520px) {
-  .trade-slots { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 6px; }
-  .trade-slot .ico { width: 34px; height: 34px; border-radius: 10px; }
+  .trade-scroll { --trade-gap: 4px; padding: 6px; }
+  .trade-slots { gap: 4px; grid-auto-rows: 70px; grid-auto-rows: calc((100cqw - 3 * var(--trade-gap)) / 4); }
   .trade-slot .name { font-size: 9px; }
   .trade-slot .rar { display: none; }
 }

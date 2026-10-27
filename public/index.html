@@ -514,7 +514,7 @@
     <div class="trade-cols">
       <div class="trade-side" id="tradeMine">
         <div class="trade-side-h">Ваше предложение <span id="tradeMyFlags" class="trade-flags"></span></div>
-        <div id="tradeMyOffer" class="trade-slots trade-offer" aria-label="Ваши предметы в обмене"></div>
+        <div class="trade-scroll trade-offer-scroll"><div id="tradeMyOffer" class="trade-slots" aria-label="Ваши предметы в обмене"></div></div>
         <div class="trade-cur-bar" id="tradeMyCur">
           <div class="trade-cur-row" title="Сферы">
             <i class="cur-orb" aria-hidden="true"></i>
@@ -530,11 +530,11 @@
           </div>
         </div>
         <div class="trade-inv-h">Ваш инвентарь <small class="muted">(нажмите, чтобы добавить)</small></div>
-        <div id="tradeMyInv" class="trade-slots trade-inv" aria-label="Предметы для обмена"></div>
+        <div class="trade-scroll trade-inv-scroll"><div id="tradeMyInv" class="trade-slots" aria-label="Предметы для обмена"></div></div>
       </div>
       <div class="trade-side" id="tradeTheirs">
         <div class="trade-side-h">Предложение <span id="tradeTheirName"></span> <span id="tradeTheirFlags" class="trade-flags"></span></div>
-        <div id="tradeTheirOffer" class="trade-slots trade-offer" aria-label="Предметы партнёра"></div>
+        <div class="trade-scroll trade-offer-scroll"><div id="tradeTheirOffer" class="trade-slots" aria-label="Предметы партнёра"></div></div>
         <div class="trade-cur-bar trade-cur-theirs" id="tradeTheirCur">
           <div class="trade-cur-row" title="Сферы"><i class="cur-orb" aria-hidden="true"></i><b id="tradeTheirOrbs">0</b></div>
           <div class="trade-cur-row" title="Осколки"><i class="cur-shard" aria-hidden="true"></i><b id="tradeTheirShards">0</b></div>
