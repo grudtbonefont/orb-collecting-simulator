@@ -540,6 +540,32 @@ body.in-game .music-btn { display: none; }
   .ach-list { max-height: 52vh; }
 }
 .inv-sort { display: flex; align-items: center; gap: 6px; margin: 6px 0 8px; font-size: 13px; }
+
+/* inventory / trade search + sort tools */
+.inv-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0 8px; }
+.inv-search {
+  flex: 1 1 160px; min-width: 140px; max-width: 280px;
+  background: #131a36; color: #fff; border: 1px solid rgba(120,150,255,.4);
+  border-radius: 8px; padding: 7px 10px; font: inherit;
+}
+.inv-search::placeholder { color: #7a8ab0; }
+.inv-search:focus { outline: none; border-color: #6aa8ff; box-shadow: 0 0 0 2px rgba(80,140,255,.25); }
+.inv-tools .inv-sort { margin: 0; }
+.trade-inv-tools {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin: 0 0 6px; flex: none;
+}
+.trade-inv-tools .inv-search { max-width: none; flex: 1 1 120px; padding: 6px 8px; font-size: 12px; }
+.trade-inv-tools .inv-sort-select,
+.inv-sort-select {
+  background: #131a36; color: #fff; border: 1px solid rgba(120,150,255,.4);
+  border-radius: 8px; padding: 6px 8px; font: inherit; font-size: 12px;
+  flex: 0 1 auto; max-width: 100%;
+}
+@media (max-width: 640px) {
+  .inv-search, .trade-inv-tools .inv-sort-select { font-size: 16px; min-height: 38px; }
+}
+
 .inv-sort select { background: #131a36; color: #fff; border: 1px solid rgba(120,150,255,.4); border-radius: 8px; padding: 6px 8px; font: inherit; }
 @media (max-width: 640px) { .inv-sort select { font-size: 16px; flex: 1; min-height: 38px; } }
 .set-btn { right: 50px; font-size: 15px; line-height: 1; padding: 0; }

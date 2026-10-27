@@ -2820,24 +2820,56 @@
     row.append(minus, inp, plus, mx);
     el.append(row, btn); upd();
   }
+  // shared name filter + type/rarity/qty/name sort (inventory + trade picker)
+  const nameQuery = q => (q || '').trim().toLocaleLowerCase('ru');
+  const nameMatches = (def, q) => !q || ((def && def.name) || '').toLocaleLowerCase('ru').includes(q);
+  const TYPE_SORT_KEYS = ['hat', 'trail', 'color', 'shape', 'nameColor', 'emote', 'potion', 'misc'];
+  const typeSortRank = def => {
+    if (!def) return 99;
+    let key = def.cat;
+    if (def.type === 'potion') key = 'potion';
+    else if (def.type === 'emote') key = 'emote';
+    const i = TYPE_SORT_KEYS.indexOf(key);
+    return i < 0 ? 98 : i;
+  };
+  function cmpByItemMode(mode, a, b) {
+    // a/b: { def, q, i?, at? }
+    const da = a.def || {}, db = b.def || {};
+    const na = da.name || '', nb = db.name || '';
+    const byName = () => na.localeCompare(nb, 'ru') || (a.i ?? 0) - (b.i ?? 0);
+    if (mode === 'rarity') {
+      const d = (RAR_RANK[db.rarity] || 0) - (RAR_RANK[da.rarity] || 0);
+      return d || byName();
+    }
+    if (mode === 'type') {
+      const d = typeSortRank(da) - typeSortRank(db);
+      return d || byName();
+    }
+    if (mode === 'qty') {
+      const d = (b.q || 0) - (a.q || 0);
+      return d || byName();
+    }
+    if (mode === 'name') return byName();
+    return byName();
+  }
   // inventory sort (display only; slot indexes stay the server's), saved in localStorage
   const INV_SORT_KEY = 'ocs_inv_sort', INV_SORTS = ['default', 'newest', 'price_desc', 'price_asc', 'rarity', 'type', 'name', 'qty'];
   let invSort = INV_SORTS.includes(store.get(INV_SORT_KEY)) ? store.get(INV_SORT_KEY) : 'default';
+  let invSearchQ = '';
   const itemValue = d => (d.price > 0 ? d.price : d.shardPrice ? d.shardPrice * G.SHARD_EXCHANGE.orbs : 0);
   function invOrder(inv) {
     const idx = inv.map((_, i) => i), D = i => G.ITEM_BY_ID[inv[i].id] || {}, nm = i => D(i).name || '', by = f => (a, b) => f(a, b) || nm(a).localeCompare(nm(b), 'ru') || a - b;
-    const catRank = Object.fromEntries(G.INV_CATEGORIES.map((c, k) => [c.key, k]));
+    if (invSort === 'rarity' || invSort === 'type' || invSort === 'name' || invSort === 'qty') {
+      return idx.sort((a, b) => cmpByItemMode(invSort, { def: D(a), q: inv[a].q, i: a }, { def: D(b), q: inv[b].q, i: b }));
+    }
     const cmp = {
       newest: by((a, b) => (inv[b].at || 0) - (inv[a].at || 0) || b - a),
       price_desc: by((a, b) => itemValue(D(b)) - itemValue(D(a))), price_asc: by((a, b) => itemValue(D(a)) - itemValue(D(b))),
-      rarity: by((a, b) => (RAR_RANK[D(b).rarity] || 0) - (RAR_RANK[D(a).rarity] || 0)),
-      type: by((a, b) => (catRank[D(a).cat] ?? 99) - (catRank[D(b).cat] ?? 99)),
-      name: (a, b) => nm(a).localeCompare(nm(b), 'ru') || a - b,
-      qty: by((a, b) => inv[b].q - inv[a].q),
     }[invSort];
     return cmp ? idx.sort(cmp) : idx;
   }
   $('invSort').addEventListener('change', () => { invSort = INV_SORTS.includes($('invSort').value) ? $('invSort').value : 'default'; store.set(INV_SORT_KEY, invSort); renderInv(); });
+  $('invSearch').addEventListener('input', () => { invSearchQ = nameQuery($('invSearch').value); renderInv(); });
   function renderInv() {
     if (!profile) return;
     pruneHidden('inv');
@@ -2856,9 +2888,11 @@
     let shown = 0;
     $('invSort').value = invSort;
     const order = invOrder(inv);
+    const q = invSearchQ || nameQuery($('invSearch') && $('invSearch').value);
     order.forEach(i => { const slot = inv[i];
       const def = G.ITEM_BY_ID[slot.id];
       if (!def || (invTab !== 'all' && def.cat !== invTab)) return;
+      if (!nameMatches(def, q)) return;
       shown++;
       const el = document.createElement('div'); el.className = 'item inv-item rar-' + def.rarity; el.dataset.item = def.id; el.dataset.slot = i;
       el.appendChild(iconEl(def.id));
@@ -2887,7 +2921,8 @@
     });
     if (!shown) {
       const em = document.createElement('div'); em.className = 'inv-empty muted';
-      em.textContent = inv.length ? 'В этой категории пока ничего нет.' : 'Инвентарь пуст. Купите что-нибудь в магазине (B) — покупки появятся здесь.';
+      if (q) em.textContent = 'Ничего не найдено';
+      else em.textContent = inv.length ? 'В этой категории пока ничего нет.' : 'Инвентарь пуст. Купите что-нибудь в магазине (B) — покупки появятся здесь.';
       grid.appendChild(em);
     }
   }
@@ -3851,6 +3886,11 @@
     }
   }
 
+  const TRADE_INV_SORTS = ['rarity', 'type', 'qty', 'name'];
+  let tradeInvSort = 'rarity';
+  let tradeInvSearchQ = '';
+  // keep search/sort while trade UI is open; only sync from DOM (don't wipe on offer updates)
+
   function tradeableSlots() {
     if (!profile || !profile.inventory) return [];
     const out = [];
@@ -3865,9 +3905,18 @@
   function renderTradeInv() {
     const box = $('tradeMyInv'); box.textContent = '';
     const offered = new Map((tradeLocal.items || []).map(x => [x.id, x.qty]));
-    const slots = tradeableSlots();
+    const qEl = $('tradeInvSearch'), sEl = $('tradeInvSort');
+    if (qEl && document.activeElement !== qEl) qEl.value = tradeInvSearchQ;
+    if (sEl) sEl.value = TRADE_INV_SORTS.includes(tradeInvSort) ? tradeInvSort : 'rarity';
+    const q = nameQuery(tradeInvSearchQ);
+    let slots = tradeableSlots();
     if (!slots.length) {
       const e = document.createElement('div'); e.className = 'trade-empty'; e.textContent = 'Нет предметов для обмена'; box.appendChild(e); return;
+    }
+    slots = slots.filter(s => nameMatches(s.def, q));
+    slots.sort((a, b) => cmpByItemMode(tradeInvSort, { def: a.def, q: a.q, i: 0 }, { def: b.def, q: b.q, i: 0 }));
+    if (!slots.length) {
+      const e = document.createElement('div'); e.className = 'trade-empty'; e.textContent = 'Ничего не найдено'; box.appendChild(e); return;
     }
     for (const s of slots) {
       const inOffer = offered.has(s.id);
@@ -3877,6 +3926,15 @@
       box.appendChild(el);
     }
   }
+  $('tradeInvSearch').addEventListener('input', () => {
+    tradeInvSearchQ = $('tradeInvSearch').value;
+    renderTradeInv();
+  });
+  $('tradeInvSort').addEventListener('change', () => {
+    const v = $('tradeInvSort').value;
+    tradeInvSort = TRADE_INV_SORTS.includes(v) ? v : 'rarity';
+    renderTradeInv();
+  });
 
   let tradeQtyPending = null;
   function tradeQtyVal() { const v = parseInt($('tradeQty').value, 10); return Number.isFinite(v) ? v : 0; }
@@ -4014,6 +4072,10 @@
     $('trade').classList.add('hidden');
     tradeState = null;
     if (tradeCdTimer) { clearInterval(tradeCdTimer); tradeCdTimer = null; }
+    tradeInvSearchQ = '';
+    tradeInvSort = 'rarity';
+    if ($('tradeInvSearch')) $('tradeInvSearch').value = '';
+    if ($('tradeInvSort')) $('tradeInvSort').value = 'rarity';
   }
 
   function tradeCancel() {
