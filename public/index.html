@@ -514,18 +514,31 @@
     <div class="trade-cols">
       <div class="trade-side" id="tradeMine">
         <div class="trade-side-h">Ваше предложение <span id="tradeMyFlags" class="trade-flags"></span></div>
-        <div id="tradeMyOffer" class="trade-offer"></div>
-        <div class="trade-currency">
-          <label>Сферы <input type="number" id="tradeMyOrbs" min="0" step="1" value="0"></label>
-          <label>Осколки <input type="number" id="tradeMyShards" min="0" step="1" value="0"></label>
+        <div id="tradeMyOffer" class="trade-slots trade-offer" aria-label="Ваши предметы в обмене"></div>
+        <div class="trade-cur-bar" id="tradeMyCur">
+          <div class="trade-cur-row" title="Сферы">
+            <i class="cur-orb" aria-hidden="true"></i>
+            <button type="button" class="btn trade-cur-btn" id="tradeOrbsMinus" aria-label="Меньше сфер">−</button>
+            <input type="number" id="tradeMyOrbs" min="0" step="1" value="0" aria-label="Сферы в обмене">
+            <button type="button" class="btn trade-cur-btn" id="tradeOrbsPlus" aria-label="Больше сфер">+</button>
+          </div>
+          <div class="trade-cur-row" title="Осколки">
+            <i class="cur-shard" aria-hidden="true"></i>
+            <button type="button" class="btn trade-cur-btn" id="tradeShardsMinus" aria-label="Меньше осколков">−</button>
+            <input type="number" id="tradeMyShards" min="0" step="1" value="0" aria-label="Осколки в обмене">
+            <button type="button" class="btn trade-cur-btn" id="tradeShardsPlus" aria-label="Больше осколков">+</button>
+          </div>
         </div>
         <div class="trade-inv-h">Ваш инвентарь <small class="muted">(нажмите, чтобы добавить)</small></div>
-        <div id="tradeMyInv" class="trade-inv"></div>
+        <div id="tradeMyInv" class="trade-slots trade-inv" aria-label="Предметы для обмена"></div>
       </div>
       <div class="trade-side" id="tradeTheirs">
         <div class="trade-side-h">Предложение <span id="tradeTheirName"></span> <span id="tradeTheirFlags" class="trade-flags"></span></div>
-        <div id="tradeTheirOffer" class="trade-offer"></div>
-        <div class="trade-currency muted" id="tradeTheirCur"></div>
+        <div id="tradeTheirOffer" class="trade-slots trade-offer" aria-label="Предметы партнёра"></div>
+        <div class="trade-cur-bar trade-cur-theirs" id="tradeTheirCur">
+          <div class="trade-cur-row" title="Сферы"><i class="cur-orb" aria-hidden="true"></i><b id="tradeTheirOrbs">0</b></div>
+          <div class="trade-cur-row" title="Осколки"><i class="cur-shard" aria-hidden="true"></i><b id="tradeTheirShards">0</b></div>
+        </div>
       </div>
     </div>
     <div id="tradeCd" class="trade-cd hidden">Обмен через <b id="tradeCdN">4</b>…</div>
@@ -534,6 +547,28 @@
       <button type="button" id="tradeReady" class="btn">Готов</button>
       <button type="button" id="tradeConfirm" class="btn primary" disabled>Подтвердить</button>
       <button type="button" id="tradeCancel" class="btn">Отмена</button>
+    </div>
+  </div>
+</div>
+
+<!-- Trade quantity prompt (stackables) -->
+<div id="tradeQtyDlg" class="confirm-ov hidden" role="dialog" aria-modal="true" aria-labelledby="tradeQtyTitle">
+  <div class="confirm-card">
+    <h3 id="tradeQtyTitle">Добавить в обмен</h3>
+    <div class="trash-item"><div id="tradeQtyIco"></div><b id="tradeQtyName"></b></div>
+    <div class="trash-qty">
+      <label for="tradeQty">Количество:</label>
+      <div class="qty-row">
+        <button type="button" id="tradeQtyMinus" class="btn" aria-label="Меньше">−</button>
+        <input id="tradeQty" type="number" min="1" value="1" inputmode="numeric">
+        <button type="button" id="tradeQtyPlus" class="btn" aria-label="Больше">+</button>
+        <button type="button" id="tradeQtyAll" class="btn">Все</button>
+      </div>
+      <input id="tradeQtyRange" type="range" min="1" value="1" aria-label="Количество">
+    </div>
+    <div class="confirm-actions">
+      <button type="button" id="tradeQtyCancel" class="btn">Отмена</button>
+      <button type="button" id="tradeQtyOk" class="btn primary">Добавить</button>
     </div>
   </div>
 </div>

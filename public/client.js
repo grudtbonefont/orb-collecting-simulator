@@ -3820,12 +3820,16 @@
   socket.on('trade:reqGone', () => hideTradeReq());
   socket.on('trade:declined', d => toast(`${(d && d.by) || 'Игрок'} отклонил(а) обмен`, 'err'));
 
-  function tradeChip(it) {
+  function tradeSlotEl(it, opts) {
     const def = G.ITEM_BY_ID[it.id]; if (!def) return null;
-    const el = document.createElement('div'); el.className = 'item trade-chip rar-' + def.rarity; el.title = `${def.name} ×${it.qty}`;
-    el.appendChild(iconEl(def.id, 'sm'));
-    const nm = document.createElement('span'); nm.textContent = def.name; el.appendChild(nm);
-    if (it.qty > 1) { const q = document.createElement('span'); q.className = 'q'; q.textContent = '×' + it.qty; el.appendChild(q); }
+    const el = document.createElement('div');
+    el.className = 'trade-slot rar-' + def.rarity + (opts && opts.inOffer ? ' in-offer' : '');
+    el.title = `${def.name} ×${it.qty}` + (opts && opts.remove ? ' — нажмите, чтобы убрать' : (opts && opts.add ? ' — нажмите, чтобы добавить' : ''));
+    el.appendChild(iconEl(def.id));
+    if (it.qty > 1 || (def.stackable && !(opts && opts.hideQtyOne))) {
+      const q = document.createElement('span'); q.className = 'qty'; q.textContent = '×' + it.qty; el.appendChild(q);
+    }
+    const nm = document.createElement('div'); nm.className = 'name'; nm.textContent = def.name; el.appendChild(nm);
     el.appendChild(rarityTag(def));
     return el;
   }
@@ -3833,21 +3837,17 @@
   function renderTradeOffer(box, offer, mine) {
     box.textContent = '';
     if (!offer) return;
-    for (const it of offer.items || []) {
-      const el = tradeChip(it); if (!el) continue;
+    const items = offer.items || [];
+    if (!items.length) {
+      const e = document.createElement('div'); e.className = 'trade-empty'; e.textContent = 'Пусто — добавьте предметы ниже';
+      if (!mine) e.textContent = 'Пусто';
+      box.appendChild(e);
+      return;
+    }
+    for (const it of items) {
+      const el = tradeSlotEl(it, { remove: mine }); if (!el) continue;
       if (mine) el.onclick = () => tradeRemoveItem(it.id);
       box.appendChild(el);
-    }
-    if ((offer.orbs | 0) > 0) {
-      const c = document.createElement('div'); c.className = 'trade-chip'; c.innerHTML = `<i class="cur-orb"></i> ${fmt(offer.orbs)}`;
-      box.appendChild(c);
-    }
-    if ((offer.shards | 0) > 0) {
-      const c = document.createElement('div'); c.className = 'trade-chip'; c.textContent = `✦ ${fmt(offer.shards)}`;
-      box.appendChild(c);
-    }
-    if (!(offer.items || []).length && !(offer.orbs | 0) && !(offer.shards | 0)) {
-      const e = document.createElement('span'); e.className = 'muted'; e.textContent = 'Пусто'; box.appendChild(e);
     }
   }
 
@@ -3865,32 +3865,76 @@
   function renderTradeInv() {
     const box = $('tradeMyInv'); box.textContent = '';
     const offered = new Map((tradeLocal.items || []).map(x => [x.id, x.qty]));
-    for (const s of tradeableSlots()) {
-      const el = document.createElement('div'); el.className = 'item rar-' + s.def.rarity + (offered.has(s.id) ? ' in-offer' : '');
-      el.appendChild(iconEl(s.id, 'sm'));
-      const nm = document.createElement('div'); nm.className = 'name'; nm.textContent = s.def.name; el.append(nm, rarityTag(s.def));
-      if (s.q > 1) { const q = document.createElement('div'); q.className = 'qty'; q.textContent = '×' + s.q; el.appendChild(q); }
-      el.title = 'Добавить в обмен';
+    const slots = tradeableSlots();
+    if (!slots.length) {
+      const e = document.createElement('div'); e.className = 'trade-empty'; e.textContent = 'Нет предметов для обмена'; box.appendChild(e); return;
+    }
+    for (const s of slots) {
+      const inOffer = offered.has(s.id);
+      const el = tradeSlotEl({ id: s.id, qty: s.q }, { add: true, inOffer, hideQtyOne: !s.def.stackable });
+      if (!el) continue;
       el.onclick = () => tradeAddItem(s.id);
       box.appendChild(el);
     }
-    if (!box.children.length) { const e = document.createElement('span'); e.className = 'muted'; e.textContent = 'Нет предметов для обмена'; box.appendChild(e); }
   }
+
+  let tradeQtyPending = null;
+  function tradeQtyVal() { const v = parseInt($('tradeQty').value, 10); return Number.isFinite(v) ? v : 0; }
+  function setTradeQty(v) {
+    if (!tradeQtyPending) return;
+    v = Math.max(1, Math.min(tradeQtyPending.max, Math.round(v) || 1));
+    $('tradeQty').value = v; $('tradeQtyRange').value = v;
+    $('tradeQtyOk').textContent = `Добавить ×${v}`;
+  }
+  function openTradeQty(id, max, def, initial) {
+    tradeQtyPending = { id, max };
+    $('tradeQtyName').textContent = def.name + ` (доступно ${max})`;
+    $('tradeQtyIco').replaceChildren(iconEl(def.id, 'lg'));
+    $('tradeQtyRange').max = max;
+    setTradeQty(Math.max(1, Math.min(max, initial || 1)));
+    $('tradeQtyDlg').classList.remove('hidden');
+    $('tradeQty').focus();
+  }
+  function closeTradeQty() { $('tradeQtyDlg').classList.add('hidden'); tradeQtyPending = null; }
+  function applyTradeQty() {
+    if (!tradeQtyPending) return;
+    const { id, max } = tradeQtyPending;
+    const qty = Math.max(1, Math.min(max, tradeQtyVal()));
+    const cur = tradeLocal.items.find(x => x.id === id);
+    if (cur) cur.qty = qty; else tradeLocal.items.push({ id, qty });
+    closeTradeQty();
+    pushOffer();
+  }
+  $('tradeQtyMinus').onclick = () => setTradeQty(tradeQtyVal() - 1);
+  $('tradeQtyPlus').onclick = () => setTradeQty(tradeQtyVal() + 1);
+  $('tradeQtyAll').onclick = () => setTradeQty(tradeQtyPending ? tradeQtyPending.max : 1);
+  $('tradeQtyRange').oninput = () => setTradeQty(Number($('tradeQtyRange').value));
+  $('tradeQty').onchange = () => setTradeQty(tradeQtyVal());
+  $('tradeQtyCancel').onclick = closeTradeQty;
+  $('tradeQtyOk').onclick = applyTradeQty;
+  $('tradeQtyDlg').addEventListener('pointerdown', e => { if (e.target === $('tradeQtyDlg')) closeTradeQty(); });
+  $('tradeQtyDlg').addEventListener('keydown', e => {
+    e.stopPropagation();
+    if (e.key === 'Escape') closeTradeQty();
+    if (e.key === 'Enter') { e.preventDefault(); applyTradeQty(); }
+  });
 
   function tradeAddItem(id) {
     const def = G.ITEM_BY_ID[id]; if (!def || !G.isTradeable(def)) return;
     const have = (profile.inventory || []).filter(s => s.id === id).reduce((n, s) => n + s.q, 0);
-    const cur = tradeLocal.items.find(x => x.id === id);
+    const already = (tradeLocal.items.find(x => x.id === id) || {}).qty || 0;
+    const left = have - already;
+    if (have < 1) return toast('Нет предмета', 'err');
     if (!def.stackable) {
-      if (cur) return;
+      if (already) return; // already offered
       if (have < 1) return toast('Нет предмета', 'err');
       tradeLocal.items.push({ id, qty: 1 });
-    } else {
-      const next = (cur ? cur.qty : 0) + 1;
-      if (next > have) return toast('Недостаточно', 'err');
-      if (cur) cur.qty = next; else tradeLocal.items.push({ id, qty: 1 });
+      pushOffer();
+      return;
     }
-    pushOffer();
+    // stackable: qty prompt sets absolute offered amount (capped by owned)
+    if (have < 1) return toast('Недостаточно', 'err');
+    openTradeQty(id, have, def, already || 1);
   }
 
   function tradeRemoveItem(id) {
@@ -3898,9 +3942,23 @@
     pushOffer();
   }
 
+  function ownedOrbs() { return (profile && (profile.orbs | 0)) || 0; }
+  function ownedShards() { return (profile && (profile.shards | 0)) || 0; }
+
+  function nudgeCurrency(kind, delta) {
+    const inp = $(kind === 'orbs' ? 'tradeMyOrbs' : 'tradeMyShards');
+    const max = kind === 'orbs' ? ownedOrbs() : ownedShards();
+    let v = Math.max(0, Math.floor(Number(inp.value) || 0) + delta);
+    if (v > max) v = max;
+    inp.value = v;
+    pushOffer();
+  }
+
   function pushOffer() {
     tradeLocal.orbs = Math.max(0, Math.floor(Number($('tradeMyOrbs').value) || 0));
     tradeLocal.shards = Math.max(0, Math.floor(Number($('tradeMyShards').value) || 0));
+    if (tradeLocal.orbs > ownedOrbs()) tradeLocal.orbs = ownedOrbs();
+    if (tradeLocal.shards > ownedShards()) tradeLocal.shards = ownedShards();
     $('tradeMyOrbs').value = tradeLocal.orbs;
     $('tradeMyShards').value = tradeLocal.shards;
     renderTradeOffer($('tradeMyOffer'), tradeLocal, true);
@@ -3921,13 +3979,13 @@
     $('tradeTheirName').textContent = st.partner && st.partner.name ? st.partner.name : '';
     $('trade').classList.remove('hidden');
     $('tradeErr').textContent = '';
-    // sync local offer from server state (authoritative after round-trip)
     tradeLocal = { items: (st.myOffer.items || []).map(x => ({ id: x.id, qty: x.qty })), orbs: st.myOffer.orbs | 0, shards: st.myOffer.shards | 0 };
     $('tradeMyOrbs').value = tradeLocal.orbs;
     $('tradeMyShards').value = tradeLocal.shards;
     renderTradeOffer($('tradeMyOffer'), st.myOffer, true);
     renderTradeOffer($('tradeTheirOffer'), st.theirOffer, false);
-    $('tradeTheirCur').textContent = `Сферы: ${fmt(st.theirOffer.orbs | 0)} · Осколки: ${fmt(st.theirOffer.shards | 0)}`;
+    $('tradeTheirOrbs').textContent = fmt(st.theirOffer.orbs | 0);
+    $('tradeTheirShards').textContent = fmt(st.theirOffer.shards | 0);
     renderTradeInv();
     const mf = $('tradeMyFlags'), tf = $('tradeTheirFlags');
     mf.innerHTML = st.myReady ? (st.myConfirm ? '<span class="ok">✓ Подтверждено</span>' : '<span class="ok">✓ Готов</span>') : '<span class="wait">…</span>';
@@ -3952,6 +4010,7 @@
   }
 
   function closeTradeUI() {
+    closeTradeQty();
     $('trade').classList.add('hidden');
     tradeState = null;
     if (tradeCdTimer) { clearInterval(tradeCdTimer); tradeCdTimer = null; }
@@ -3983,6 +4042,10 @@
   $('tradeMyShards').addEventListener('change', pushOffer);
   $('tradeMyOrbs').addEventListener('input', () => { if (tradePushTimer) clearTimeout(tradePushTimer); tradePushTimer = setTimeout(pushOffer, 250); });
   $('tradeMyShards').addEventListener('input', () => { if (tradePushTimer) clearTimeout(tradePushTimer); tradePushTimer = setTimeout(pushOffer, 250); });
+  $('tradeOrbsMinus').onclick = () => nudgeCurrency('orbs', -1);
+  $('tradeOrbsPlus').onclick = () => nudgeCurrency('orbs', 1);
+  $('tradeShardsMinus').onclick = () => nudgeCurrency('shards', -1);
+  $('tradeShardsPlus').onclick = () => nudgeCurrency('shards', 1);
 
 
 })();
