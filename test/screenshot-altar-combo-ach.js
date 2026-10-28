@@ -48,11 +48,17 @@ const CHROME = process.env.CHROME || ['/usr/bin/google-chrome', '/usr/bin/chromi
   await call('play', null);
 
   const A = G.SPAWN_ALTAR, S = G.SHOP_PAD;
-  // Frame both altar and shop (shop is ~230px east of altar centre)
-  ok((await call('test:tp', { name: nick, x: (A.x + S.x) / 2, y: A.y + 20 })).ok, 'tp to altar+shop frame');
-  await sleep(1000);
-  await page.screenshot({ path: path.join(OUT, 'ocs-altar2.png') });
-  ok(fs.existsSync(path.join(OUT, 'ocs-altar2.png')) && fs.statSync(path.join(OUT, 'ocs-altar2.png')).size > 10000, 'ocs-altar2.png');
+  // Wide frame: bigger altar + shop to the east
+  ok((await call('test:tp', { name: nick, x: (A.x + S.x) / 2, y: A.y + 40 })).ok, 'tp to altar+shop frame');
+  await sleep(1200);
+  // zoom out a bit so both landmarks fit
+  await page.evaluate(() => {
+    const c = document.getElementById('game');
+    for (let i = 0; i < 10; i++) c.dispatchEvent(new WheelEvent('wheel', { deltaY: 500, bubbles: true, cancelable: true }));
+  });
+  await sleep(500);
+  await page.screenshot({ path: path.join(OUT, 'ocs-altar3.png') });
+  ok(fs.existsSync(path.join(OUT, 'ocs-altar3.png')) && fs.statSync(path.join(OUT, 'ocs-altar3.png')).size > 10000, 'ocs-altar3.png');
   await page.screenshot({ path: path.join(OUT, 'ocs-altar.png') });
 
   await call('test:tp', { name: nick, x: S.x, y: S.y });
@@ -65,7 +71,7 @@ const CHROME = process.env.CHROME || ['/usr/bin/google-chrome', '/usr/bin/chromi
   if (shopOpen) { await page.keyboard.press('Escape'); await sleep(250); }
 
   // Combo: teleport viewer, spawn commons around them, nudge helper isn't needed — viewer auto-collects if on top
-  const cx = A.x + 120, cy = A.y + 120;
+  const cx = A.x + A.clearR + 80, cy = A.y + 80;
   await call('test:tp', { name: nick, x: cx, y: cy });
   await sleep(200);
   const types = Array(14).fill('c');

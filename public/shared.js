@@ -252,8 +252,8 @@
     return Math.min(COMBO.maxMult, m);
   }
   // Ruined altar spawn (centre of zone 1) + shop proximity circle next to it (non-blocking decorations).
-  const SPAWN_ALTAR = { x: ZONE_W / 2, y: ZONE_H / 2, platformR: 150, clearR: 210 };
-  const SHOP_PAD = { x: ZONE_W / 2 + 230, y: ZONE_H / 2, r: 78 };
+  const SPAWN_ALTAR = { x: ZONE_W / 2, y: ZONE_H / 2, platformR: 420, clearR: 580 };
+  const SHOP_PAD = { x: ZONE_W / 2 + 980, y: ZONE_H / 2 + 40, r: 160 }; // east of bigger altar (clear of stairs)
   const SHARD_EXCHANGE = { orbs: 25, maxPerTrade: 99 }; // «Лавка осколков»: 1 shard → 25 orbs (was 40) (balance only, not the all-time total)
   const ITEM_BY_ID = {};
   for (const it of ITEMS) ITEM_BY_ID[it.id] = it;
