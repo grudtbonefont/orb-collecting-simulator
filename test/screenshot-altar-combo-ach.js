@@ -48,10 +48,12 @@ const CHROME = process.env.CHROME || ['/usr/bin/google-chrome', '/usr/bin/chromi
   await call('play', null);
 
   const A = G.SPAWN_ALTAR, S = G.SHOP_PAD;
-  ok((await call('test:tp', { name: nick, x: A.x, y: A.y - 40 })).ok, 'tp to altar');
-  await sleep(900);
+  // Frame both altar and shop (shop is ~230px east of altar centre)
+  ok((await call('test:tp', { name: nick, x: (A.x + S.x) / 2, y: A.y + 20 })).ok, 'tp to altar+shop frame');
+  await sleep(1000);
+  await page.screenshot({ path: path.join(OUT, 'ocs-altar2.png') });
+  ok(fs.existsSync(path.join(OUT, 'ocs-altar2.png')) && fs.statSync(path.join(OUT, 'ocs-altar2.png')).size > 10000, 'ocs-altar2.png');
   await page.screenshot({ path: path.join(OUT, 'ocs-altar.png') });
-  ok(fs.existsSync(path.join(OUT, 'ocs-altar.png')) && fs.statSync(path.join(OUT, 'ocs-altar.png')).size > 10000, 'ocs-altar.png');
 
   await call('test:tp', { name: nick, x: S.x, y: S.y });
   await sleep(1000);

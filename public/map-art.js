@@ -293,54 +293,250 @@
     }
     const robotPal = zone => zone === 1 ? ['#f2efe6', '#b9b6a8', '#6f6c60', '#dcd8ca'] : ['#e0e6d6', '#8a9a74', '#3e4a34', '#b8c4a4'];
 
-    // Ruined altar (spawn) + shop circle — world-space overlays (not chunk-baked)
+    // Ruined altar (spawn) + shop hut — static parts cached; rune/crystal/pad glow animate.
+    let altarCache = null, shopCache = null;
+    function roundRect(g, x, y, w, h, r) {
+      g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+      g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+    }
+    function buildAltarCache() {
+      const R = G.SPAWN_ALTAR.platformR, pad = 70, S = (R + pad) * 2;
+      const c = document.createElement('canvas'); c.width = S; c.height = S;
+      const g = c.getContext('2d'), cx = S / 2, cy = S / 2;
+      // soft ground shadow
+      g.fillStyle = 'rgba(0,0,0,.32)'; g.beginPath(); g.ellipse(cx + 8, cy + 14, R * 1.08, R * 0.94, 0, 0, 6.283); g.fill();
+      // outer dark stone ring
+      g.fillStyle = '#4a453e'; g.beginPath(); g.arc(cx, cy, R, 0, 6.283); g.fill();
+      // mid light stone ring
+      g.fillStyle = '#7a7368'; g.beginPath(); g.arc(cx, cy, R * 0.86, 0, 6.283); g.fill();
+      // ring tile seams
+      g.strokeStyle = 'rgba(35,30,24,.45)'; g.lineWidth = 2;
+      for (let i = 0; i < 24; i++) {
+        const a = (i / 24) * 6.283;
+        g.beginPath(); g.moveTo(cx + Math.cos(a) * R * 0.86, cy + Math.sin(a) * R * 0.86);
+        g.lineTo(cx + Math.cos(a) * R, cy + Math.sin(a) * R); g.stroke();
+      }
+      g.beginPath(); g.arc(cx, cy, R * 0.86, 0, 6.283); g.stroke();
+      // inner dark disc (rune sits here)
+      g.fillStyle = '#2a2433'; g.beginPath(); g.arc(cx, cy, R * 0.42, 0, 6.283); g.fill();
+      g.strokeStyle = '#5a4a6a'; g.lineWidth = 3; g.beginPath(); g.arc(cx, cy, R * 0.42, 0, 6.283); g.stroke();
+      // ruin cracks on platform
+      g.strokeStyle = 'rgba(25,20,16,.55)'; g.lineWidth = 2.4; g.lineCap = 'round';
+      g.beginPath(); g.moveTo(cx - R * 0.7, cy - R * 0.05); g.quadraticCurveTo(cx - R * 0.2, cy + R * 0.15, cx + R * 0.15, cy + R * 0.55); g.stroke();
+      g.beginPath(); g.moveTo(cx + R * 0.55, cy - R * 0.45); g.lineTo(cx + R * 0.25, cy - R * 0.05); g.lineTo(cx + R * 0.7, cy + R * 0.2); g.stroke();
+      g.beginPath(); g.moveTo(cx - R * 0.1, cy - R * 0.75); g.lineTo(cx - R * 0.35, cy - R * 0.35); g.stroke();
+      // 4 stair approaches (N/E/S/W) — arc treads + flared buttresses
+      const steps = [ -Math.PI / 2, 0, Math.PI / 2, Math.PI ];
+      for (const a0 of steps) {
+        const ux = Math.cos(a0), uy = Math.sin(a0), px = -uy, py = ux;
+        for (const side of [-1, 1]) {
+          const bx = cx + ux * (R - 2) + px * side * 42, by = cy + uy * (R - 2) + py * side * 42;
+          g.fillStyle = '#555048';
+          g.beginPath();
+          g.moveTo(bx - px * side * 5, by - py * side * 5);
+          g.quadraticCurveTo(bx + ux * 18 - px * side * 2, by + uy * 18 - py * side * 2,
+                             bx + ux * 36 + px * side * 14, by + uy * 36 + py * side * 14);
+          g.lineTo(bx + ux * 30 + px * side * 18, by + uy * 30 + py * side * 18);
+          g.quadraticCurveTo(bx + ux * 8 + px * side * 8, by + uy * 8 + py * side * 8,
+                             bx + px * side * 12, by + py * side * 12);
+          g.closePath(); g.fill();
+          g.fillStyle = '#8e877a'; g.beginPath(); g.arc(bx, by, 6, 0, 6.283); g.fill();
+        }
+        for (let s = 0; s < 3; s++) {
+          const d0 = R - 4 + s * 13, d1 = d0 + 12, half = 0.22 - s * 0.02;
+          g.fillStyle = s % 2 ? '#9c9486' : '#81796c';
+          g.beginPath();
+          g.arc(cx, cy, d1, a0 - half, a0 + half);
+          g.arc(cx, cy, d0, a0 + half, a0 - half, true);
+          g.closePath(); g.fill();
+          g.strokeStyle = 'rgba(40,35,28,.4)'; g.lineWidth = 1.4; g.stroke();
+        }
+      }
+      // 6 pillars on the rim (octagonal plinth + shaft; crystals drawn live)
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * 6.283 - Math.PI / 2;
+        const px = cx + Math.cos(a) * R * 0.78, py = cy + Math.sin(a) * R * 0.78;
+        g.fillStyle = '#3a3630';
+        g.beginPath();
+        for (let k = 0; k < 8; k++) {
+          const aa = k / 8 * 6.283 + 0.2;
+          const xx = px + Math.cos(aa) * 15, yy = py + Math.sin(aa) * 12;
+          k ? g.lineTo(xx, yy) : g.moveTo(xx, yy);
+        }
+        g.closePath(); g.fill();
+        g.fillStyle = '#6e675c';
+        g.beginPath();
+        for (let k = 0; k < 8; k++) {
+          const aa = k / 8 * 6.283 + 0.2;
+          const xx = px + Math.cos(aa) * 12, yy = py + Math.sin(aa) * 10;
+          k ? g.lineTo(xx, yy) : g.moveTo(xx, yy);
+        }
+        g.closePath(); g.fill();
+        // shaft as rounded column (slight 3/4: highlight west)
+        g.fillStyle = '#4e4a44'; roundRect(g, px - 8, py - 36, 16, 40, 3); g.fill();
+        g.fillStyle = '#8a8376'; g.fillRect(px - 6, py - 34, 5, 36);
+        g.fillStyle = '#2e2a26'; g.fillRect(px + 4, py - 34, 3, 36);
+        g.fillStyle = '#5a544a'; roundRect(g, px - 10, py - 40, 20, 8, 2); g.fill();
+        g.fillStyle = '#9a9284'; g.fillRect(px - 8, py - 38, 16, 3);
+        if (i % 2 === 0) {
+          const a2 = a + 0.48;
+          const rx = cx + Math.cos(a2) * R * 0.84, ry = cy + Math.sin(a2) * R * 0.84;
+          g.fillStyle = '#5a544a'; roundRect(g, rx - 7, ry - 5, 14, 12, 2); g.fill();
+          g.fillStyle = '#3e3a34'; roundRect(g, rx + 1, ry - 12, 10, 9, 2); g.fill();
+        }
+      }
+      return { c, S, R };
+    }
+    function buildShopCache() {
+      // cute 2D shop hut — arched green roof, timber walls, door + counter (original)
+      const W = 156, H = 142, c = document.createElement('canvas'); c.width = W; c.height = H;
+      const g = c.getContext('2d'), cx = W / 2;
+      g.fillStyle = 'rgba(0,0,0,.3)'; g.beginPath(); g.ellipse(cx + 4, H - 8, 64, 16, 0, 0, 6.283); g.fill();
+      // cream / timber walls
+      g.fillStyle = '#d2b48a'; g.fillRect(22, 58, 112, 66);
+      g.fillStyle = '#b89568';
+      for (let x = 28; x < 128; x += 11) g.fillRect(x, 60, 2.5, 62);
+      g.fillStyle = '#5c3a1c'; g.fillRect(18, 56, 10, 72); g.fillRect(128, 56, 10, 72);
+      g.fillRect(18, 56, 120, 7); g.fillRect(18, 120, 120, 8);
+      // thick arched moss-green roof (reference spirit, not a copy)
+      g.fillStyle = '#3a6a30';
+      g.beginPath(); g.moveTo(6, 64); g.bezierCurveTo(cx - 40, -4, cx + 40, -4, W - 6, 64);
+      g.lineTo(W - 16, 72); g.bezierCurveTo(cx + 36, 10, cx - 36, 10, 16, 72); g.closePath(); g.fill();
+      g.fillStyle = '#2d5526';
+      g.beginPath(); g.moveTo(10, 66); g.bezierCurveTo(cx - 30, 8, cx + 30, 8, W - 10, 66);
+      g.lineTo(W - 18, 72); g.bezierCurveTo(cx + 28, 16, cx - 28, 16, 18, 72); g.closePath(); g.fill();
+      g.strokeStyle = '#1e3a1a'; g.lineWidth = 2.2;
+      for (let i = 0; i < 6; i++) {
+        const y = 14 + i * 9;
+        g.beginPath(); g.moveTo(18 + i * 2.5, y + 28); g.quadraticCurveTo(cx, y, W - 18 - i * 2.5, y + 28); g.stroke();
+      }
+      g.strokeStyle = '#6e4420'; g.lineWidth = 5; g.lineCap = 'round';
+      g.beginPath(); g.moveTo(cx, 6); g.lineTo(cx, 62); g.stroke();
+      // door
+      g.fillStyle = '#2a5528'; roundRect(g, 34, 78, 32, 44, 8); g.fill();
+      g.strokeStyle = '#1a3418'; g.lineWidth = 2.5; roundRect(g, 34, 78, 32, 44, 8); g.stroke();
+      g.fillStyle = '#1a3418'; g.fillRect(38, 92, 24, 2.5); g.fillRect(38, 104, 24, 2.5);
+      g.fillStyle = '#f0d080'; g.beginPath(); g.arc(58, 100, 2.8, 0, 6.283); g.fill();
+      // striped awning
+      g.fillStyle = '#a84830'; g.beginPath(); g.moveTo(28, 76); g.lineTo(72, 76); g.lineTo(68, 88); g.lineTo(32, 88); g.closePath(); g.fill();
+      g.fillStyle = '#e8c070';
+      for (let i = 0; i < 4; i++) g.fillRect(32 + i * 10, 76, 5, 12);
+      g.fillStyle = '#c45a3a'; g.fillRect(30, 74, 40, 4);
+      // shop counter / window
+      g.fillStyle = '#3a2818'; roundRect(g, 78, 82, 46, 34, 4); g.fill();
+      g.fillStyle = '#8fd0f0'; g.fillRect(82, 86, 38, 26);
+      g.strokeStyle = '#5a3a1e'; g.lineWidth = 2.2;
+      g.beginPath(); g.moveTo(101, 86); g.lineTo(101, 112); g.moveTo(82, 99); g.lineTo(120, 99); g.stroke();
+      // wall plaque with orb (attached, not floating)
+      g.fillStyle = '#6a4422'; g.fillRect(96, 58, 3, 12);
+      g.fillStyle = '#e0b868'; roundRect(g, 84, 48, 30, 20, 5); g.fill();
+      g.strokeStyle = '#5a3a1e'; g.lineWidth = 1.8; roundRect(g, 84, 48, 30, 20, 5); g.stroke();
+      const og = g.createRadialGradient(99, 58, 1, 99, 58, 8);
+      og.addColorStop(0, '#fff3a0'); og.addColorStop(0.45, '#5ab0ff'); og.addColorStop(1, '#1a3870');
+      g.fillStyle = og; g.beginPath(); g.arc(99, 58, 7, 0, 6.283); g.fill();
+      g.strokeStyle = 'rgba(255,255,255,.5)'; g.lineWidth = 1; g.beginPath(); g.arc(97, 56, 2.5, 0, 6.283); g.stroke();
+      return { c, W, H };
+    }
+    function drawRune(g, x, y, r, t) {
+      const pulse = 0.45 + 0.2 * Math.sin((t || 0) * 2.1);
+      const rot = (t || 0) * 0.35;
+      // soft purple bloom
+      const gr = g.createRadialGradient(x, y, 2, x, y, r);
+      gr.addColorStop(0, `rgba(200,120,255,${0.55 * pulse})`);
+      gr.addColorStop(0.55, `rgba(140,60,220,${0.28 * pulse})`);
+      gr.addColorStop(1, 'rgba(80,20,160,0)');
+      g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, 6.283); g.fill();
+      g.save(); g.translate(x, y); g.rotate(rot);
+      g.strokeStyle = `rgba(220,160,255,${0.75 + 0.2 * pulse})`; g.lineWidth = 2.2; g.lineCap = 'round';
+      // outer magic ring
+      g.beginPath(); g.arc(0, 0, r * 0.72, 0, 6.283); g.stroke();
+      // hex
+      g.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * 6.283;
+        const px = Math.cos(a) * r * 0.55, py = Math.sin(a) * r * 0.55;
+        i ? g.lineTo(px, py) : g.moveTo(px, py);
+      }
+      g.closePath(); g.stroke();
+      // spokes + rune ticks
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * 6.283;
+        g.beginPath(); g.moveTo(Math.cos(a) * r * 0.18, Math.sin(a) * r * 0.18);
+        g.lineTo(Math.cos(a) * r * 0.55, Math.sin(a) * r * 0.55); g.stroke();
+        const a2 = a + 0.3;
+        g.beginPath(); g.moveTo(Math.cos(a2) * r * 0.62, Math.sin(a2) * r * 0.62);
+        g.lineTo(Math.cos(a2) * r * 0.72, Math.sin(a2) * r * 0.72); g.stroke();
+      }
+      // inner diamond
+      g.rotate(-rot * 1.6);
+      g.strokeStyle = `rgba(255,200,255,${0.55 + 0.25 * pulse})`; g.lineWidth = 1.8;
+      g.beginPath();
+      for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * 6.283 + Math.PI / 4;
+        const px = Math.cos(a) * r * 0.28, py = Math.sin(a) * r * 0.28;
+        i ? g.lineTo(px, py) : g.moveTo(px, py);
+      }
+      g.closePath(); g.stroke();
+      g.fillStyle = `rgba(230,170,255,${0.35 * pulse})`; g.beginPath(); g.arc(0, 0, r * 0.1, 0, 6.283); g.fill();
+      g.restore();
+    }
+    function drawCrystal(g, x, y, t, seed) {
+      const pulse = 0.55 + 0.25 * Math.sin((t || 0) * 2.4 + seed);
+      const gr = g.createRadialGradient(x, y - 22, 1, x, y - 12, 34);
+      gr.addColorStop(0, `rgba(255,140,255,${0.65 * pulse})`);
+      gr.addColorStop(0.45, `rgba(190,70,230,${0.3 * pulse})`);
+      gr.addColorStop(1, 'rgba(120,20,180,0)');
+      g.fillStyle = gr; g.beginPath(); g.arc(x, y - 16, 32, 0, 6.283); g.fill();
+      g.fillStyle = '#c040e8';
+      g.beginPath();
+      g.moveTo(x, y - 46); g.lineTo(x + 11, y - 18); g.lineTo(x + 5, y - 2); g.lineTo(x - 5, y - 2); g.lineTo(x - 11, y - 18);
+      g.closePath(); g.fill();
+      g.fillStyle = `rgba(255,200,255,${0.75})`;
+      g.beginPath(); g.moveTo(x - 1, y - 44); g.lineTo(x + 4, y - 18); g.lineTo(x - 1, y - 4); g.lineTo(x - 6, y - 18); g.closePath(); g.fill();
+      g.fillStyle = `rgba(160,40,220,${0.7})`;
+      g.beginPath(); g.moveTo(x + 1, y - 44); g.lineTo(x + 10, y - 18); g.lineTo(x + 4, y - 4); g.closePath(); g.fill();
+      g.strokeStyle = `rgba(255,230,255,${0.55 + 0.35 * pulse})`; g.lineWidth = 1.6;
+      g.beginPath(); g.moveTo(x, y - 46); g.lineTo(x + 11, y - 18); g.lineTo(x + 5, y - 2); g.lineTo(x - 5, y - 2); g.lineTo(x - 11, y - 18); g.closePath(); g.stroke();
+    }
     function drawLandmarks(g, cam, VW, VH, t) {
       const A = G.SPAWN_ALTAR, S = G.SHOP_PAD;
       const inView = (x, y, r) => x + r > cam.x && x - r < cam.x + VW && y + r > cam.y && y - r < cam.y + VH;
-      if (inView(A.x, A.y, A.platformR + 40)) {
-        const x = A.x - cam.x, y = A.y - cam.y, R = A.platformR;
-        // cracked stone disc
-        g.save();
-        g.fillStyle = 'rgba(0,0,0,.28)'; g.beginPath(); g.ellipse(x + 6, y + 10, R * 1.05, R * 0.92, 0, 0, 6.283); g.fill();
-        g.fillStyle = '#6e675c'; g.beginPath(); g.arc(x, y, R, 0, 6.283); g.fill();
-        g.fillStyle = '#8a8376'; g.beginPath(); g.arc(x - R * 0.08, y - R * 0.1, R * 0.88, 0, 6.283); g.fill();
-        g.fillStyle = '#a39c8e'; g.beginPath(); g.arc(x - R * 0.18, y - R * 0.22, R * 0.55, 0, 6.283); g.fill();
-        // cracks
-        g.strokeStyle = 'rgba(40,35,28,.55)'; g.lineWidth = 2.2; g.lineCap = 'round';
-        g.beginPath(); g.moveTo(x - R * 0.55, y - R * 0.1); g.lineTo(x - R * 0.1, y + R * 0.35); g.lineTo(x + R * 0.4, y + R * 0.15); g.stroke();
-        g.beginPath(); g.moveTo(x + R * 0.15, y - R * 0.5); g.lineTo(x + R * 0.05, y - R * 0.05); g.lineTo(x + R * 0.45, y + R * 0.25); g.stroke();
-        // broken pillars (4 stubs)
-        for (let i = 0; i < 4; i++) {
-          const a = i * 1.5708 + 0.4, px = x + Math.cos(a) * R * 0.72, py = y + Math.sin(a) * R * 0.72;
-          const h = 18 + (i % 2) * 10;
-          g.fillStyle = '#5a5348'; g.fillRect(px - 8, py - h, 16, h + 6);
-          g.fillStyle = '#8a8274'; g.fillRect(px - 7, py - h, 14, 8);
-          if (i % 2) { g.fillStyle = '#4a443c'; g.fillRect(px + 2, py - h - 6, 10, 8); } // toppled block
+      if (inView(A.x, A.y, A.platformR + 80)) {
+        if (!altarCache) altarCache = buildAltarCache();
+        const { c, S: AS, R } = altarCache;
+        const x = A.x - cam.x, y = A.y - cam.y;
+        g.drawImage(c, x - AS / 2, y - AS / 2);
+        drawRune(g, x, y, R * 0.4, t);
+        for (let i = 0; i < 6; i++) {
+          const a = (i / 6) * 6.283 - Math.PI / 2;
+          drawCrystal(g, x + Math.cos(a) * R * 0.78, y + Math.sin(a) * R * 0.78, t, i * 1.1);
         }
-        // soft rune glow in centre
-        const pulse = 0.35 + 0.15 * Math.sin((t || 0) * 2.2);
-        const gr = g.createRadialGradient(x, y, 4, x, y, R * 0.45);
-        gr.addColorStop(0, `rgba(120,200,255,${pulse})`); gr.addColorStop(1, 'rgba(120,200,255,0)');
-        g.fillStyle = gr; g.beginPath(); g.arc(x, y, R * 0.45, 0, 6.283); g.fill();
-        g.restore();
       }
-      if (inView(S.x, S.y, S.r + 20)) {
-        const x = S.x - cam.x, y = S.y - cam.y, R = S.r;
+      if (inView(S.x, S.y, S.r + 100)) {
+        if (!shopCache) shopCache = buildShopCache();
+        const { c, W, H } = shopCache;
+        const x = S.x - cam.x, y = S.y - cam.y;
+        // hut overlaps the north half of the pad; glow ring stays the enter zone at the door
+        const bx = x - W / 2, by = y - H + 36;
+        g.drawImage(c, bx, by);
+        // glowing shop pad circle (opens shop on enter) — kept at SHOP_PAD
         g.save();
-        g.fillStyle = 'rgba(0,0,0,.2)'; g.beginPath(); g.ellipse(x + 4, y + 6, R * 1.05, R * 0.9, 0, 0, 6.283); g.fill();
-        // gold shop ring
-        g.strokeStyle = 'rgba(255,200,60,.85)'; g.lineWidth = 4;
-        g.beginPath(); g.arc(x, y, R, 0, 6.283); g.stroke();
-        g.strokeStyle = 'rgba(255,230,140,.45)'; g.lineWidth = 2;
-        g.beginPath(); g.arc(x, y, R - 8, 0, 6.283); g.stroke();
-        const pulse = 0.2 + 0.12 * Math.sin((t || 0) * 3);
-        const gr = g.createRadialGradient(x, y, 2, x, y, R);
+        const pulse = 0.22 + 0.14 * Math.sin((t || 0) * 2.8);
+        g.strokeStyle = `rgba(255,200,60,${0.75 + pulse})`; g.lineWidth = 4;
+        g.beginPath(); g.arc(x, y, S.r, 0, 6.283); g.stroke();
+        g.strokeStyle = `rgba(255,230,140,${0.4 + pulse})`; g.lineWidth = 2;
+        g.beginPath(); g.arc(x, y, S.r - 8, 0, 6.283); g.stroke();
+        const gr = g.createRadialGradient(x, y, 2, x, y, S.r);
         gr.addColorStop(0, `rgba(255,210,80,${pulse})`); gr.addColorStop(1, 'rgba(255,210,80,0)');
-        g.fillStyle = gr; g.beginPath(); g.arc(x, y, R, 0, 6.283); g.fill();
-        // little stall icon
-        g.fillStyle = '#c9743a'; g.fillRect(x - 14, y - 6, 28, 16);
-        g.fillStyle = '#e08a45'; g.beginPath(); g.moveTo(x - 18, y - 6); g.lineTo(x, y - 22); g.lineTo(x + 18, y - 6); g.closePath(); g.fill();
-        g.fillStyle = '#ffe27a'; g.beginPath(); g.arc(x + 10, y - 18, 5, 0, 6.283); g.fill();
+        g.fillStyle = gr; g.beginPath(); g.arc(x, y, S.r, 0, 6.283); g.fill();
+        // tiny "enter" sparkles
+        if (!RM) {
+          g.fillStyle = `rgba(255,240,160,${0.5 + pulse})`;
+          for (let i = 0; i < 6; i++) {
+            const a = (t || 0) * 1.2 + i * 1.047;
+            g.fillRect(x + Math.cos(a) * (S.r - 14) - 1.5, y + Math.sin(a) * (S.r - 14) - 1.5, 3, 3);
+          }
+        }
         g.restore();
       }
     }

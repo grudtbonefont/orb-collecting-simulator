@@ -167,7 +167,7 @@ function rollPool(z = 1) {
 function spotIsFree(x, y) {
   if (inObstacle(x, y, 20)) return false;
   { const A = G.SPAWN_ALTAR; if (Math.hypot(x - A.x, y - A.y) < A.clearR) return false; } // no orbs on the ruined altar
-  { const S = G.SHOP_PAD; if (Math.hypot(x - S.x, y - S.y) < S.r + 40) return false; }
+  { const S = G.SHOP_PAD; if (Math.hypot(x - S.x, y - S.y) < S.r + 110) return false; } // hut footprint north of pad
   for (const pl of players.values()) { const dx = pl.x - x, dy = pl.y - y; if (dx * dx + dy * dy < SPAWN.playerClear ** 2) return false; }
   const cx = Math.floor(x / SPAWN.cell), cy = Math.floor(y / SPAWN.cell);
   for (let j = cy - 1; j <= cy + 1; j++) for (let i = cx - 1; i <= cx + 1; i++) {
@@ -334,7 +334,7 @@ function spawnObstacle(now, f = {}) {
     const x = Number.isFinite(f.x) ? f.x : Math.round(rand(reach + 100, G.WORLD.w - reach - 100)), y = Number.isFinite(f.y) ? f.y : Math.round(rand(reach + 100, G.WORLD.h - reach - 100));
     const ok = Number.isFinite(f.x) || (G.doorDist(x) > OB.doorClear + reach &&
       Math.hypot(x - G.SPAWN_ALTAR.x, y - G.SPAWN_ALTAR.y) > G.SPAWN_ALTAR.clearR + reach &&
-      Math.hypot(x - G.SHOP_PAD.x, y - G.SHOP_PAD.y) > G.SHOP_PAD.r + reach &&
+      Math.hypot(x - G.SHOP_PAD.x, y - G.SHOP_PAD.y) > G.SHOP_PAD.r + 110 + reach &&
       Array.from(players.values()).every(pl => Math.hypot(pl.x - x, pl.y - y) > OB.playerClear + reach) &&
       obstacles.every(b => Math.hypot(b.x - x, b.y - y) > obsReach(b) + reach + OB.gap));
     if (ok) at = { x, y };
