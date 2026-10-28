@@ -4,8 +4,8 @@ const G = require('../public/shared.js');
 const C = require('../public/content.js');
 const assert = (c, m) => { if (!c) throw new Error(m); console.log('ok', m); };
 
-assert(G.COMBO && G.COMBO.maxMult === 2 && G.COMBO.windowMs === 1800, 'COMBO window/cap');
-assert(G.comboMult(1) === 1 && G.comboMult(5) === 1.1 && G.comboMult(50) === 2 && G.comboMult(999) === 2, 'comboMult steps + cap');
+assert(G.COMBO && G.COMBO.maxMult === 1.25 && G.COMBO.windowMs === 1800, 'COMBO window/cap');
+assert(G.comboMult(1) === 1 && G.comboMult(5) === 1.05 && G.comboMult(10) === 1.1 && G.comboMult(20) === 1.15 && G.comboMult(30) === 1.2 && G.comboMult(40) === 1.25 && G.comboMult(999) === 1.25 && !G.COMBO.tiers.some(t => t.n === 50), 'comboMult steps + cap');
 assert(G.SPAWN_ALTAR.x === G.ZONE_W / 2 && G.SPAWN_ALTAR.y === G.ZONE_H / 2 && G.SHOP_PAD.r > 0, 'altar + shop pad');
 
 const mid = ['b', 'g', 'p', 'a', 'x'];

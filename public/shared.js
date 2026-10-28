@@ -240,10 +240,10 @@
   // Combo on collect (server-authoritative): window between pickups, stepped multiplier, hard cap.
   const COMBO = {
     windowMs: 1800,
-    maxMult: 2,
+    maxMult: 1.25,
     tiers: [ // first matching from the end wins; n = combo count
-      { n: 1, m: 1 }, { n: 5, m: 1.1 }, { n: 10, m: 1.25 }, { n: 20, m: 1.4 },
-      { n: 30, m: 1.6 }, { n: 40, m: 1.8 }, { n: 50, m: 2 },
+      { n: 1, m: 1 }, { n: 5, m: 1.05 }, { n: 10, m: 1.1 }, { n: 20, m: 1.15 },
+      { n: 30, m: 1.2 }, { n: 40, m: 1.25 },
     ],
   };
   function comboMult(n) {

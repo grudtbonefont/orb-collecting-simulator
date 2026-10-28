@@ -327,7 +327,7 @@
     if (d.n < 2) { el.classList.add('hidden'); return; }
     el.classList.remove('hidden');
     el.classList.toggle('pop', !!d.pop);
-    const m = Number(d.mult), ms = (m % 1 ? m.toFixed(2) : String(m)).replace(/\.00$/, '');
+    const m = Number(d.mult), ms = (Math.round(m * 100) / 100 === Math.round(m) ? String(Math.round(m)) : String(Math.round(m * 100) / 100));
     el.innerHTML = '<b>×' + ms + '</b><span>комбо ' + d.n + '</span>';
     if (d.pop) setTimeout(() => el.classList.remove('pop'), 420);
   });
