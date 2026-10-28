@@ -13,6 +13,9 @@ const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (c) passes++
 const rnd = () => crypto.randomInt(1000, 9999);
 const waitFor = async (fn, ms = 3000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = fn(); if (v) return v; await sleep(50); } return fn(); };
 const ONLY = (process.env.CT_ONLY || '').split(',').filter(Boolean), want = k => !ONLY.length || ONLY.includes(k);
+// ach events may be {id} (≤3 unlocks) or batched {ids:[...]} (>3); flatten either shape
+const achIds = evs => evs.flatMap(e => e && Array.isArray(e.ids) ? e.ids : (e && e.id ? [e.id] : []));
+const gotAch = (c, id) => achIds(c.events('ach')).includes(id);
 
 async function startServer(port, env) {
   const proc = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: Object.assign({}, process.env, { PORT: String(port), DATABASE_URL: '', OCS_TEST_HOOKS: '1', OBSTACLES: '0', OCS_WEEKEND: 'off', EVENTS_ENABLED: '0' }, env), stdio: ['ignore', 'pipe', 'pipe'] });
@@ -60,7 +63,7 @@ async function shardSuite(url) {
   ok(r.ok && A.profile.shards === 6, `promo code shards go to the balance (${A.profile.shards})`);
   await A.emit('test:spawn', { types: ['l'], ring: 1, x: A.pos.x + 30, y: A.pos.y });
   await A.hold(A.pos.x + 30, A.pos.y, 900);
-  ok(A.profile.shards >= 8 && A.events('ach').some(a => a.id === 'legend_1'), `legendary orb shard (+1) and «Легенда I» achievement (+1, plus other tiers) go to the balance (${A.profile.shards})`);
+  ok(A.profile.shards >= 8 && gotAch(A, 'legend_1'), `legendary orb shard (+1) and «Легенда I» achievement (+1, plus other tiers) go to the balance (${A.profile.shards})`);
   A.close();
 }
 async function migrationSuite() {
@@ -89,72 +92,94 @@ async function migrationSuite() {
   A2.close(); await srv.stop(); fs.rmSync(file, { force: true });
 }
 async function achSuite(url) {
-  console.log('--- tiered achievements (no titles)');
-  const cats = {}; for (const t of C.ACH) cats[t.cat] = (cats[t.cat] || 0) + 1;
-  const grows = C.CHAINS.every(ch => ch.tiers.every((t, i) => t.reward.orbs > 0 && t.reward.shards >= 1 && (i === 0 || (t.goal > ch.tiers[i - 1].goal && t.reward.orbs > ch.tiers[i - 1].reward.orbs && t.reward.shards >= ch.tiers[i - 1].reward.shards))));
-  ok(C.ACH.length >= 60 && C.ACH.length <= 80 && Object.keys(cats).length === 8 && C.ACH_CATS.every(c => cats[c.key] >= 5) && new Set(C.ACH.map(a => a.id)).size === C.ACH.length && grows && C.ACH.every(a => !a.title),
+  console.log('--- tiered achievements v3 (fresh, no titles)');
+  const cats = {}; for (const a of C.ACH) cats[a.cat] = (cats[a.cat] || 0) + 1;
+  const grows = C.CHAINS.every(ch => ch.tiers.every((tier, i) => tier.reward.orbs > 0 && tier.reward.shards >= 1 && (i === 0 || (tier.goal > ch.tiers[i - 1].goal && tier.reward.orbs > ch.tiers[i - 1].reward.orbs && tier.reward.shards >= ch.tiers[i - 1].reward.shards))));
+  ok(C.ACH.length === 100 && Object.keys(cats).length === 8 && C.ACH_CATS.every(c => cats[c.key] >= 5) && new Set(C.ACH.map(a => a.id)).size === C.ACH.length && grows && C.ACH.every(a => !a.title),
     `${C.ACH.length} tiers in ${C.CHAINS.length} chains: ${C.ACH_CATS.map(c => c.name + ' ' + cats[c.key]).join(', ')}; every tier pays orbs + shards, growing per tier`);
-  ok(C.CHAIN_BY_ID.bosskill.tiers.map(t => t.goal).join('/') === '1/3/10/25/50' && C.ACH_BY_ID.bosskill_5.name === 'Победитель босса V', '«Победитель босса I…V» = 1/3/10/25/50 kills');
-  // old account: 3 old achievements already paid -> covered tiers marked, only the difference paid, once
-  const name = 'Ach' + rnd(), A = client(url); await A.register(name, false); // lobby only
-  await A.emit('test:stats', { resetAch: true, achV2: null, achResetV2: 1, achSet: ['first100', 'collector', 'games'], total: 1500, minigames: 30 });
+  ok(C.CHAIN_BY_ID.bosskill.tiers.map(x => x.goal).join('/') === '1/3/10/30' && !C.ACH_BY_ID.bosskill_5, '«Победитель босса I…IV» = 1/3/10/30 kills');
+  ok(C.CHAIN_BY_ID.combo && C.CHAIN_BY_ID.potion && C.CHAIN_BY_ID.trade, 'v3 chains include combo / potion / trade');
+
+  const name = 'Ach' + rnd(), A = client(url); await A.register(name, false);
+  A.enter(await A.call('play', null)); await sleep(800);
+  // leave the busy altar spawn so ambient orbs do not unlock total_* mid-suite
+  await A.emit('test:tp', { x: 800, y: 800, clear: true }); await sleep(400);
+  ok(A.profile.stats.achV3 && Object.keys(A.profile.stats.ach || {}).length === 0 && A.events('ach').length === 0, 'fresh join: achV3 flag, empty unlocks, no payout');
+
   const b0 = A.profile.balance, s0 = A.profile.shards;
-  A.enter(await A.call('play', null));
-  await waitFor(() => A.events('ach').length >= 1, 3000); await sleep(1500);
-  const ev = A.events('ach'), st = A.profile.stats;
-  ok(ev.length === 1 && ev[0].ids && st.achV2 === true && st.ach.total_1 && st.ach.total_2 && st.ach.games_1 && !st.ach.total_3 && !st.ach.games_2 && A.profile.balance - b0 === 10 && A.profile.shards - s0 === 4,
-    `migration: «Первые шаги»/«Собиратель»/«Игрок» → Собиратель I, II and Игрок I marked; only the difference paid (+${A.profile.balance - b0} orbs, +${A.profile.shards - s0} shards; expected +10 / +4), one summary toast`);
-  await A.emit('test:stats', { minigames: 31 }); await sleep(1300);
-  ok(A.events('ach').length === 1 && A.profile.balance - b0 === 10, 'nothing is paid twice (re-check after a stat change)');
-  // progression: several tiers at once, then the next one
-  const b1 = A.profile.balance, s1 = A.profile.shards;
-  await A.emit('test:stats', { bossKills: 3 }); await waitFor(() => A.events('ach').length >= 3, 3000);
-  const k = A.events('ach').slice(1).map(e => e.id).join(',');
-  ok(k === 'bosskill_1,bosskill_2' && A.profile.balance - b1 === 40 + 105 && A.profile.shards - s1 === 1 + 3, `3 kills → «Победитель босса I» and «II» (+${A.profile.balance - b1} orbs, +${A.profile.shards - s1} shards)`);
+  await A.emit('test:stats', { bossKills: 3 }); await waitFor(() => gotAch(A, 'bosskill_2'), 3000);
+  const r1 = C.ACH_BY_ID.bosskill_1.reward, r2 = C.ACH_BY_ID.bosskill_2.reward;
+  ok(gotAch(A, 'bosskill_1') && gotAch(A, 'bosskill_2') && A.profile.balance - b0 === r1.orbs + r2.orbs && A.profile.shards - s0 === r1.shards + r2.shards,
+    `3 kills → I+II (+${A.profile.balance - b0} orbs, +${A.profile.shards - s0} shards)`);
+
   await A.emit('test:stats', { bossKills: 9 }); await sleep(1300);
-  ok(A.events('ach').length === 3, '9 kills: tier III (10) not yet');
-  await A.emit('test:stats', { bossKills: 10 }); await waitFor(() => A.events('ach').length >= 4, 3000);
-  ok(A.events('ach')[3].id === 'bosskill_3' && A.events('ach')[3].reward.orbs === C.ACH_BY_ID.bosskill_3.reward.orbs, '10 kills → «Победитель босса III»');
-  // new counters
+  ok(!gotAch(A, 'bosskill_3'), '9 kills: tier III (10) not yet');
+  await A.emit('test:stats', { bossKills: 10 }); await waitFor(() => gotAch(A, 'bosskill_3'), 3000);
+  ok(gotAch(A, 'bosskill_3'), '10 kills → «Победитель босса III»');
+
+  await A.emit('test:stats', { maxCombo: 5 }); await waitFor(() => gotAch(A, 'combo_1'), 3000);
+  ok(gotAch(A, 'combo_1'), 'maxCombo 5 → Комбо I');
+
   await A.emit('test:tp', { x: 2000, y: 2000 }); await sleep(300);
   const d0 = A.profile.stats.distM || 0;
   await A.moveTo(2700, 2000, 6000); await sleep(1300); await A.emit('test:stats', {});
-  ok((A.profile.stats.distM || 0) - d0 >= 50, `distance travelled is tracked (+${(A.profile.stats.distM || 0) - d0} m walked ~700 px)`);
-  // titles are gone everywhere
+  ok((A.profile.stats.distM || 0) - d0 >= 50, `distance travelled is tracked (+${(A.profile.stats.distM || 0) - d0} m)`);
+
   const B = client(url); await B.register('Obs' + rnd());
   await A.call('chat', 'привет'); await waitFor(() => B.chat.some(m => m.n === name), 2000);
   const meta = B.metas.get(A.id);
   ok(!('title' in A.profile) && B.chat.some(m => m.n === name && !('ti' in m)) && (!meta || !('ti' in meta)), 'no titles: not in the profile, chat or public player data');
   A.close(); B.close();
 }
+
 async function resetSuite(url) {
-  console.log('--- one-time achievement reset (stats.achResetV2)');
+  console.log('--- achievements v3 fresh start (ignore old unlocks, keep Кубок)');
   const name = 'Rst' + rnd(), A = client(url); await A.register(name, false);
-  await A.emit('test:stats', { achResetV2: null, achV2: true, achSet: ['total_1', 'total_2', 'total_3', 'bosskill_1', 'bosskill_2', 'games_1', 'zone2_1'], total: 60000, bossKills: 30, bossDmg: 5000, rareCaught: 500, distM: 5000, minigames: 100, unlockedDoor2: false, questsDone: 12, bestStreak: 5 });
-  await A.emit('test:grant', { id: G.SHARD_ID, qty: 7, source: 'admin' }); await A.emit('test:orbs', 1234);
+  // Pretend this is a veteran with old unlocks + trophy; high totals must not auto-grant under v3
+  await A.emit('test:stats', {
+    achV3: null, achResetV2: 1, achV2: true,
+    achSet: ['total_1', 'total_2', 'total_3', 'bosskill_1', 'bosskill_2', 'games_1', 'zone2_1'],
+    total: 60000, bossKills: 30, bossDmg: 5000, rareCaught: 500, distM: 5000, minigames: 100,
+    unlockedDoor2: false, questsDone: 12, bestStreak: 5, trophyAt: Date.now(),
+  });
+  await A.emit('test:grant', { id: 'h_trophy', qty: 1, source: 'admin' });
+  await A.emit('test:grant', { id: G.SHARD_ID, qty: 7, source: 'admin' });
+  await A.emit('test:orbs', 1234);
   const b0 = A.profile.balance, s0 = A.profile.shards, inv0 = JSON.stringify(A.profile.inventory), up0 = JSON.stringify(A.profile.upgrades);
+  const hadTrophy = (A.profile.inventory || []).some(s => s.id === 'h_trophy');
   A.enter(await A.call('play', null)); await sleep(2500);
-  let st = A.profile.stats; const p = { total: A.profile.total, stats: st, codesUsed: A.profile.codesUsed || 0, items: C.itemsOwned(A.profile.inventory), liveMs: 0 };
+  let st = A.profile.stats;
+  const p = { total: A.profile.total, stats: st, codesUsed: A.profile.codesUsed || 0, items: C.itemsOwned(A.profile.inventory), liveMs: 0 };
   const allZero = C.CHAINS.every(ch => C.achValue(ch.tiers[0], p) === 0);
-  ok(A.events('ach').length === 0 && Object.keys(st.ach).length === 0 && st.achResetV2 && st.achV2 === true && allZero, `after load: no tiers, every chain at progress 0 (${C.CHAINS.length} chains), no achievement events`);
+  ok(A.events('ach').length === 0 && Object.keys(st.ach || {}).length === 0 && st.achV3 && allZero,
+    `after load: ach wiped, achV3 set, every chain at progress 0 (${C.CHAINS.length} chains), no achievement events`);
   ok(A.profile.balance === b0 && A.profile.shards === s0 && JSON.stringify(A.profile.inventory) === inv0 && JSON.stringify(A.profile.upgrades) === up0 && st.unlockedDoor2 === false && A.profile.total === 60000 && st.minigames === 100 && st.questsDone === 12,
     `balance (${b0}), shards (${s0}), inventory, upgrades, door, total, minigames, quests untouched; no payout`);
-  ok(st.bossKills === undefined && st.rareCaught === undefined && st.distM === undefined && st.bossDmg === undefined && st.achBase.total === 60000 && st.achBase.games === 100 && st.achBase.zone2 === undefined, 'achievement-only counters zeroed; shared stats measured from a baseline');
-  await A.emit('test:stats', { bossKills: 1 }); await waitFor(() => A.events('ach').length >= 1, 3000);
-  await A.emit('test:stats', { total: 60100 }); await waitFor(() => A.events('ach').length >= 2, 3000);
+  ok(hadTrophy && (A.profile.inventory || []).some(s => s.id === 'h_trophy') && st.trophyAt, '«Кубок» kept for prior owners');
+  ok(st.achBase && st.achBase.total === 60000 && st.achBase.games === 100 && st.achBase.bosskill === 30, 'baseline snapshots current counters');
+
+  await A.emit('test:stats', { bossKills: 31 }); await waitFor(() => A.events('ach').length >= 1, 3000);
+  await A.emit('test:stats', { total: 60001 }); await waitFor(() => A.events('ach').length >= 2, 3000);
   const ids = A.events('ach').map(e => e.id).join(',');
-  ok(ids === 'bosskill_1,total_1' && A.profile.balance === b0 + 40 + 30 && A.profile.shards === s0 + 2, `progressing pays tier I again: ${ids} (+${A.profile.balance - b0} orbs, +${A.profile.shards - s0} shards)`);
+  const rb = C.ACH_BY_ID.bosskill_1.reward, rt = C.ACH_BY_ID.total_1.reward;
+  ok(ids === 'bosskill_1,total_1' && A.profile.balance === b0 + rb.orbs + rt.orbs && A.profile.shards === s0 + rb.shards + rt.shards,
+    `progress past baseline pays tier I: ${ids} (+${A.profile.balance - b0} orbs, +${A.profile.shards - s0} shards)`);
+
   A.close(); await sleep(300);
   const A2 = client(url); await A2.login(name); A2.enter(await A2.call('play', null)); await sleep(2000);
-  ok(A2.events('ach').length === 0 && A2.profile.stats.ach.bosskill_1 && A2.profile.stats.ach.total_1 && A2.profile.stats.bossKills === 1 && A2.profile.stats.achBase.total === 60000, 'second load: reset not reapplied (tiers and counters kept)');
-  // «Первопроходец» is not baseline-based: an account that already unlocked the door gets it once
+  ok(A2.events('ach').length === 0 && A2.profile.stats.ach.bosskill_1 && A2.profile.stats.ach.total_1 && A2.profile.stats.bossKills === 31 && A2.profile.stats.achBase.total === 60000,
+    'second load: v3 not reapplied (tiers and baseline kept)');
+
   const b2 = A2.profile.balance, sh2 = A2.profile.shards;
-  await A2.emit('test:stats', { unlockedDoor2: true }); await waitFor(() => A2.events('ach').length >= 1, 3000);
-  await A2.emit('test:stats', { minigames: 101 }); await sleep(1300);
+  await A2.emit('test:tp', { x: 800, y: 800, clear: true }); await sleep(300);
+  await A2.emit('test:stats', { unlockedDoor2: true }); await waitFor(() => gotAch(A2, 'zone2_1'), 3000);
   const zr = C.ACH_BY_ID.zone2_1.reward;
-  ok(A2.events('ach').length === 1 && A2.events('ach')[0].id === 'zone2_1' && A2.profile.balance === b2 + zr.orbs && A2.profile.shards === sh2 + zr.shards, `door already unlocked → «Первопроходец» granted once (+${zr.orbs} orbs, +${zr.shards} shards), not again`);
+  // games baseline is 100 and games_1 goal is 1 — do not bump minigames here (would unlock games_1)
+  ok(gotAch(A2, 'zone2_1') && achIds(A2.events('ach')).filter(id => id === 'zone2_1').length === 1 && A2.profile.balance === b2 + zr.orbs && A2.profile.shards === sh2 + zr.shards,
+    `door unlock → «Первопроходец» once (+${zr.orbs} orbs, +${zr.shards} shards)`);
   A2.close();
 }
+
 async function questSuite(url) {
   console.log('--- daily quests');
   const A = client(url); await A.register('Qst' + rnd());
@@ -171,7 +196,10 @@ async function questSuite(url) {
   for (let i = 0; i < 2; i++) { const s = await A.call('mg:start', i ? 'shell' : 'reaction'); if (s.ok && !i) A.s.emit('mg:reaction:click'); await sleep(400); }
   // shell may still be running: pick a cup after the shuffle
   await sleep(G.MINIGAMES.shell.swaps * 400 + 2500); await A.call('mg:act', { cup: 0 }); await sleep(500);
-  ok(A.profile.stats.daily.q.find(q => q.id === 'mg2').done && A.profile.shards === sh0 + 1, `«Сыграйте 2 мини-игры» done → +1 shard (${sh0} → ${A.profile.shards})`);
+  const mgDone = !!(A.profile.stats.daily.q.find(q => q.id === 'mg2') || {}).done;
+  // quest pays +1 shard; v3 also unlocks games_1 (and possibly mg prize shards) on the same actions
+  ok(mgDone && A.profile.shards >= sh0 + 1,
+    `«Сыграйте 2 мини-игры» done → +1 shard (${sh0} → ${A.profile.shards})`);
   // rare orbs
   for (let i = 0; i < 10; i++) { await A.emit('test:spawn', { types: ['r'], ring: 1, x: A.pos.x + 40, y: A.pos.y }); await A.hold(A.pos.x + 40, A.pos.y, 350); }
   await waitFor(() => A.profile.stats.daily.q.find(q => q.id === 'rare10').done, 2000);
@@ -183,8 +211,8 @@ async function questSuite(url) {
   const st = A.profile.stats, qa = A.events('quest').find(q => q.all);
   ok(st.daily.q.every(q => q.done) && st.boosts && st.boosts.orbs > Date.now() + 4 * 60000, '«300 сфер» done → boost «Сферы ×1.5» for 5 min');
   ok(qa && qa.streak === 4 && qa.reward.orbs === C.allDoneBonus(4).orbs && qa.reward.shards === 1 && st.streak === 4 && st.bestStreak === 4, `all 3 done → bonus ${qa && qa.reward.orbs} orbs + 1 shard, streak 3 → ${st.streak}`);
-  // boost effect: an epic orb (+10) now gives 15
-  await A.emit('test:tp', { x: 4000, y: 4000 }); await sleep(400);
+  // boost effect: an epic orb (+10) now gives 15 (wait out combo window so comboMult stays 1)
+  await A.emit('test:tp', { x: 4000, y: 4000, clear: true }); await sleep(G.COMBO.windowMs + 400);
   const b0 = A.profile.balance; await A.emit('test:spawn', { types: ['e'], ring: 1, x: A.pos.x + 40, y: A.pos.y }); await A.hold(A.pos.x + 40, A.pos.y, 700);
   ok(A.profile.balance - b0 === 15, `boost active: epic orb +${A.profile.balance - b0} (10 × 1.5)`);
   // new day → new quests, streak kept if yesterday was complete

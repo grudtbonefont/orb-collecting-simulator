@@ -1238,3 +1238,25 @@ input[type=checkbox] { accent-color: var(--ui-cyan); }
   .trade-slot .name { font-size: 9px; }
   .trade-slot .rar { display: none; }
 }
+
+/* Combo multiplier (server-validated collect streak) */
+.combo-hud {
+  position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%);
+  z-index: 40; pointer-events: none;
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 10px 18px; border-radius: 999px;
+  background: linear-gradient(180deg, rgba(20,16,40,.88), rgba(10,8,24,.92));
+  border: 2px solid rgba(255,180,60,.65);
+  box-shadow: 0 8px 28px rgba(0,0,0,.45), 0 0 24px rgba(255,160,40,.25);
+  color: #ffe6a8; font-weight: 800; letter-spacing: .02em;
+  transition: opacity .25s, transform .25s;
+}
+.combo-hud.hidden { display: none; }
+.combo-hud b { font-size: 28px; color: #ffcc55; text-shadow: 0 0 12px rgba(255,180,40,.55); }
+.combo-hud span { font-size: 14px; opacity: .9; font-weight: 700; }
+.combo-hud.pop { animation: comboPop .4s ease-out; }
+@keyframes comboPop {
+  0% { transform: translateX(-50%) scale(.7); }
+  55% { transform: translateX(-50%) scale(1.18); }
+  100% { transform: translateX(-50%) scale(1); }
+}

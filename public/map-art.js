@@ -292,7 +292,60 @@
       for (let i = 0; i < 5; i++) { const k = ((now / 600 + i / 5) % 1), x = o.x + (ex - o.x) * k, y = o.y + (ey - o.y) * k; g.fillRect(x - 2, y - 2, 4, 4); }
     }
     const robotPal = zone => zone === 1 ? ['#f2efe6', '#b9b6a8', '#6f6c60', '#dcd8ca'] : ['#e0e6d6', '#8a9a74', '#3e4a34', '#b8c4a4'];
-    return { drawGround, drawVignette, drawBorder, drawDoorWall, rectObs, rockObs, pylon, beamFx, robotPal, zoneOf, stats: () => stats, RM };
+
+    // Ruined altar (spawn) + shop circle — world-space overlays (not chunk-baked)
+    function drawLandmarks(g, cam, VW, VH, t) {
+      const A = G.SPAWN_ALTAR, S = G.SHOP_PAD;
+      const inView = (x, y, r) => x + r > cam.x && x - r < cam.x + VW && y + r > cam.y && y - r < cam.y + VH;
+      if (inView(A.x, A.y, A.platformR + 40)) {
+        const x = A.x - cam.x, y = A.y - cam.y, R = A.platformR;
+        // cracked stone disc
+        g.save();
+        g.fillStyle = 'rgba(0,0,0,.28)'; g.beginPath(); g.ellipse(x + 6, y + 10, R * 1.05, R * 0.92, 0, 0, 6.283); g.fill();
+        g.fillStyle = '#6e675c'; g.beginPath(); g.arc(x, y, R, 0, 6.283); g.fill();
+        g.fillStyle = '#8a8376'; g.beginPath(); g.arc(x - R * 0.08, y - R * 0.1, R * 0.88, 0, 6.283); g.fill();
+        g.fillStyle = '#a39c8e'; g.beginPath(); g.arc(x - R * 0.18, y - R * 0.22, R * 0.55, 0, 6.283); g.fill();
+        // cracks
+        g.strokeStyle = 'rgba(40,35,28,.55)'; g.lineWidth = 2.2; g.lineCap = 'round';
+        g.beginPath(); g.moveTo(x - R * 0.55, y - R * 0.1); g.lineTo(x - R * 0.1, y + R * 0.35); g.lineTo(x + R * 0.4, y + R * 0.15); g.stroke();
+        g.beginPath(); g.moveTo(x + R * 0.15, y - R * 0.5); g.lineTo(x + R * 0.05, y - R * 0.05); g.lineTo(x + R * 0.45, y + R * 0.25); g.stroke();
+        // broken pillars (4 stubs)
+        for (let i = 0; i < 4; i++) {
+          const a = i * 1.5708 + 0.4, px = x + Math.cos(a) * R * 0.72, py = y + Math.sin(a) * R * 0.72;
+          const h = 18 + (i % 2) * 10;
+          g.fillStyle = '#5a5348'; g.fillRect(px - 8, py - h, 16, h + 6);
+          g.fillStyle = '#8a8274'; g.fillRect(px - 7, py - h, 14, 8);
+          if (i % 2) { g.fillStyle = '#4a443c'; g.fillRect(px + 2, py - h - 6, 10, 8); } // toppled block
+        }
+        // soft rune glow in centre
+        const pulse = 0.35 + 0.15 * Math.sin((t || 0) * 2.2);
+        const gr = g.createRadialGradient(x, y, 4, x, y, R * 0.45);
+        gr.addColorStop(0, `rgba(120,200,255,${pulse})`); gr.addColorStop(1, 'rgba(120,200,255,0)');
+        g.fillStyle = gr; g.beginPath(); g.arc(x, y, R * 0.45, 0, 6.283); g.fill();
+        g.restore();
+      }
+      if (inView(S.x, S.y, S.r + 20)) {
+        const x = S.x - cam.x, y = S.y - cam.y, R = S.r;
+        g.save();
+        g.fillStyle = 'rgba(0,0,0,.2)'; g.beginPath(); g.ellipse(x + 4, y + 6, R * 1.05, R * 0.9, 0, 0, 6.283); g.fill();
+        // gold shop ring
+        g.strokeStyle = 'rgba(255,200,60,.85)'; g.lineWidth = 4;
+        g.beginPath(); g.arc(x, y, R, 0, 6.283); g.stroke();
+        g.strokeStyle = 'rgba(255,230,140,.45)'; g.lineWidth = 2;
+        g.beginPath(); g.arc(x, y, R - 8, 0, 6.283); g.stroke();
+        const pulse = 0.2 + 0.12 * Math.sin((t || 0) * 3);
+        const gr = g.createRadialGradient(x, y, 2, x, y, R);
+        gr.addColorStop(0, `rgba(255,210,80,${pulse})`); gr.addColorStop(1, 'rgba(255,210,80,0)');
+        g.fillStyle = gr; g.beginPath(); g.arc(x, y, R, 0, 6.283); g.fill();
+        // little stall icon
+        g.fillStyle = '#c9743a'; g.fillRect(x - 14, y - 6, 28, 16);
+        g.fillStyle = '#e08a45'; g.beginPath(); g.moveTo(x - 18, y - 6); g.lineTo(x, y - 22); g.lineTo(x + 18, y - 6); g.closePath(); g.fill();
+        g.fillStyle = '#ffe27a'; g.beginPath(); g.arc(x + 10, y - 18, 5, 0, 6.283); g.fill();
+        g.restore();
+      }
+    }
+
+    return { drawGround, drawVignette, drawBorder, drawDoorWall, drawLandmarks, rectObs, rockObs, pylon, beamFx, robotPal, zoneOf, stats: () => stats, RM };
   }
   window.OCSMapArtCreate = create;
 })();

@@ -160,11 +160,14 @@ const zoneCount = { 1: 0, 2: 0 }; // normal (pool) orbs alive per zone
 function rollPool(z = 1) {
   const w = z === 2 ? G.ZONE2_WEIGHTS : G.POOL_WEIGHTS, t = G.rollOrbType(discoOn() ? G.luckyWeights(luckyOn() ? G.luckyWeights(w) : w, DISCO.rareMult) : luckyOn() ? G.luckyWeights(w) : w); // «Волна удачи»: rare+ ×2
   if (t === 'l') return players.size === 0 || (ev && ev.kind !== 'lucky') ? 'e' : 'l'; // chance only; not while nobody can catch it (75 s life, announced); never during an arena event (except «Волна удачи»)
+  if (t === 'x') return players.size === 0 || (ev && ev.kind !== 'lucky') ? 'a' : 'x';
   return t; // mythic: by chance only, no cap / timer
 }
 
 function spotIsFree(x, y) {
   if (inObstacle(x, y, 20)) return false;
+  { const A = G.SPAWN_ALTAR; if (Math.hypot(x - A.x, y - A.y) < A.clearR) return false; } // no orbs on the ruined altar
+  { const S = G.SHOP_PAD; if (Math.hypot(x - S.x, y - S.y) < S.r + 40) return false; }
   for (const pl of players.values()) { const dx = pl.x - x, dy = pl.y - y; if (dx * dx + dy * dy < SPAWN.playerClear ** 2) return false; }
   const cx = Math.floor(x / SPAWN.cell), cy = Math.floor(y / SPAWN.cell);
   for (let j = cy - 1; j <= cy + 1; j++) for (let i = cx - 1; i <= cx + 1; i++) {
@@ -198,12 +201,14 @@ function addOrb(t, pos, evKind) {
   const o = { id: nextOrbId++, x: pos.x, y: pos.y, t, cell: cellOf(pos.x, pos.y), z: G.zoneOf(pos.x) };
   if (!evKind) { o.pool = true; zoneCount[o.z]++; }
   if (t === 'l') { o.expires = Date.now() + G.ORB_TYPES.l.lifeMs; legendaryAlive++; }
+  if (t === 'x') { o.expires = Date.now() + G.ORB_TYPES.x.lifeMs; }
   if (t === 'm') { o.expires = Date.now() + G.ORB_TYPES.m.lifeMs; mythicAlive++; }
   if (evKind) { o.ev = evKind; evAlive++; }
   orbs.set(o.id, o);
   cells[o.cell].add(o.id);
   pendingAdds.push(evKind ? [o.id, o.x, o.y, o.t, 1] : [o.id, o.x, o.y, o.t]);
   if (t === 'l' && !evKind && io) io.to('arena').emit('announce', { text: 'Появилась легендарная сфера (+25)! Её покажет компас «Чутьё легенды».', x: o.x, y: o.y });
+  if (t === 'x' && !evKind && io) io.to('arena').emit('announce', { text: 'Появилась астральная сфера (+35 и 2 осколка)!', x: o.x, y: o.y });
   if (t === 'm' && !evKind && io) io.to('arena').emit('announce', { text: 'Появилась мифическая сфера (+50 и 3 осколка)! Её покажет компас «Чутьё легенды».', x: o.x, y: o.y });
   return o;
 }
@@ -234,7 +239,7 @@ function spawnTick(now) {
   }
   respawnQueue = keep;
   for (const o of orbs.values()) {
-    if ((o.t === 'm' || o.t === 'l') && !Number.isFinite(o.expires)) o.expires = now + G.ORB_TYPES[o.t].lifeMs; // older orbs without a lifetime get one
+    if ((o.t === 'm' || o.t === 'l' || o.t === 'x') && !Number.isFinite(o.expires)) o.expires = now + G.ORB_TYPES[o.t].lifeMs; // timed tiers without a lifetime get one
     if (o.expires <= now) removeOrb(o, 0); // legendary / mythic lifetime
   }
 }
@@ -328,6 +333,8 @@ function spawnObstacle(now, f = {}) {
   for (let i = 0; i < 40 && !at; i++) {
     const x = Number.isFinite(f.x) ? f.x : Math.round(rand(reach + 100, G.WORLD.w - reach - 100)), y = Number.isFinite(f.y) ? f.y : Math.round(rand(reach + 100, G.WORLD.h - reach - 100));
     const ok = Number.isFinite(f.x) || (G.doorDist(x) > OB.doorClear + reach &&
+      Math.hypot(x - G.SPAWN_ALTAR.x, y - G.SPAWN_ALTAR.y) > G.SPAWN_ALTAR.clearR + reach &&
+      Math.hypot(x - G.SHOP_PAD.x, y - G.SHOP_PAD.y) > G.SHOP_PAD.r + reach &&
       Array.from(players.values()).every(pl => Math.hypot(pl.x - x, pl.y - y) > OB.playerClear + reach) &&
       obstacles.every(b => Math.hypot(b.x - x, b.y - y) > obsReach(b) + reach + OB.gap));
     if (ok) at = { x, y };
@@ -1039,7 +1046,8 @@ io.on('connection', socket => {
       removePlayer(existing, { silent: true });
       existing.socket.disconnect(true);
     }
-    const spawn = { x: 200 + Math.random() * (G.ZONE_W - 400), y: 200 + Math.random() * (G.ZONE_H - 400) }; // always zone 1
+    const A = G.SPAWN_ALTAR, jitter = () => (Math.random() - 0.5) * A.platformR * 0.7;
+    const spawn = { x: A.x + jitter(), y: A.y + jitter() }; // ruined altar, centre of zone 1
     pl = {
       id: newPublicId(), acc, socket, sessionHash, x: spawn.x, y: spawn.y,
       inputs: [], budget: 2, lastSeq: 0, session: 0, gained: 0, lucky: 0, jackpots: 0, frac: 0, evInside: false, rtt: 100, mg: null, joinedAt: Date.now(), chatTimes: [], lastChat: '',
@@ -1692,7 +1700,8 @@ io.on('connection', socket => {
     const r = INV.removeItem(acct.acc, def.id, 1, 'use'); if (!r || !r.ok) return ack({ ok: false, error: (r && r.error) || 'Не получилось' });
     const until = Math.min(cur + G.POTIONS[def.potion].sec * 1000, cap);
     st.potions[def.potion] = until;
-    accountChanged(acct.acc); ack({ ok: true, profile: ownProfile(acct.acc), until, added: until - cur, stacked: cur > now });
+    st.potionsUsed = (st.potionsUsed || 0) + 1;
+    accountChanged(acct.acc); if (pl) FX.checkAch(acct.acc, pl); ack({ ok: true, profile: ownProfile(acct.acc), until, added: until - cur, stacked: cur > now });
   });
   // ---- emotes (free ones for everyone, others must be owned); shown to everyone for G.EMOTE_MS, rate-limited
   socket.on('emote', (itemId, ack) => {
@@ -1997,6 +2006,15 @@ function collectAround(pl, radius, now) {
     const lm = (discoOn(now) ? DISCO.luckMult : 1) * boostMult('custom', 'luck', now) * G.potionMult(pl.acc.stats, 'luck', now);
     if (lm > 1 && !rw.lucky) { const p = G.upValue('luck', pl.acc.upgrades.luck) / 100, extra = p > 0 && p < 1 ? Math.min(1, p * (lm - 1) / (1 - p)) : 0; if (extra > 0 && Math.random() < extra) { rw.value *= 2; rw.lucky = true; } } // disco: luck chance ×1.5
     { const xm = (discoOn(now) ? DISCO.orbMult : 1) * boostMult(null, 'orb', now) * G.potionMult(pl.acc.stats, 'orbs', now); if (xm > 1) { const f = (pl.xFrac || 0) + rw.value * (xm - 1), whole = Math.floor(f + 1e-9); pl.xFrac = f - whole; rw.value += whole; } } // disco ×1.5, admin /x2 ×2 (stack multiplicatively with weekend / boosts)
+    // Combo (server-only): validated pickups within COMBO.windowMs raise the counter; multiplier capped at COMBO.maxMult.
+    { const cb = pl.combo || (pl.combo = { n: 0, last: 0, mult: 1, tier: 1 });
+      if (now - cb.last > G.COMBO.windowMs) cb.n = 0;
+      cb.n++; cb.last = now; cb.mult = G.comboMult(cb.n);
+      let tier = 1; for (const t of G.COMBO.tiers) if (cb.n >= t.n) tier = t.n;
+      const popped = tier > cb.tier; cb.tier = tier;
+      if (cb.mult > 1) { const f = (pl.cFrac || 0) + rw.value * (cb.mult - 1), whole = Math.floor(f + 1e-9); pl.cFrac = f - whole; rw.value += whole; }
+      pl.socket.emit('combo', { n: cb.n, mult: cb.mult, left: G.COMBO.windowMs, pop: popped });
+    }
     FX.onCollect(pl, o, rw.value);
     if (G.ORB_RANK[o.t] >= G.ORB_RANK.r && G.potionOn(pl.acc.stats, 'shard', now) && Math.random() < G.POTIONS.shard.chance) { const g = INV.grantItem(pl.acc, G.SHARD_ID, 1, 'arena'); if (g.ok) { pl.socket.emit('item', { id: G.SHARD_ID, qty: 1, source: 'arena' }); emitProfile(pl); } } // «Зелье осколков»
     if (rw.lucky) pl.lucky++;
@@ -2007,11 +2025,14 @@ function collectAround(pl, radius, now) {
     pl.acc.total += rw.value;
     if (o.ev === 'rain' && ev && ev.kind === 'rain') { ev.rainAlive--; evScore(pl).score += rw.value; }
     if (luckyOn()) evScore(pl).score += rw.value; // «Волна удачи»: orbs collected during the wave
-    if (ot.shards && (o.t === 'l' || o.t === 'm')) { // legendary 1, mythic 3 shards
+    if (ot.shards && (o.t === 'l' || o.t === 'x' || o.t === 'm')) { // legendary 1, astral 2, mythic 3 shards
       const g = INV.grantItem(pl.acc, G.SHARD_ID, ot.shards, 'arena');
       pl.socket.emit('item', g.ok ? { id: G.SHARD_ID, qty: ot.shards, source: 'arena' } : { error: g.error });
       if (g.ok) emitProfile(pl);
-      if (o.t === 'm' || o.t === 'l') { if (o.t === 'm') systemChat(`${pl.acc.name} поймал(а) мифическую сферу!`); respawnQueue.push({ due: now + rand(SPAWN.respawnMin, SPAWN.respawnMax), z: o.z }); }
+      if (o.t === 'm' || o.t === 'l' || o.t === 'x') {
+        if (o.t === 'm') systemChat(`${pl.acc.name} поймал(а) мифическую сферу!`);
+        respawnQueue.push({ due: now + rand(SPAWN.respawnMin, SPAWN.respawnMax), z: o.z });
+      }
     } else if (o.pool) respawnQueue.push({ due: now + rand(SPAWN.respawnMin, SPAWN.respawnMax), z: o.z });
   }
 }

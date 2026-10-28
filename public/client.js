@@ -318,6 +318,19 @@
   socket.on('pmeta', p => { const pl = players.get(p.id); if (pl) { pl.eq = p.eq; pl.name = p.name; pl.sz = p.sz || 1; } else if (p.id !== myId) addPlayer(p); });
   socket.on('sping', v => socket.emit('spong', v));
   socket.on('announce', a => toastC('rare', '✨ ' + a.text));
+  // Combo HUD: server emits after each validated collect; multiplier capped at G.COMBO.maxMult
+  let comboHud = { n: 0, mult: 1, until: 0 };
+  socket.on('combo', d => {
+    if (!d) return;
+    comboHud = { n: d.n, mult: d.mult, until: performance.now() + (d.left || G.COMBO.windowMs) };
+    const el = $('comboHud'); if (!el) return;
+    if (d.n < 2) { el.classList.add('hidden'); return; }
+    el.classList.remove('hidden');
+    el.classList.toggle('pop', !!d.pop);
+    const m = Number(d.mult), ms = (m % 1 ? m.toFixed(2) : String(m)).replace(/\.00$/, '');
+    el.innerHTML = '<b>×' + ms + '</b><span>комбо ' + d.n + '</span>';
+    if (d.pop) setTimeout(() => el.classList.remove('pop'), 420);
+  });
   // ------------------------------------------------------------ temporary obstacles + rotating lasers (server-run)
   let obstacles = [], zapFlash = 0, robotState = new Map(), shotsNow = [];
   // «Выходные» chip: ms left until Monday 00:00 MSK, counted down locally between server updates
@@ -883,6 +896,10 @@
     G.resolveObstacles(me, obstacles); G.resolveObstacles(me, bossSolid());
     pending.push(inp);
     updateDoorBtn();
+    { const S = G.SHOP_PAD, d = Math.hypot(me.x - S.x, me.y - S.y);
+      if (d <= S.r) { if (!me._shopPad) { me._shopPad = true; if ($('shop').classList.contains('hidden')) openModal('shop'); } }
+      else me._shopPad = false;
+    }
     if (pending.length > 80) pending.shift();
     lastStepAt = performance.now();
     if (inp.x || inp.y) { const l = Math.hypot(inp.x, inp.y); myDir = { x: inp.x / l, y: inp.y / l }; }
@@ -891,7 +908,7 @@
   // ------------------------------------------------------------ rendering helpers
   const orbSprites = {};
   // render-only tints: more saturated, and uncommon pushed to mint so it doesn't melt into the grass
-  const ORB_TINT = { c: ['#22d8ff', '#0a5a8a'], u: ['#9dffcf', '#0b6b45'], r: ['#b05cff', '#3d1478'], e: ['#ff8a12', '#7a3300'], l: ['#ffd21a', '#7a5600'], m: ['#ff2d63', '#7a0024'], t: ['#ffe680', '#7a5a00'] };
+  const ORB_TINT = { c: ['#22d8ff', '#0a5a8a'], b: ['#5ad0ff', '#0a4a72'], u: ['#9dffcf', '#0b6b45'], g: ['#7dff9a', '#0a5a30'], r: ['#b05cff', '#3d1478'], p: ['#d080ff', '#4a1080'], e: ['#ff8a12', '#7a3300'], a: ['#ffb040', '#7a3a00'], l: ['#ffd21a', '#7a5600'], x: ['#ff9a70', '#7a2808'], m: ['#ff2d63', '#7a0024'], t: ['#ffe680', '#7a5a00'] };
   function makeOrbSprite(t) {
     const size = Math.ceil(t.r * 8), c = document.createElement('canvas');
     c.width = c.height = size * 2;
@@ -1606,6 +1623,7 @@
 
     ctx.setTransform(DPR * zoom, 0, 0, DPR * zoom, 0, 0);
     drawBackground(t);
+    tickComboHud();
     ctx.save(); ctx.translate(-cam.x, -cam.y);
     drawZones(t);
     // world border
@@ -1700,7 +1718,7 @@
 
   // «Чутьё легенды» compass: arrows at the screen edge to the rarest orbs (and, at level 3, to event targets).
   // Client-side only: every position it uses is already public (orb list, minimap, event broadcast).
-  const COMPASS_COLORS = { l: '#ffcc33', m: '#ff3d6e', e: '#ff9a2e', event: '#7dffb0' };
+  const COMPASS_COLORS = { l: '#ffcc33', x: '#ff7a55', m: '#ff3d6e', e: '#ff9a2e', a: '#ffb040', event: '#7dffb0' };
   function drawCompass(t, now) {
     if (!profile || !profile.upgrades.sense) return;
     const evc = evState ? { zone: evState.zone, runners: Array.from(runners.values(), r => ({ x: runnerX(r, now), y: runnerY(r, now) })) } : null;
@@ -1713,7 +1731,7 @@
     const color = COMPASS_COLORS[tg.kind] || '#ffcc33';
     const cx = W / 2, cy = H / 2, dx = sx - cx, dy = sy - cy, a = Math.atan2(dy, dx);
     const m = 46, k = Math.min((W / 2 - m) / Math.abs(dx || 1e-6), (H / 2 - m) / Math.abs(dy || 1e-6));
-    const ax = cx + dx * k, ay = cy + dy * k, pulse = 1 + 0.12 * Math.sin(t * 5), big = tg.kind === 'l' || tg.kind === 'm' || tg.kind === 'event';
+    const ax = cx + dx * k, ay = cy + dy * k, pulse = 1 + 0.12 * Math.sin(t * 5), big = tg.kind === 'l' || tg.kind === 'x' || tg.kind === 'm' || tg.kind === 'event';
     ctx.save(); ctx.translate(ax, ay);
     ctx.save(); ctx.rotate(a); ctx.scale(pulse * (big ? 1 : 0.8), pulse * (big ? 1 : 0.8));
     ctx.fillStyle = color; ctx.shadowColor = color; ctx.shadowBlur = 14;
@@ -1727,8 +1745,13 @@
     }
     ctx.restore();
   }
+  function tickComboHud() {
+    const el = $('comboHud'); if (!el || el.classList.contains('hidden')) return;
+    if (performance.now() > comboHud.until) { el.classList.add('hidden'); comboHud.n = 0; }
+  }
+  /* combo fade */
   function drawBackground(t) { // natural zone-themed ground from cached chunks (public/map-art.js), no grid
-    MA.drawGround(ctx, cam, VW, VH, zoom, DPR, t); MA.drawVignette(ctx, VW, VH);
+    MA.drawGround(ctx, cam, VW, VH, zoom, DPR, t); MA.drawLandmarks(ctx, cam, VW, VH, t); MA.drawVignette(ctx, VW, VH);
   }
   const idleOrbs = Array.from({ length: 60 }, (_, i) => ({ x: Math.random(), y: Math.random(), t: i % 29 === 0 ? 'm' : i % 25 === 0 ? 'l' : i % 13 === 0 ? 'e' : i % 6 === 0 ? 'r' : i % 4 === 0 ? 'u' : 'c', v: 0.2 + Math.random() * 0.6, id: i }));
   function drawIdleBackground(t) {
@@ -2224,7 +2247,7 @@
       const body = document.createElement('div'); body.className = 'ach-body';
       const nm = document.createElement('b'); nm.className = 'ach-nm'; nm.textContent = s.done ? ch.tiers[s.done - 1].name : ch.name;
       const medals = document.createElement('span'); medals.className = 'ach-medals';
-      ch.tiers.forEach((t, i) => { const m = document.createElement('span'); m.className = `medal ${metalOf(i, n)} ${i < s.done ? 'got' : i === s.done ? 'next' : 'locked'}`; m.textContent = n > 1 ? ['I', 'II', 'III', 'IV', 'V'][i] : '★'; m.title = `${t.name}: ${t.desc}`; medals.appendChild(m); });
+      ch.tiers.forEach((t, i) => { const m = document.createElement('span'); m.className = `medal ${metalOf(i, n)} ${i < s.done ? 'got' : i === s.done ? 'next' : 'locked'}`; m.textContent = n > 1 ? (['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'][i] || String(i + 1)) : '★'; m.title = `${t.name}: ${t.desc}`; medals.appendChild(m); });
       const top = document.createElement('div'); top.className = 'ach-top'; top.append(nm, medals);
       const ds = document.createElement('div'); ds.className = 'ach-desc';
       ds.textContent = s.max ? 'Все ступени пройдены!' : `Дальше: ${s.next.name} — ${s.next.desc}`;

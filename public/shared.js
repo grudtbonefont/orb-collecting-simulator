@@ -3,7 +3,7 @@
   const ZONE_W = 6000, ZONE_H = 6000; // one zone (was 3000×3000; 2× each side)
   const WORLD = { w: ZONE_W * 2, h: ZONE_H }; // zone 1 (violet) | door | zone 2 (blue)
   const DOOR_COST = 3750; // one-time unlock for zone 2 (~35 min of base farming); earlier 1000-orb unlocks are kept
-  const ZONE2_WEIGHTS = { c: 6960, u: 1800, r: 850, e: 280, l: 80, m: 30 }; // same tiers as zone 1, better odds: c 69.6 / u 18 / r 8.5 / e 2.8 / l 0.8 / m 0.3 % (mean ≈ 2.03 vs 1.49)
+  const ZONE2_WEIGHTS = { c: 6200, b: 700, u: 1300, g: 400, r: 550, p: 200, e: 200, a: 90, l: 80, x: 40, m: 40 }; // richer mid/high tiers than zone 1
   const zoneOf = x => (x < ZONE_W ? 1 : 2);
   const DOOR = { x: ZONE_W, y: ZONE_H / 2, half: ZONE_H / 2, clear: 300 }; // the whole dividing wall is the door (wall-door); spawns keep `clear` px off it
   const doorDist = x => Math.abs(x - ZONE_W); // distance to the wall-door line
@@ -20,20 +20,26 @@
 
   // Orb tiers. `weight` = share (per 10 000) of normal pool spawns; 0 = never in the pool (timed / event orbs).
   // The pool mean (≈1.43 per orb) is tuned so a player without upgrades still earns ≈100 orbs/min (README «Orb rarities»).
+  // Mid-tiers (b/g/p/a/x) sit between the classic six; weights sum to 10 000 so mean value stays ≈1.45.
   const ORB_TYPES = {
-    c: { key: 'c', name: 'Обычная', value: 1, r: 7, color: '#3ee0ff', glow: 'rgba(62,224,255,', weight: 8204 },
-    u: { key: 'u', name: 'Необычная', value: 2, r: 8, color: '#5dff8f', glow: 'rgba(93,255,143,', weight: 1200 },
-    r: { key: 'r', name: 'Редкая', value: 5, r: 10, color: '#b46bff', glow: 'rgba(180,107,255,', weight: 460 },
-    e: { key: 'e', name: 'Эпическая', value: 10, r: 12, color: '#ff9a2e', glow: 'rgba(255,154,46,', weight: 110 },
-    l: { key: 'l', name: 'Легендарная', value: 25, r: 14, color: '#ffcc33', glow: 'rgba(255,204,51,', weight: 20, shards: 1, lifeMs: 75000, note: 'редкая: шанс 0,2 % на каждую новую сферу (во 2-й зоне 0,8 %), живёт 75 с' },
-    m: { key: 'm', name: 'Мифическая', value: 50, r: 15, color: '#ff3d6e', glow: 'rgba(255,61,110,', weight: 6, shards: 3, lifeMs: 60000, note: 'очень редкая: появляется только по шансу, живёт 60 с' },
+    c: { key: 'c', name: 'Обычная', value: 1, r: 7, color: '#3ee0ff', glow: 'rgba(62,224,255,', weight: 8120 },
+    b: { key: 'b', name: 'Блестящая', value: 2, r: 7.5, color: '#5af0c8', glow: 'rgba(90,240,200,', weight: 385 },
+    u: { key: 'u', name: 'Необычная', value: 2, r: 8, color: '#5dff8f', glow: 'rgba(93,255,143,', weight: 880 },
+    g: { key: 'g', name: 'Изумрудная', value: 4, r: 9, color: '#3dffb0', glow: 'rgba(61,255,176,', weight: 150 },
+    r: { key: 'r', name: 'Редкая', value: 5, r: 10, color: '#b46bff', glow: 'rgba(180,107,255,', weight: 280 },
+    p: { key: 'p', name: 'Призматическая', value: 7, r: 11, color: '#ff6bd6', glow: 'rgba(255,107,214,', weight: 70 },
+    e: { key: 'e', name: 'Эпическая', value: 10, r: 12, color: '#ff9a2e', glow: 'rgba(255,154,46,', weight: 70 },
+    a: { key: 'a', name: 'Древняя', value: 17, r: 13, color: '#ffb347', glow: 'rgba(255,179,71,', weight: 20 },
+    l: { key: 'l', name: 'Легендарная', value: 25, r: 14, color: '#ffcc33', glow: 'rgba(255,204,51,', weight: 14, shards: 1, lifeMs: 75000, note: 'редкая: шанс ~0,14 % на каждую новую сферу (во 2-й зоне выше), живёт 75 с' },
+    x: { key: 'x', name: 'Астральная', value: 35, r: 14.5, color: '#ff7a55', glow: 'rgba(255,122,85,', weight: 6, shards: 2, lifeMs: 65000, note: 'между легендарной и мифической; 2 осколка, живёт 65 с' },
+    m: { key: 'm', name: 'Мифическая', value: 50, r: 15, color: '#ff3d6e', glow: 'rgba(255,61,110,', weight: 5, shards: 3, lifeMs: 60000, note: 'очень редкая: появляется только по шансу, живёт 60 с' },
     t: { key: 't', name: 'Сокровище', value: 50, r: 15, color: '#ffe680', glow: 'rgba(255,230,128,', weight: 0, shards: 1, event: true, note: 'только во время события' },
   };
-  const ORB_RANK = { c: 0, u: 1, r: 2, e: 3, l: 4, t: 4, m: 5 };
-  const ORB_LEGEND = ['c', 'u', 'r', 'e', 'l', 'm', 't'];
+  const ORB_RANK = { c: 0, b: 1, u: 2, g: 3, r: 4, p: 5, e: 6, a: 7, l: 8, t: 8, x: 9, m: 10 };
+  const ORB_LEGEND = ['c', 'b', 'u', 'g', 'r', 'p', 'e', 'a', 'l', 'x', 'm', 't'];
   const POOL_WEIGHTS = {};
   for (const t of Object.values(ORB_TYPES)) if (t.weight > 0) POOL_WEIGHTS[t.key] = t.weight;
-  const RAIN_WEIGHTS = { c: 5400, u: 2600, r: 1400, e: 600 }; // «Сферный дождь»: rarer orbs much more often
+  const RAIN_WEIGHTS = { c: 4800, b: 900, u: 1800, g: 600, r: 900, p: 400, e: 600 }; // «Сферный дождь»: rarer orbs much more often
   function rollOrbType(weights = POOL_WEIGHTS, rnd = Math.random) {
     let sum = 0; for (const k in weights) sum += weights[k];
     let x = rnd() * sum;
@@ -231,6 +237,23 @@
   const EMOTE_MS = 3000, EMOTE_GAP_MS = 2500;
   const SHARD_ID = 'x_legend_shard';
   const TROPHY_ACH = 50; // «Кубок»: completed achievement tiers needed
+  // Combo on collect (server-authoritative): window between pickups, stepped multiplier, hard cap.
+  const COMBO = {
+    windowMs: 1800,
+    maxMult: 2,
+    tiers: [ // first matching from the end wins; n = combo count
+      { n: 1, m: 1 }, { n: 5, m: 1.1 }, { n: 10, m: 1.25 }, { n: 20, m: 1.4 },
+      { n: 30, m: 1.6 }, { n: 40, m: 1.8 }, { n: 50, m: 2 },
+    ],
+  };
+  function comboMult(n) {
+    let m = 1; const N = Math.max(0, Math.floor(Number(n) || 0));
+    for (const t of COMBO.tiers) if (N >= t.n) m = t.m;
+    return Math.min(COMBO.maxMult, m);
+  }
+  // Ruined altar spawn (centre of zone 1) + shop proximity circle next to it (non-blocking decorations).
+  const SPAWN_ALTAR = { x: ZONE_W / 2, y: ZONE_H / 2, platformR: 150, clearR: 210 };
+  const SHOP_PAD = { x: ZONE_W / 2 + 230, y: ZONE_H / 2, r: 78 };
   const SHARD_EXCHANGE = { orbs: 25, maxPerTrade: 99 }; // «Лавка осколков»: 1 shard → 25 orbs (was 40) (balance only, not the all-time total)
   const ITEM_BY_ID = {};
   for (const it of ITEMS) ITEM_BY_ID[it.id] = it;
@@ -354,7 +377,7 @@
     ups = ups || {};
     let v = base, lucky = false, jackpot = false;
     const j = jackpotChance(ups.luck) / 100;
-    if (j > 0 && (type === 'c' || type === 'u') && rnd() < j) { v = ORB_TYPES.e.value; jackpot = true; }
+    if (j > 0 && type && (ORB_RANK[type] || 0) < ORB_RANK.r && rnd() < j) { v = ORB_TYPES.e.value; jackpot = true; }
     const luck = upValue('luck', ups.luck) / 100;
     if (luck > 0 && rnd() < luck) { v *= 2; lucky = true; }
     const m = upValue('mult', ups.mult) / 100;
@@ -383,7 +406,7 @@
     if (lvl < 1 || !me) return out;
     let epic = null, ed = SENSE_EPIC_RANGE;
     for (const o of orbList) {
-      if (o.t === 'l' || o.t === 'm') out.push({ x: o.x, y: o.y, kind: o.t });
+      if (o.t === 'l' || o.t === 'x' || o.t === 'm') out.push({ x: o.x, y: o.y, kind: o.t });
       else if (lvl >= 3 && o.t === 't') out.push({ x: o.x, y: o.y, kind: 'event' });
       else if (lvl >= 2 && o.t === 'e') { const d = Math.hypot(o.x - me.x, o.y - me.y); if (d < ed) { ed = d; epic = o; } }
     }
@@ -415,7 +438,7 @@
   const EVENT_SCHEDULE = { minMs: 2 * 60000, maxMs: 6 * 60000, announceMs: 25000 }; // counted only while ≥ 1 player is online
 
   // «Волна удачи»: rare+ tiers (r, e, l, m) weigh ×rareMult
-  const luckyWeights = (w, k = EVENTS.lucky.rareMult) => { const o = {}; for (const t in w) o[t] = 'relm'.includes(t) ? w[t] * k : w[t]; return o; };
+  const luckyWeights = (w, k = EVENTS.lucky.rareMult) => { const o = {}; for (const t in w) o[t] = (ORB_RANK[t] || 0) >= ORB_RANK.r ? w[t] * k : w[t]; return o; };
 
   // ---------------------------------------------------------------- temporary obstacles (server spawns, everyone collides)
   // kinds: 'wall' (long thin rect), 'block' (square-ish rect), 'rock' (circle), 'laser' (solid pylon + spinning beam)
@@ -526,7 +549,7 @@
   const api = {
     BETA_CAP_GRANT, BETA_CAP_ID, TRADING_ENABLED, TRADE, isTradeable, NON_TRADEABLE_IDS, WORLD, ZONE_W, ZONE_H, DOOR, doorDist, DOOR_COST, ZONE2_WEIGHTS, zoneOf, zoneGate, PLAYER_R, BASE_SPEED, TICK_MS, STEP_DT, ORB_TYPES, ORB_RANK, ORB_LEGEND, POOL_WEIGHTS, RAIN_WEIGHTS, rollOrbType, expectedOrbValue, CATEGORIES, INV_CATEGORIES, RARITIES, ITEMS, ITEM_BY_ID, INV_SLOTS, INV_CAP, BUY_MAX_QTY, PAINTS,
     DEFAULT_EQUIPPED, DEFAULT_OWNED, UPGRADES, UPGRADE_KEYS, UPGRADE_REFUND_PRICES, upLevel, upValue, jackpotChance, upgradeText, orbReward, skillPrize, compassTargets, SENSE_EPIC_RANGE, RADAR, radarBlips, PUSH, separatePlayers,
-    EVENTS, EVENT_KEYS, AUTO_EVENT_KEYS, EVENT_SCHEDULE, luckyWeights, OBSTACLES, laserAngle, resolveObstacles, laserHits, laserPenalty, robotPenalty, WEEKEND, weekendInfo, SHARD_ID, SHARD_EXCHANGE, TROPHY_ACH, POTIONS, POTION_CAP_MS, POTION_MAP, potionOn, potionMult, EMOTE_MS, EMOTE_GAP_MS, MG_PRIZE_MULT,
+    EVENTS, EVENT_KEYS, AUTO_EVENT_KEYS, EVENT_SCHEDULE, luckyWeights, OBSTACLES, laserAngle, resolveObstacles, laserHits, laserPenalty, robotPenalty, WEEKEND, weekendInfo, SHARD_ID, SHARD_EXCHANGE, TROPHY_ACH, COMBO, comboMult, SPAWN_ALTAR, SHOP_PAD, POTIONS, POTION_CAP_MS, POTION_MAP, potionOn, potionMult, EMOTE_MS, EMOTE_GAP_MS, MG_PRIZE_MULT,
     MINIGAMES, REACTION_PRIZES, rushPrize, memoryPrize, memoryShowMs, shellFinal, shellShuffleMs, throwPos, throwPoints, throwPrize, chainPrize, minigameMinMs, speedFor, pickupFor, applyInput, BONUS_ROOM, inBonusRoom,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

@@ -7,7 +7,7 @@ const ROOT = process.cwd(), PORT = 3144, URL = 'http://localhost:' + PORT, sleep
   for (let i = 0; i < 100; i++) { try { if ((await fetch(URL + '/api/health')).ok) break; } catch (_) {} await sleep(200); }
   const def = G.ITEM_BY_ID.h_trophy; ok(def && def.cat === 'hat' && def.price == null && !def.exclusive, 'Кубок: hat, not in shop / shard shop');
   const shop = await (await fetch(URL + '/api/shop')).json(); ok(!shop.items.some(i => i.id === 'h_trophy' && (i.price > 0 || i.shardPrice > 0)), 'no price in shop api');
-  const ids = C.ACH.map(a => a.id); const N = ids.length; ok(N === 79, 'total tiers ' + N);
+  const ids = C.ACH.map(a => a.id); const N = ids.length; ok(N === 100, 'total tiers ' + N);
   const b = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox'] }); const errs = [];
   async function reg(name, play = true) { const p = await (await b.newContext({ viewport: { width: 1280, height: 720 } })).newPage(); p.on('pageerror', e => errs.push(e.message));
     await p.goto(URL); await sleep(300); await p.click('.auth-tab[data-mode=register]'); await p.fill('#nick', name); await p.fill('#pass', 'demo-pass-123'); await p.fill('#pass2', 'demo-pass-123'); await p.click('#authSubmit'); await p.waitForSelector('#profile:not(.hidden)');
