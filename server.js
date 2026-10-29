@@ -736,7 +736,6 @@ app.get('/api/leaderboard', async (req, res) => {
 app.get('/api/health', (req, res) => res.json({ ok: true, perf: req.query.perf === '1' ? (perf.at = 0, perfReport()) : perfReport(), online: players.size, orbs: orbs.size, targetOrbs: targetOrbs(), event: ev ? ev.kind + ':' + ev.phase : null, eventsEnabled: EV_EVERY !== 0, weekend: weekendState().on, obstacles: obstacles.length, mini: FX.miniNow() ? FX.miniNow().kind : null, boss: FX.bossNow() ? FX.bossNow().phase : null, world: G.WORLD,
   storage: store.mode, version: VERSION, uptimeSec: Math.round(process.uptime()) }));
 app.get('/api/shop', (req, res) => res.json({ items: G.ITEMS, upgrades: G.UPGRADES, minigames: G.MINIGAMES, orbs: G.ORB_TYPES, events: G.EVENTS, shardExchange: G.SHARD_EXCHANGE }));
-try { const td = require('./lib/temp-dump'); td.mountDumpRoute(app, () => store && store.pool); td.mountRestoreRoute(app, () => store && store.pool); } catch (e) { console.error('temp-dump mount failed:', e && e.message); }
 app.use((req, res) => res.status(404).type('text').send('Not found'));
 app.use((err, req, res, next) => { console.error('http error:', err && err.message); res.status(500).type('text').send('Server error'); }); // eslint-disable-line no-unused-vars
 
